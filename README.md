@@ -75,6 +75,8 @@ You can also force one mood with `survey lonk <stalk|block|behind|wander|gift|fl
 - On hills he still floats or sinks a little.
 - He'll happily block you while standing on thin air over a cliff.
 - Each piece of him still has its own physics, so sometimes his trousers arrive before he does.
+- Wandering off on his own, he walks straight through rocks and trees.
+- He jumps when you jump. He has no idea why.
 
 ## License
 
