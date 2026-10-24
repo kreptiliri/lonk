@@ -1,0 +1,9 @@
+.DS_Store
+*.xci
+*.nsp
+*.keys
+prod.keys
+romfs/
+exefs/
+*.elf
+*.log
