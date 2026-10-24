@@ -12,7 +12,7 @@ diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey
  #include <limits.h>
  #include <mach/mach.h>
  #include "mach_vm_compat.h"
-@@ -185,6 +188,40 @@
+@@ -185,6 +188,46 @@
  static uintptr_t survey_main;
  static void (*survey_force)(void *, const float *, uint32_t);
  static _Atomic int survey_enabled;
@@ -49,11 +49,17 @@ diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey
 +static uintptr_t spawn_pre;
 +static unsigned spawn_left;
 +static char spawn_name[64], spawn_tag[64];
++/* "survey stalk <frames> [m/s [stop m]]": every spawned actor walks toward the player, facing them, through
++   forceSetMatrix, until it is <stop> metres away; "survey stalk 0" stops. Survives user input (the user is playing). */
++enum { STALK_MAX = 16 };
++static struct { uintptr_t actor; char name[64]; } stalkers[STALK_MAX];
++static unsigned stalker_count, stalk_left;
++static float stalk_speed = 2.5f, stalk_stop = 1.5f;
 +#endif
  _Atomic int runtime_survey_pending;
  /* The frame-end sync, read by hle_nvn.c (built once for all versions): *(sys+[0]), then +[1] through one more pointer if
     [1] >= 0. 1.4.3's frame controller (main+0x2db94c) first waits on *(*(sys+0x150)+0x78), found with TOTK_SURVEY_DEBUG. */
-@@ -194,7 +231,7 @@
+@@ -194,7 +237,7 @@
  const int32_t runtime_survey_sync[2] = {0x1d8, -1};
  #endif
  static pthread_mutex_t survey_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -62,11 +68,10 @@ diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey
  static unsigned hold_left;
  static float hold_xyz[3];
  static char hold_tag[64];
-@@ -253,7 +290,45 @@
-         }
+@@ -254,6 +297,44 @@
      }
      return 0;
-+}
+ }
 +#if defined(SURVEY_SPAWN) && defined(TOTK_GAME_V143)
 +/* Spawned shop props (Mannequin_001_*) crash 0.5 s after the player comes near. The player's interaction search
 +   (main+0x5e3294) finds the mannequin's type-0x17 entry and main+0x21368b4 -> +0x2136620 looks up the actor's outgoing
@@ -103,12 +108,12 @@ diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey
 +    memcpy(m->base + SITE, patched, sizeof patched);
 +    fprintf(stderr, "[survey] link-count guard: main+%#x counts 0 links for a null node (spawned mannequins have no ForSale link)\n", (unsigned)SITE);
 +#endif
- }
++}
 +#endif
  void runtime_survey_init(Module *m) {
      const char *enabled = getenv("TOTK_SURVEY");
      if (!enabled || strcmp(enabled, "1")) return;
-@@ -272,6 +347,21 @@
+@@ -272,6 +353,21 @@
          runtime_fail("survey requires verified game-version forceSetMatrix entry");
      survey_main = (uintptr_t)m->base;
      survey_force = (void (*)(void *, const float *, uint32_t))(m->base + FORCE_MATRIX);
@@ -130,10 +135,11 @@ diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,22 +372,93 @@
+@@ -281,23 +377,136 @@
+         fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=%#llx xyz=%.6f,%.6f,%.6f\n",
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
- }
++}
 +#ifdef SURVEY_SPAWN
 +/* The created actor, once the PreActor holds it: a pointer in the PreActor's first 0x100 bytes whose actor name is the
 +   requested one (1.2.1 keeps it at +0x20; found by name here so a moved field shows in the log instead of misreading). */
@@ -171,7 +177,7 @@ diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey
 +    bool ok = survey_spawn_create(mgr, &create_name, &arg, NULL, 1 /* CreatePriority::High */, NULL, NULL, NULL, 0, &result, &pre);
 +    fprintf(stderr, "[survey] tag=%s status=spawn_requested frame=%llu ok=%d result=%u preactor=%p\n", tag, (unsigned long long)frame, ok, result, pre);
 +    if (ok && pre) { spawn_pre = (uintptr_t)pre; spawn_left = SPAWN_WATCH_FRAMES; }
-+}
+ }
 +static void spawn_watch(uint64_t frame) {
 +    unsigned at = 0;
 +    uintptr_t actor = spawn_find_actor(&at);
@@ -180,11 +186,39 @@ diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey
 +        fprintf(stderr, "[survey] tag=%s status=spawned frame=%llu preactor=%#llx actor=%#llx (preactor+%#x) name=%s xyz=%.3f,%.3f,%.3f\n", spawn_tag,
 +                (unsigned long long)frame, (unsigned long long)spawn_pre, (unsigned long long)actor, at, spawn_name, xyz[0], xyz[1], xyz[2]);
 +        spawn_left = 0;
++        if (stalker_count < STALK_MAX) { stalkers[stalker_count].actor = actor; strcpy(stalkers[stalker_count++].name, spawn_name); }
 +    } else if (!--spawn_left) {
 +        uint64_t head[8] = {0}; read_mem(spawn_pre, head, sizeof head);
 +        fprintf(stderr, "[survey] tag=%s status=spawn_no_actor frame=%llu preactor=%#llx head=%llx %llx %llx %llx %llx %llx %llx %llx\n", spawn_tag,
 +                (unsigned long long)frame, (unsigned long long)spawn_pre, (unsigned long long)head[0], (unsigned long long)head[1], (unsigned long long)head[2],
 +                (unsigned long long)head[3], (unsigned long long)head[4], (unsigned long long)head[5], (unsigned long long)head[6], (unsigned long long)head[7]);
++    }
++}
++/* One frame of stalking: each live stalker steps toward the player on the ground plane at the player's height and turns to
++   face them (yaw only; local Z = facing, as spawn_request reads it). A stalker whose name no longer reads back is dropped. */
++static void stalk_step(uint64_t frame, uintptr_t player) {
++    float target[3];
++    if (!read_mem(player + ACTOR_POS, target, sizeof target)) return;
++    for (unsigned i = 0; i < stalker_count;) {
++        uintptr_t actor = stalkers[i].actor, name = read_ptr(actor + GAME_ACTOR_NAME);
++        char text[64] = {0};
++        float pos[3];
++        if (!name || !read_mem(name, text, sizeof text - 1) || strcmp(text, stalkers[i].name) ||
++            !read_mem(actor + ACTOR_POS, pos, sizeof pos) || !valid_xyz(pos)) {
++            fprintf(stderr, "[survey] stalk: dropped %s (%#llx)\n", stalkers[i].name, (unsigned long long)actor);
++            stalkers[i] = stalkers[--stalker_count];
++            continue;
++        }
++        float dx = target[0] - pos[0], dz = target[2] - pos[2], dist = sqrtf(dx * dx + dz * dz);
++        if (dist < 0.01f) { ++i; continue; }
++        dx /= dist; dz /= dist;
++        float step = fminf(stalk_speed / 60.0f, fmaxf(dist - stalk_stop, 0.0f));
++        float matrix[12] = {dz, 0, dx, pos[0] + dx * step,
++                            0,  1, 0,  target[1],
++                            -dx, 0, dz, pos[2] + dz * step};
++        survey_force((void *)actor, matrix, 0);
++        if (!i && frame % 60 == 0) fprintf(stderr, "[survey] stalk: frame=%llu %s dist=%.2f\n", (unsigned long long)frame, stalkers[i].name, dist);
++        ++i;
 +    }
 +}
 +#endif
@@ -209,6 +243,20 @@ diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey
 +    if (kind == 3) {
 +        for (const char *p = name; *p; ++p) if (!isalnum((unsigned char)*p) && *p != '_') kind = 0;
 +    }
++    unsigned frames = 0; float speed = 2.5f, stop = 1.5f; int fields = 0;
++    if (!kind && ((used = 0, (fields = sscanf(line, "survey stalk %u %n", &frames, &used)) == 1 && used && !line[used]) ||
++                  (used = 0, (fields = sscanf(line, "survey stalk %u %f %n", &frames, &speed, &used)) == 2 && used && !line[used]) ||
++                  (used = 0, (fields = sscanf(line, "survey stalk %u %f %f %n", &frames, &speed, &stop, &used)) == 3 && used && !line[used]))) {
++        if (frames > 36000 || !isfinite(speed) || speed < 0 || speed > 20 || !isfinite(stop) || stop < 0 || stop > 30) {
++            fprintf(stderr, "[survey] rejected: stalk <0..36000 frames> [0..20 m/s [0..30 m]]\n"); return 1;
++        }
++        pthread_mutex_lock(&survey_lock);
++        stalk_left = survey_enabled ? frames : 0; stalk_speed = speed; stalk_stop = stop;
++        fprintf(stderr, "[survey] stalk: %u frames, %.2f m/s, stop at %.2f m, %u stalkers\n", stalk_left, speed, stop, stalker_count);
++        if (stalk_left) atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
++        pthread_mutex_unlock(&survey_lock);
++        return 1;
++    }
 +#endif
 +    if (!kind) { fprintf(stderr, "[survey] rejected: expected pos <tag>, move <tag> X Y Z <1..600 frames> or spawn <tag> <ActorName>\n"); return 1; }
      for (const char *p = tag; *p; ++p) if (!isalnum((unsigned char)*p) && *p != '_' && *p != '-') {
@@ -227,33 +275,40 @@ diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,6 +468,9 @@
+@@ -307,6 +516,10 @@
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
 +#ifdef SURVEY_SPAWN
 +    spawn_left = 0;
++    if (stalk_left) atomic_store(&runtime_survey_pending, 1);
 +#endif
      fprintf(stderr, "[survey] cancelled: user input\n");
      pthread_mutex_unlock(&survey_lock);
  }
-@@ -315,6 +479,10 @@
+@@ -315,7 +528,15 @@
      in_tick = 1;
      pthread_mutex_lock(&survey_lock);
      uintptr_t actor = player_actor();
 +#ifdef SURVEY_SPAWN
 +    if (spawn_left) spawn_watch(frame);
 +    if (request.kind == 3 && actor) { spawn_request(request.tag, request.name, request.off, frame, actor); request.kind = 0; }
++    if (stalk_left && actor) { stalk_step(frame, actor); if (!--stalk_left) fprintf(stderr, "[survey] stalk: done\n"); }
 +#endif
      if (!actor) {
++#ifdef SURVEY_SPAWN
++        if (!request.kind && !hold_left) goto done;   /* stalking or watching a spawn: wait for the player to come back */
++#endif
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
-@@ -340,7 +508,11 @@
+     } else if (request.kind == 1) {
+@@ -340,7 +561,12 @@
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }
 +#ifdef SURVEY_SPAWN
-+    atomic_store_explicit(&runtime_survey_pending, request.kind || hold_left || spawn_left, memory_order_release);
++done:
++    atomic_store_explicit(&runtime_survey_pending, request.kind || hold_left || spawn_left || stalk_left, memory_order_release);
 +#else
      atomic_store_explicit(&runtime_survey_pending, request.kind || hold_left, memory_order_release);
 +#endif
