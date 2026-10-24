@@ -77,10 +77,11 @@ diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey
  static unsigned hold_left;
  static float hold_xyz[3];
  static char hold_tag[64];
-@@ -254,6 +306,44 @@
+@@ -253,7 +305,45 @@
+         }
      }
      return 0;
- }
++}
 +#if defined(SURVEY_SPAWN) && defined(TOTK_GAME_V143)
 +/* Spawned shop props (Mannequin_001_*) crash 0.5 s after the player comes near. The player's interaction search
 +   (main+0x5e3294) finds the mannequin's type-0x17 entry and main+0x21368b4 -> +0x2136620 looks up the actor's outgoing
@@ -117,7 +118,7 @@ diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey
 +    memcpy(m->base + SITE, patched, sizeof patched);
 +    fprintf(stderr, "[survey] link-count guard: main+%#x counts 0 links for a null node (spawned mannequins have no ForSale link)\n", (unsigned)SITE);
 +#endif
-+}
+ }
 +#endif
  void runtime_survey_init(Module *m) {
      const char *enabled = getenv("TOTK_SURVEY");
@@ -144,11 +145,10 @@ diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -281,23 +386,239 @@
-         fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=%#llx xyz=%.6f,%.6f,%.6f\n",
+@@ -282,22 +387,249 @@
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
-+}
+ }
 +#ifdef SURVEY_SPAWN
 +/* The created actor, once the PreActor holds it: a pointer in the PreActor's first 0x100 bytes whose actor name is the
 +   requested one (1.2.1 keeps it at +0x20; found by name here so a moved field shows in the log instead of misreading). */
@@ -210,14 +210,17 @@ diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey
 +}
 +/* The dice: mostly stalking, sometimes in the way, a gift, a wander or right behind you. */
 +static void lonk_roll(void) {
-+    static const unsigned weight[LONK_KINDS] = {30, 20, 15, 15, 20, 0};
++    unsigned weight[LONK_KINDS] = {30, 20, 15, 15, 20, 0};
++    static int last_kind = -1;
++    if (last_kind == LONK_GIFT) weight[LONK_GIFT] = 0;   /* no two gifts in a row */
 +    unsigned total = 0, pick;
 +    for (int k = 0; k < LONK_KINDS; k++) total += weight[k];
 +    pick = arc4random_uniform(total);
 +    int kind = 0;
 +    while (pick >= weight[kind]) pick -= weight[kind++];
++    last_kind = kind;
 +    lonk_enter(kind, kind == LONK_BEHIND ? 240 + arc4random_uniform(120) : 360 + arc4random_uniform(360));
- }
++}
 +/* Ground height near (x, z): the nearest of the player's recent footsteps within 25 m, else the player's own height. */
 +static float trail_height(float x, float z, float fallback) {
 +    float best = 25 * 25, y = fallback;
@@ -263,7 +266,7 @@ diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey
 +    case LONK_BLOCK: target[0] = p[0] + fx * 2.5f; target[2] = p[2] + fz * 2.5f; speed = 7; stop = 0.2f; break;
 +    case LONK_BEHIND:
 +        if (entering) { a[0] = p[0] - fx * 1.5f; a[2] = p[2] - fz * 1.5f; }   /* he was always there */
-+        speed = 1; stop = 1.2f; break;
++        speed = 4; stop = 1.2f; break;
 +    case LONK_WANDER:
 +        if (entering) { float r = frand(0, 6.2832f), d = frand(4, 10); lonk_wander[0] = a[0] + cosf(r) * d; lonk_wander[2] = a[2] + sinf(r) * d; }
 +        target[0] = lonk_wander[0]; target[2] = lonk_wander[2]; speed = 1.5f; stop = 0.3f; face_player = 0; break;
@@ -289,10 +292,18 @@ diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey
 +        float step = fminf(speed / 60.0f, fmaxf(dist - stop, 0.0f));
 +        a[0] += dx / dist * step; a[2] += dz / dist * step;
 +    }
++    /* Never through the player: overlapping Link reads as a low ceiling and forces a crouch, so keep 1.1 m and slide round */
++    float ox = a[0] - p[0], oz = a[2] - p[2], od = hypotf(ox, oz);
++    if (od < 1.1f) {
++        if (od < 0.01f) { ox = -fx; oz = -fz; od = 1; }
++        a[0] = p[0] + ox / od * 1.1f; a[2] = p[2] + oz / od * 1.1f;
++    }
 +    float hx = face_player ? p[0] - a[0] : dx, hz = face_player ? p[2] - a[2] : dz, hl = hypotf(hx, hz);
 +    if (hl < 0.01f) { hx = -fx; hz = -fz; hl = 1; }
 +    hx /= hl; hz /= hl;
 +    float ground = ground_mode == GROUND_TRAIL ? trail_height(a[0], a[2], p[1]) : p[1];
++    /* ease toward the new height (no pops when the nearest footstep changes); a teleport snaps */
++    if (!(lonk_kind == LONK_BEHIND && entering) && isfinite(a[1]) && fabsf(ground - a[1]) < 30) ground = a[1] + (ground - a[1]) * 0.15f;
 +    for (unsigned i = 0; i < stalker_count; i++) {
 +        float y = ground;
 +        if (ground_mode == GROUND_PHYSICS) read_mem(stalkers[i].actor + ACTOR_POS + 4, &y, sizeof y);   /* keep its own height */
@@ -387,7 +398,7 @@ diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,6 +628,10 @@
+@@ -307,6 +639,10 @@
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
@@ -398,7 +409,7 @@ diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey
      fprintf(stderr, "[survey] cancelled: user input\n");
      pthread_mutex_unlock(&survey_lock);
  }
-@@ -315,7 +640,15 @@
+@@ -315,7 +651,15 @@
      in_tick = 1;
      pthread_mutex_lock(&survey_lock);
      uintptr_t actor = player_actor();
@@ -414,7 +425,7 @@ diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
      } else if (request.kind == 1) {
-@@ -340,7 +673,12 @@
+@@ -340,7 +684,12 @@
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }
