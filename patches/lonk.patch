@@ -1,16 +1,18 @@
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
-@@ -6,6 +6,8 @@
+@@ -5,7 +5,10 @@
+    Only called after the actual game frame-end GPU wait, never from the input file thread. */
  #include "world_survey.h"
  #include "game_version.h"
++#include <TargetConditionals.h>
  #include <ctype.h>
 +#include <stdbool.h>
 +#include <stddef.h>
  #include <limits.h>
  #include <mach/mach.h>
  #include "mach_vm_compat.h"
-@@ -185,6 +187,40 @@
+@@ -185,6 +188,40 @@
  static uintptr_t survey_main;
  static void (*survey_force)(void *, const float *, uint32_t);
  static _Atomic int survey_enabled;
@@ -51,7 +53,7 @@ diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey
  _Atomic int runtime_survey_pending;
  /* The frame-end sync, read by hle_nvn.c (built once for all versions): *(sys+[0]), then +[1] through one more pointer if
     [1] >= 0. 1.4.3's frame controller (main+0x2db94c) first waits on *(*(sys+0x150)+0x78), found with TOTK_SURVEY_DEBUG. */
-@@ -194,7 +230,7 @@
+@@ -194,7 +231,7 @@
  const int32_t runtime_survey_sync[2] = {0x1d8, -1};
  #endif
  static pthread_mutex_t survey_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -60,7 +62,53 @@ diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey
  static unsigned hold_left;
  static float hold_xyz[3];
  static char hold_tag[64];
-@@ -272,6 +308,18 @@
+@@ -253,7 +290,45 @@
+         }
+     }
+     return 0;
++}
++#if defined(SURVEY_SPAWN) && defined(TOTK_GAME_V143)
++/* Spawned shop props (Mannequin_001_*) crash 0.5 s after the player comes near. The player's interaction search
++   (main+0x5e3294) finds the mannequin's type-0x17 entry and main+0x21368b4 -> +0x2136620 looks up the actor's outgoing
++   "ForSale" link (main+0x2136510) in the actor link graph ([main+0x3ad74b8]+0x240, node = actor+0x370). In a shop the
++   mannequin is linked to its sale item; a spawned one has no link, the lookup returns null, and the incoming-link count
++   at main+0x2b05778 (node+0xf4 = head of the incoming list) reads null+0xf4. Ten more callers of that count use the same
++   "ForSale" pattern. The count's first eight instructions are reordered so a null node counts 0 incoming links: the
++   same words for every real node, and no veneer. Only with TOTK_SURVEY=1 (test profile), Mac only. */
++static void survey_patch_null_link_count(Module *m) {
++#if TARGET_OS_IPHONE
++    (void)m;
++#else
++    enum { SITE = 0x2b05778 };
++    static const uint32_t original[8] = {0xaa0003e8,   /* mov x8, x0 */
++                                         0xb940f42b,   /* ldr w11, [x1, #0xf4]: faults when the node is null */
++                                         0x2a1f03e0,   /* mov w0, wzr */
++                                         0xb9402109,   /* ldr w9, [x8, #0x20] */
++                                         0x12b0000a,   /* mov w10, #0x7fffffff */
++                                         0xf9401508,   /* ldr x8, [x8, #0x28] */
++                                         0x6b0a017f,   /* cmp w11, w10 (the loop's branch target, kept at +0x18) */
++                                         0x54000140};  /* b.eq +0x2b057bc (ret) */
++    static const uint32_t patched[8] = {0xb9402009,    /* ldr w9, [x0, #0x20] */
++                                        0xf9401408,    /* ldr x8, [x0, #0x28] */
++                                        0x2a1f03e0,    /* mov w0, wzr */
++                                        0xb40001c1,    /* cbz x1, +0x2b057bc: no node, 0 links */
++                                        0xb940f42b,    /* ldr w11, [x1, #0xf4] */
++                                        0x12b0000a,    /* mov w10, #0x7fffffff */
++                                        0x6b0a017f,    /* cmp w11, w10 */
++                                        0x54000140};   /* b.eq +0x2b057bc */
++    if (SITE + sizeof original > m->text_end || memcmp(m->base + SITE, original, sizeof original)) {
++        fprintf(stderr, "[survey] link-count guard off: main+%#x does not match\n", (unsigned)SITE);
++        return;
++    }
++    memcpy(m->base + SITE, patched, sizeof patched);
++    fprintf(stderr, "[survey] link-count guard: main+%#x counts 0 links for a null node (spawned mannequins have no ForSale link)\n", (unsigned)SITE);
++#endif
+ }
++#endif
+ void runtime_survey_init(Module *m) {
+     const char *enabled = getenv("TOTK_SURVEY");
+     if (!enabled || strcmp(enabled, "1")) return;
+@@ -272,6 +347,21 @@
          runtime_fail("survey requires verified game-version forceSetMatrix entry");
      survey_main = (uintptr_t)m->base;
      survey_force = (void (*)(void *, const float *, uint32_t))(m->base + FORCE_MATRIX);
@@ -75,15 +123,17 @@ diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey
 +        !memcmp(m->base + SPAWN_CREATE, spawn_entry, sizeof spawn_entry))
 +        survey_spawn_create = (spawn_create_fn)(void *)(m->base + SPAWN_CREATE);
 +    else fprintf(stderr, "[survey] spawn off: requestCreateActorAsync entry at main+%#x does not match\n", (unsigned)SPAWN_CREATE);
++#if defined(TOTK_GAME_V143)
++    survey_patch_null_link_count(m);
++#endif
 +#endif
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -281,23 +329,94 @@
-         fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=%#llx xyz=%.6f,%.6f,%.6f\n",
+@@ -282,22 +372,93 @@
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
-+}
+ }
 +#ifdef SURVEY_SPAWN
 +/* The created actor, once the PreActor holds it: a pointer in the PreActor's first 0x100 bytes whose actor name is the
 +   requested one (1.2.1 keeps it at +0x20; found by name here so a moved field shows in the log instead of misreading). */
@@ -121,7 +171,7 @@ diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey
 +    bool ok = survey_spawn_create(mgr, &create_name, &arg, NULL, 1 /* CreatePriority::High */, NULL, NULL, NULL, 0, &result, &pre);
 +    fprintf(stderr, "[survey] tag=%s status=spawn_requested frame=%llu ok=%d result=%u preactor=%p\n", tag, (unsigned long long)frame, ok, result, pre);
 +    if (ok && pre) { spawn_pre = (uintptr_t)pre; spawn_left = SPAWN_WATCH_FRAMES; }
- }
++}
 +static void spawn_watch(uint64_t frame) {
 +    unsigned at = 0;
 +    uintptr_t actor = spawn_find_actor(&at);
@@ -177,7 +227,7 @@ diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,6 +426,9 @@
+@@ -307,6 +468,9 @@
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
@@ -187,7 +237,7 @@ diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey
      fprintf(stderr, "[survey] cancelled: user input\n");
      pthread_mutex_unlock(&survey_lock);
  }
-@@ -315,6 +437,10 @@
+@@ -315,6 +479,10 @@
      in_tick = 1;
      pthread_mutex_lock(&survey_lock);
      uintptr_t actor = player_actor();
@@ -198,7 +248,7 @@ diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey
      if (!actor) {
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
-@@ -340,7 +466,11 @@
+@@ -340,7 +508,11 @@
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }
