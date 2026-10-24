@@ -9,8 +9,6 @@ brain. Everything is still being tested.
 
 Runs on the [MacNativeGames](https://github.com/ly05010419/MacNativeGames) native macOS port, game version 1.4.3.
 
-By Iliass.
-
 ## Where he's at
 
 - **He exists.** I spawn him with the game's own actor manager, in the open world, next to you.
