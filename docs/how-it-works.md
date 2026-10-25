@@ -47,7 +47,10 @@ like an idle. His skeleton was fine all along.
 - the patch plays `PauseMenuWait` once and then sets the blackboard from his speed: idle below 0.4 m/s, walk up to
   3.2, run up to 5.5, dash above. The clip plays at his speed divided by the clip's own (estimated) speed, written to the
   rate of the body's slot (`slot+0xd0`). The game routes each command to its own slot: 0 is the face, 1 the body, 2 the
-  skin colour. Bools go through vtable `+0x40` the same way. The blackboard is `[as+0x40]` (`as` being his animation state, the same chain `0xba8ed0` walks), and its
+  skin colour. Ints go through vtable `+0x30`, bools through `+0x40`, the same way.
+- the int `HoldAnimationType` (the weapon he'd be holding in the menu) set to 5, shield only, makes the idle play the
+  menu's `PauseMenu_Equip_Shield`, which the mod turns into the cooking celebration `Demo_Get_Cooking_VeryGood`. That's
+  his party after a gift. Every other clip Link has can be reached the same way, one idle branch at a time. The blackboard is `[as+0x40]` (`as` being his animation state, the same chain `0xba8ed0` walks), and its
   vtable `+0x38` sets a float by name: `set(bb, &{"Temperature", 0}, value)`, the way the menu's own
   `ExecutePouchPlayerSetASBBParameter` (`0x241cc08`) does it.
 
@@ -121,4 +124,4 @@ forces a crouch. Lonk keeps 1.1 m away and slides around instead.
 
 Every 6 to 12 seconds a weighted dice roll picks a behaviour: stalk 30, block 20, gift 20, behind 15, wander 15, never
 two gifts in a row. A gift spawns `Item_Fruit_A` (75%) or `BarrelBomb` (25%) next to Link through the same spawn call,
-then Lonk flees for four seconds.
+then Lonk celebrates for two and a half seconds and flees for four.

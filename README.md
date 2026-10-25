@@ -32,7 +32,7 @@ Runs on the [MacNativeGames](https://github.com/ly05010419/MacNativeGames) nativ
 |---|---|
 | stalk | walks up and stares at you from a step away |
 | block | sprints into your path |
-| gift | drops an apple at your feet, sometimes a bomb barrel, and runs |
+| gift | drops an apple at your feet, sometimes a bomb barrel, celebrates, and runs |
 | behind | is suddenly standing right behind you |
 | wander | forgets you exist |
 
@@ -81,7 +81,7 @@ He starts his idle animation and gets dressed on his own. `survey equip <slot> <
 still works (`survey spawn m1 Mannequin_001_Upper` and friends), and `survey drop <name start|all>` removes pieces from
 him again.
 
-You can also force one mood with `survey lonk <stalk|block|behind|wander|gift|flee> <frames>`, send him somewhere with
+You can also force one mood with `survey lonk <stalk|block|behind|wander|gift|flee|party> <frames>`, send him somewhere with
 `survey lonk goto <metres right> <metres forward> [m/s]` (from you), and stop him with `survey lonk stop`.
 
 ## Known issues
@@ -90,7 +90,7 @@ You can also force one mood with `survey lonk <stalk|block|behind|wander|gift|fl
   the defaults.
 - His feet may still slide a little: the clips' own speeds are my estimates.
 - With the mod installed, the inventory Link walks, runs or dashes in place in the pause menu when you're somewhere cold
-  or hot, or out of stamina.
+  or hot, or out of stamina, and celebrates when you equip a shield with no weapon.
 - Off a ledge (nothing under him within 60 m) he falls back to your footsteps' height and floats.
 - He'll happily block you while standing on thin air over a cliff.
 - Wandering off on his own, he walks straight through rocks and trees (or over them: the raycast lands him on top).

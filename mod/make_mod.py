@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""Builds Lonk's RomFS mod from your own game files: his walk, run and dash.
+"""Builds Lonk's RomFS mod from your own game files: his walk, run, dash and party.
 
 The inventory Link (PouchPlayer) has one full-body animation command, the pause menu's PauseMenuWait. It's an idle that
 plays Nml_Cold_Wait, Nml_Wait or Nml_Hot_Wait depending on the ASB blackboard float "Temperature", and Nml_Tired_Wait
-when the bool "Stamina" is false. This mod points the cold, hot and tired idles at Link's own Nml_Move_Walk, Nml_Move_Run
-and Nml_Move_Dash, and the patch drives the blackboard from his speed.
+when the bool "Stamina" is false, or the shield-equip clip when the int "HoldAnimationType" is 5. This mod points the
+cold, hot and tired idles at Link's own Nml_Move_Walk, Nml_Move_Run and Nml_Move_Dash, and the shield clip at the cooking
+"great meal" celebration (his party), and the patch drives the blackboard.
 Adding new commands or nodes to the ASB crashes the game, so nothing else changes. (Side effect: with the mod installed,
-the inventory Link walks, runs or dashes in place when you open the menu somewhere cold or hot, or out of stamina.)
+the inventory Link walks, runs or dashes in place when you open the menu somewhere cold or hot, or out of stamina, and
+celebrates when you equip a shield with no weapon.)
 
 Nothing from the game is in this repo. The script reads AS/PouchPlayer.root.asb.zs and the zstd dictionaries from the RomFS
 that MacNativeGames prepared (extracted/v143/romfs: romfs.bin + index.json), edits it with dt-12345's ASB tool, and writes
@@ -24,7 +26,8 @@ from pathlib import Path
 import zstandard
 
 ASB = 'AS/PouchPlayer.root.asb.zs'
-MOVES = {'Nml_Cold_Wait': 'Nml_Move_Walk', 'Nml_Hot_Wait': 'Nml_Move_Run', 'Nml_Tired_Wait': 'Nml_Move_Dash'}
+MOVES = {'Nml_Cold_Wait': 'Nml_Move_Walk', 'Nml_Hot_Wait': 'Nml_Move_Run', 'Nml_Tired_Wait': 'Nml_Move_Dash',
+         'PauseMenu_Equip_Shield': 'Demo_Get_Cooking_VeryGood'}
 
 
 def romfs_reader(folder):
