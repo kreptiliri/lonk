@@ -38,12 +38,15 @@ menu's `PauseMenuWait`. For a long time Lonk only ever got `FaceDefault` (which 
 like an idle. His skeleton was fine all along.
 
 `PauseMenuWait` picks its clip from the ASB blackboard every update: the float `Temperature` chooses `Nml_Cold_Wait`
-(< 0), `Nml_Wait` (0) or `Nml_Hot_Wait` (> 0). So:
+(< 0), `Nml_Wait` (0) or `Nml_Hot_Wait` (> 0), and the bool `Stamina` set to false turns the middle one into
+`Nml_Tired_Wait`. So:
 
 - the RomFS mod (`mod/make_mod.py`, built with [dt-12345/asb](https://github.com/dt-12345/asb)) points the cold and hot
-  idles at `Nml_Move_Walk` and `Nml_Move_Run`. PouchPlayer already loads all of Link's animations.
-- the patch plays `PauseMenuWait` once and then sets `Temperature` from his speed: 0 below 0.4 m/s, -1 up to 3.2 m/s,
-  +1 above. The blackboard is `[as+0x40]` (`as` being his animation state, the same chain `0xba8ed0` walks), and its
+  idles at `Nml_Move_Walk` and `Nml_Move_Run`, and the tired one at `Nml_Move_Dash`. PouchPlayer already loads all of
+  Link's animations.
+- the patch plays `PauseMenuWait` once and then sets the blackboard from his speed: idle below 0.4 m/s, walk up to
+  3.2, run up to 5.5, dash above. The clip plays at his speed divided by the clip's own (estimated) speed, written to
+  slot 0's rate (`slot0+0xd0`). Bools go through vtable `+0x40` the same way. The blackboard is `[as+0x40]` (`as` being his animation state, the same chain `0xba8ed0` walks), and its
   vtable `+0x38` sets a float by name: `set(bb, &{"Temperature", 0}, value)`, the way the menu's own
   `ExecutePouchPlayerSetASBBParameter` (`0x241cc08`) does it.
 

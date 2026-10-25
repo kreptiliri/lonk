@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..1493b06 100644
+index c05d6c3..9d77dd5 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -93,14 +93,14 @@ index c05d6c3..1493b06 100644
 +static unsigned pouch_idle_left, pouch_idle_tries;   /* a fresh PouchPlayer starts Nml_Wait once its animation chain is up */
 +static int dress_slot = -1;   /* "survey equip <slot> <Name|->": one slot; otherwise "survey dress" does head, upper, lower and the arm */
 +static char dress_name[64];
-+static unsigned dress_left, dress_watch, dress_shown;
++static unsigned dress_left, dress_watch;
 +static int lonk_gait = -1;   /* the gait last set on PouchPlayer (pouch_gait), -1 = not yet */   /* a fresh PouchPlayer gets dressed 60 frames in; then isAllCreated is logged */
 +static struct { uintptr_t actor; char name[64]; } stalkers[STALK_MAX];
 +static unsigned stalker_count, stalk_left, lonk_phase_left;
 +static float stalk_speed = 2.5f, stalk_stop = 1.5f;
 +static int lonk_kind, lonk_brain, lonk_entered, lonk_anchored, lonk_gifted, ground_mode = GROUND_TERRAIN, spawn_body = 1;
 +static float lonk_anchor[3], lonk_wander[3];
-+static float lonk_goto[2];   /* "survey lonk goto <right> <forward>": the next wander walks to this spot (metres from the player) */
++static float lonk_goto[2], lonk_goto_speed = 1.5f;   /* "survey lonk goto <right> <forward> [m/s]": the next wander goes to this spot (metres from the player) */
 +static int lonk_goto_set;
 +static float trail[TRAIL_MAX][3];   /* the player's recent footsteps: ground heights Lonk can stand on */
 +static unsigned trail_count, trail_head;
@@ -184,7 +184,7 @@ index c05d6c3..1493b06 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,22 +399,713 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,22 +399,747 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -348,6 +348,12 @@ index c05d6c3..1493b06 100644
 +    snprintf(buf, sizeof buf, "%s", peek_request);
 +    for (char *t = strtok_r(buf, " \t\r\n", &save); t && n < 24; t = strtok_r(NULL, " \t\r\n", &save)) tok[n++] = t;
 +    const char *dump = NULL;   /* "survey peek dump <file> <base> <off>... <bytes>": up to 4 MB written raw to <file> */
++    int poke = 0;              /* "survey peek poke <base> <off>... <hex u32>": writes one word instead (debugging) */
++    if (n > 0 && !strcmp(tok[0], "poke")) {
++        poke = 1;
++        for (int i = 1; i < n; i++) tok[i - 1] = tok[i];
++        n -= 1;
++    }
 +    if (n > 0 && !strcmp(tok[0], "dump")) {
 +        if (n < 2) { fprintf(stderr, "[survey] peek dump: expected a file\n"); return; }
 +        dump = tok[1];
@@ -365,6 +371,13 @@ index c05d6c3..1493b06 100644
 +    else addr = (uintptr_t)strtoull(tok[0], NULL, 16);
 +    for (int i = 1; i < n - 2 && addr; i++) addr = read_ptr(addr + (uintptr_t)strtoull(tok[i], NULL, 16));
 +    if (addr) addr += (uintptr_t)strtoull(tok[n - 2], NULL, 16);
++    if (poke) {
++        uint32_t value = (uint32_t)strtoul(tok[n - 1], NULL, 16), was = 0;
++        if (!addr || !read_mem(addr, &was, 4)) { fprintf(stderr, "[survey] poke: unreadable (addr %#llx)\n", (unsigned long long)addr); return; }
++        memcpy((void *)addr, &value, 4);
++        fprintf(stderr, "[survey] poke %#llx: %08x -> %08x\n", (unsigned long long)addr, was, value);
++        return;
++    }
 +    unsigned bytes = (unsigned)strtoul(tok[n - 1], NULL, 0);
 +    if (dump) {
 +        static uint8_t chunk[65536];
@@ -437,19 +450,29 @@ index c05d6c3..1493b06 100644
 +   Nml_Hot_Wait from the ASB blackboard float "Temperature" (<0, 0, >0) on every update. Lonk's RomFS mod (lonk/mod) points
 +   the cold and hot idles at Nml_Move_Walk and Nml_Move_Run, so the temperature becomes his gait. The blackboard is
 +   [as+0x40]; its vtable+0x38 sets a float by name, the way ExecutePouchPlayerSetASBBParameter (0x241cc08) does. */
-+enum { GAIT_IDLE, GAIT_WALK, GAIT_RUN };
-+static void pouch_gait(int gait) {
-+    if (gait == lonk_gait) return;
-+    static const float temperature[] = {0.0f, -1.0f, 1.0f};
-+    static const char *const gait_names[] = {"idle", "walk", "run"};
-+    struct { const char *name; uint64_t zero; } key = {"Temperature", 0};
++enum { GAIT_IDLE, GAIT_WALK, GAIT_RUN, GAIT_DASH };
++static void pouch_gait(int gait, float speed) {
++    /* Stamina false at temperature 0 is the tired idle, which the mod turns into the dash. Each clip plays at the rate that
++       matches his speed (the clips' own speeds are estimates), so his feet don't slide: slot 0's rate at slot0+0xd0. */
++    static const float temperature[] = {0.0f, -1.0f, 1.0f, 0.0f}, clip_speed[] = {1, 1.6f, 4.2f, 6.5f};
++    static const char *const gait_names[] = {"idle", "walk", "run", "dash"};
++    struct { const char *name; uint64_t zero; } t_key = {"Temperature", 0}, s_key = {"Stamina", 0};
 +    for (unsigned i = 0; i < stalker_count; i++) {
 +        if (strcmp(stalkers[i].name, "PouchPlayer")) continue;
 +        uintptr_t as = anim_state(stalkers[i].actor), bb = as ? read_ptr(as + 0x40) : 0, vt = bb ? read_ptr(bb) : 0;
-+        uintptr_t set = vt ? read_ptr(vt + 0x38) : 0;
-+        if (set < survey_main || set >= survey_main + 0x2bb9c00) { fprintf(stderr, "[survey] gait: no blackboard setter (as=%#llx)\n", (unsigned long long)as); continue; }
-+        ((void (*)(uintptr_t, const void *, float))set)(bb, &key, temperature[gait]);
-+        fprintf(stderr, "[survey] gait: %s\n", gait_names[gait]);
++        uintptr_t set_float = vt ? read_ptr(vt + 0x38) : 0, set_bool = vt ? read_ptr(vt + 0x40) : 0;
++        if (set_float < survey_main || set_float >= survey_main + 0x2bb9c00 || set_bool < survey_main || set_bool >= survey_main + 0x2bb9c00) {
++            if (gait != lonk_gait) fprintf(stderr, "[survey] gait: no blackboard setter (as=%#llx)\n", (unsigned long long)as);
++            continue;
++        }
++        if (gait != lonk_gait) {
++            ((void (*)(uintptr_t, const void *, float))set_float)(bb, &t_key, temperature[gait]);
++            ((void (*)(uintptr_t, const void *, bool))set_bool)(bb, &s_key, gait != GAIT_DASH);
++            fprintf(stderr, "[survey] gait: %s\n", gait_names[gait]);
++        }
++        uintptr_t slot0 = read_ptr(read_ptr(as + 0x20));
++        float rate = gait == GAIT_IDLE ? 1.0f : fminf(fmaxf(speed / clip_speed[gait], 0.6f), 1.7f);
++        if (slot0) memcpy((void *)(slot0 + 0xd0), &rate, sizeof rate);
 +    }
 +    lonk_gait = gait;
 +}
@@ -574,11 +597,10 @@ index c05d6c3..1493b06 100644
 +                (unsigned long long)eu, all_created ? all_created(eu) : 0xffffffffu, state[9], state[10], state[11], state[19],
 +                (unsigned long long)link[0][1], (unsigned long long)link[0][2], (unsigned long long)link[1][1], (unsigned long long)link[1][2],
 +                (unsigned long long)link[2][1], (unsigned long long)link[2][2]);
-+        if (all_created && all_created(eu) && !dress_shown) {
++        if (all_created && all_created(eu)) {   /* again every check: a piece's model can arrive after the piece (real armor loads first) */
 +            static const uint32_t w_model[] = {0xf9411408, 0xb4000168, 0xf9400500, 0xb4000100, 0xf9400008};
 +            uintptr_t (*get_model)(uintptr_t) = (uintptr_t (*)(uintptr_t))game_fn(0xba8854, w_model, 5);
 +            uintptr_t world_model = get_model ? get_model(player) : 0;
-+            dress_shown = 1;
 +            dress_show(eu, world_model ? read_ptr(world_model + 0x60) : 0);
 +        }
 +    }
@@ -608,10 +630,12 @@ index c05d6c3..1493b06 100644
 +        char text[64] = {0};
 +        read_mem(read_ptr(ref.actor + GAME_ACTOR_NAME), text, sizeof text - 1);
 +        uintptr_t model = get_model(ref.actor), scene = model ? read_ptr(model + 0x60) : 0;
-+        if (model && world && scene != world) bind(model, world);
-+        if (model) set_mask(model, 0xffffffffu);
-+        fprintf(stderr, "[survey] dress show: slot %u %s (%#llx) model=%#llx scene %#llx -> %#llx\n", slot, text, (unsigned long long)ref.actor,
-+                (unsigned long long)model, (unsigned long long)scene, (unsigned long long)world);
++        if (model && world && scene != world) {
++            bind(model, world);
++            set_mask(model, 0xffffffffu);
++            fprintf(stderr, "[survey] dress show: slot %u %s (%#llx) model=%#llx scene %#llx -> %#llx\n", slot, text, (unsigned long long)ref.actor,
++                    (unsigned long long)model, (unsigned long long)scene, (unsigned long long)world);
++        }
 +        if (ref.held) __atomic_fetch_sub((int32_t *)(ref.actor + 0x1b0), 1, __ATOMIC_SEQ_CST);
 +    }
 +}
@@ -639,7 +663,7 @@ index c05d6c3..1493b06 100644
 +            equip(eu, 19, &hand, -1, 0, 0);
 +            fprintf(stderr, "[survey] dress: head, upper, lower like the player, arm %s\n", hand);
 +        }
-+        dress_watch = 600; dress_shown = 0;
++        dress_watch = 600;
 +    }
 +    dress_log("called", 0);
 +}
@@ -689,8 +713,8 @@ index c05d6c3..1493b06 100644
 +        if (entering && lonk_goto_set) {   /* right of the player is (-fz, fx) */
 +            lonk_wander[0] = p[0] - fz * lonk_goto[0] + fx * lonk_goto[1]; lonk_wander[2] = p[2] + fx * lonk_goto[0] + fz * lonk_goto[1];
 +            lonk_goto_set = 0;
-+        } else if (entering) { float r = frand(0, 6.2832f), d = frand(4, 10); lonk_wander[0] = a[0] + cosf(r) * d; lonk_wander[2] = a[2] + sinf(r) * d; }
-+        target[0] = lonk_wander[0]; target[2] = lonk_wander[2]; speed = 1.5f; stop = 0.3f; face_player = 0; break;
++        } else if (entering) { float r = frand(0, 6.2832f), d = frand(4, 10); lonk_wander[0] = a[0] + cosf(r) * d; lonk_wander[2] = a[2] + sinf(r) * d; lonk_goto_speed = 1.5f; }
++        target[0] = lonk_wander[0]; target[2] = lonk_wander[2]; speed = lonk_goto_speed; stop = 0.3f; face_player = 0; break;
 +    case LONK_GIFT:
 +        speed = 4; stop = 2;
 +        if (!lonk_gifted && hypotf(p[0] - a[0], p[2] - a[2]) < 2.4f && !spawn_left) {
@@ -726,11 +750,18 @@ index c05d6c3..1493b06 100644
 +    lonk_speed += ((moved > 2 ? 0 : moved * 60) - lonk_speed) * 0.2f;
 +    if (lonk_speed > 0.8f && moved > 0.001f) { face_player = 0; dx = mx; dz = mz; }
 +#if defined(TOTK_GAME_V143)
-+    pouch_gait(lonk_speed < 0.4f ? GAIT_IDLE : lonk_speed < 3.2f ? GAIT_WALK : GAIT_RUN);
++    pouch_gait(lonk_speed < 0.4f ? GAIT_IDLE : lonk_speed < 3.2f ? GAIT_WALK : lonk_speed < 5.5f ? GAIT_RUN : GAIT_DASH, lonk_speed);
 +#endif
 +    float hx = face_player ? p[0] - a[0] : dx, hz = face_player ? p[2] - a[2] : dz, hl = hypotf(hx, hz);
 +    if (hl < 0.01f) { hx = -fx; hz = -fz; hl = 1; }
 +    hx /= hl; hz /= hl;
++    /* turn toward that over a few frames instead of snapping; a teleport (behind) snaps */
++    static float face[2] = {0, 1};
++    if (!(lonk_kind == LONK_BEHIND && entering)) {
++        float tx = face[0] + (hx - face[0]) * 0.18f, tz = face[1] + (hz - face[1]) * 0.18f, tl = hypotf(tx, tz);
++        if (tl > 0.01f) { hx = tx / tl; hz = tz / tl; }
++    }
++    face[0] = hx; face[1] = hz;
 +    float ground = ground_mode == GROUND_TRAIL || ground_mode == GROUND_TERRAIN ? trail_height(a[0], a[2], p[1]) : p[1];
 +    static const char *ground_src;
 +    ground_src = "footsteps";
@@ -855,11 +886,14 @@ index c05d6c3..1493b06 100644
 +        pthread_mutex_unlock(&survey_lock);
 +        return 1;
 +    }
-+    float go[2];
-+    if (!kind && (used = 0, sscanf(line, "survey lonk goto %f %f %n", &go[0], &go[1], &used)) == 2 && used && !line[used]) {
-+        if (!isfinite(go[0]) || !isfinite(go[1]) || fabsf(go[0]) > 50 || fabsf(go[1]) > 50) { fprintf(stderr, "[survey] rejected: lonk goto <right> <forward> (metres, up to 50)\n"); return 1; }
++    float go[3] = {0, 0, 1.5f};
++    if (!kind && (((used = 0, sscanf(line, "survey lonk goto %f %f %n", &go[0], &go[1], &used)) == 2 && used && !line[used]) ||
++                  ((used = 0, sscanf(line, "survey lonk goto %f %f %f %n", &go[0], &go[1], &go[2], &used)) == 3 && used && !line[used]))) {
++        if (!isfinite(go[0]) || !isfinite(go[1]) || fabsf(go[0]) > 50 || fabsf(go[1]) > 50 || !(go[2] > 0.1f && go[2] <= 12)) {
++            fprintf(stderr, "[survey] rejected: lonk goto <right> <forward> [m/s] (metres up to 50, 0.1..12 m/s)\n"); return 1;
++        }
 +        pthread_mutex_lock(&survey_lock);
-+        lonk_goto[0] = go[0]; lonk_goto[1] = go[1]; lonk_goto_set = 1;
++        lonk_goto[0] = go[0]; lonk_goto[1] = go[1]; lonk_goto_speed = go[2]; lonk_goto_set = 1;
 +        stalk_left = survey_enabled ? 36000 : 0; lonk_brain = 0; lonk_enter(LONK_WANDER, 36000);
 +        if (stalk_left) atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
 +        pthread_mutex_unlock(&survey_lock);
@@ -901,7 +935,7 @@ index c05d6c3..1493b06 100644
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,6 +1115,10 @@ void runtime_survey_cancel_user(void) {
+@@ -307,6 +1149,10 @@ void runtime_survey_cancel_user(void) {
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
@@ -912,7 +946,7 @@ index c05d6c3..1493b06 100644
      fprintf(stderr, "[survey] cancelled: user input\n");
      pthread_mutex_unlock(&survey_lock);
  }
-@@ -315,7 +1127,38 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -315,7 +1161,38 @@ void runtime_survey_tick(uint64_t frame) {
      in_tick = 1;
      pthread_mutex_lock(&survey_lock);
      uintptr_t actor = player_actor();
@@ -951,7 +985,7 @@ index c05d6c3..1493b06 100644
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
      } else if (request.kind == 1) {
-@@ -340,7 +1183,15 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -340,7 +1217,15 @@ void runtime_survey_tick(uint64_t frame) {
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }
