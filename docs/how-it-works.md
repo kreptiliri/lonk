@@ -21,9 +21,21 @@ The patch checks the first ten instruction words before calling anything, and lo
 
 ## Picking a body
 
-`Player` crashes when spawned twice. `PouchPlayer` (the inventory Link) spawns fine but is invisible outside the
-menu. The armor-shop mannequins `Mannequin_001_Head`, `_Upper` and `_Lower` render in the world, and stacked on one
-spot they look like a Link with nobody inside.
+`Player` crashes when spawned twice. The armor-shop mannequins `Mannequin_001_Head`, `_Upper` and `_Lower` render in
+the world, and stacked on one spot they look like a Link with nobody inside. That was the first body.
+
+`PouchPlayer`, the inventory Link, uses the same model and animations as the real one. It spawns into the world scene
+with its draw masks already on, and looked invisible only because it moves itself to (0, 0, 0) every frame. Setting
+its transform every frame like any other piece makes it show up. Nothing ever starts its animation outside the menu,
+so the patch starts `Nml_Wait` itself, the way the game's own C++ callers do: a 0x30-byte request
+`{actor, name, slot 0, rate 1, -1, -1, 1}` passed to `0x4dc628`.
+
+Still missing: the outfit (hair included) comes from `EquipmentUser_*` blackboard values the menu sets, and the right
+arm is its own actor, `PlayerRaulHand`, which the game attaches to Link's skeleton. Spawned alone it floats in its
+rest pose.
+
+`survey drop` takes pieces off him. There's no delete call yet, so each one gets view mask 0 (`0x50138c`) and is
+moved 50 m underground.
 
 ## The "ForSale" crash
 
@@ -46,9 +58,12 @@ checking the original words. As a bonus, the mannequin turns into a working shop
 every body piece is set to the same anchor point, turned to face Link (yaw only). That keeps the three pieces one
 figure.
 
-There's no ground query yet, so height comes from Link's own footsteps: a ring of his last 512 positions, one every
-25 cm, and Lonk stands at the height of the nearest one. Letting gravity do it doesn't work, because setting the
-transform every frame keeps gravity from ever catching up, and he sinks into hills.
+Height comes from the game's terrain query, the one behind the AI node `QueryTerrainGetGroundHeight`:
+`T = [main+0x3add550]`, `scene = 0x2b7332c(T, pos, 1, 0, 300.0)`, then `0x5db4c0(&height, xz, scene, -1, 0, 1, 0)`
+answers 1 or 2 on success. It's the heightmap only, so where it doesn't answer (or answers far from Link's height,
+like on a bridge) Lonk falls back to Link's own footsteps: a ring of his last 512 positions, one every 25 cm, using the
+nearest one. Letting gravity do it doesn't work, because setting the transform every frame keeps gravity from ever
+catching up, and he sinks into hills.
 
 Walking through Link puts the mannequin's collision above Link's head, which the game reads as a low ceiling, and
 forces a crouch. Lonk keeps 1.1 m away and slides around instead.

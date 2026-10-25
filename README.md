@@ -12,12 +12,15 @@ Runs on the [MacNativeGames](https://github.com/ly05010419/MacNativeGames) nativ
 ## Where he's at
 
 - **He exists.** I spawn him with the game's own actor manager, in the open world, next to you.
-- **He has a body.** Link himself can't be spawned twice, and the inventory Link is invisible outside the menu, so for
-  now he's built from the armor-shop mannequins: a hood, a tunic and trousers stacked on one spot. From a distance
-  he's Link with nobody inside.
-- **He doesn't crash the game anymore.** Mannequins expect to belong to a shop. When you walked up to one, the game
-  went looking for the item it was selling, found nothing, and crashed. I patched that check.
-- **He moves.** Every frame he walks over the ground toward wherever his brain says, and turns to face you.
+- **He has a body, Link's own.** Link himself can't be spawned twice, so he's the Link from the inventory screen. That
+  one looked invisible outside the menu, but it turned out he was just teleporting himself to the middle of the map
+  every frame. Pinned next to you, he's there: bald, in his underwear, standing in his idle pose. His hair counts as
+  part of the outfit, so it's missing until I figure out how to dress him. So is his right arm, which is a separate
+  piece in this game.
+- **He used to be mannequins.** Before that he was three armor-shop mannequins stacked on one spot, which crashed the
+  game when you walked up to them (they went looking for the item they were selling). That fix is still in, and
+  `survey drop` gets rid of the mannequins.
+- **He moves.** Every frame he walks over the real terrain toward wherever his brain says, and turns to face you.
 - **He has a (very small) brain.** Every few seconds he decides what to do:
 
 | Mood | What he does |
@@ -30,8 +33,8 @@ Runs on the [MacNativeGames](https://github.com/ly05010419/MacNativeGames) nativ
 
 ## Where he's going
 
-- A proper Link body with animations, instead of mannequins on stands
-- Walking on the real ground, not on your footsteps
+- Clothes, hair and his right arm back
+- Walking and running animations, not sliding around in his idle pose
 - Doing things, not just standing near you: fighting, climbing, using items, breaking stuff
 - Never dying, whatever you do to him
 - A smarter brain
@@ -61,20 +64,22 @@ He only runs in the port's test mode, on a copy of your save.
 4. Load your save and add these lines to the commands file:
 
 ```
-survey spawn m1 Mannequin_001_Upper 10 0 0
-survey spawn m2 Mannequin_001_Lower 10 0 0
-survey spawn m3 Mannequin_001_Head 10 0 0
+survey spawn lonk PouchPlayer 4 0 0
 survey lonk brain 36000
 ```
+
+He starts his idle animation on his own. The old mannequin body still works (`survey spawn m1 Mannequin_001_Upper`
+and friends), and `survey drop <name start|all>` removes pieces from him again.
 
 You can also force one mood with `survey lonk <stalk|block|behind|wander|gift|flee> <frames>`, and stop him with
 `survey lonk stop`.
 
 ## Known issues
 
-- On hills he still floats or sinks a little.
+- He's bald, in his underwear, and missing his right arm.
+- He slides everywhere in his idle pose.
+- The terrain height ignores bridges, buildings and sky islands, so there he falls back to your footsteps.
 - He'll happily block you while standing on thin air over a cliff.
-- Each piece of him still has its own physics, so sometimes his trousers arrive before he does.
 - Wandering off on his own, he walks straight through rocks and trees.
 - He jumps when you jump. He has no idea why.
 
