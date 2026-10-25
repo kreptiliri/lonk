@@ -1,7 +1,7 @@
 # Lonk
 
 A second Link for *Tears of the Kingdom*. He lives in your world, follows you around, and does his own thing.
-Right now his own thing is mostly being in the way.
+Right now his own thing is mostly being in the way, and handing you apples.
 
 The goal is a real clone: a Link who walks, reacts, picks fights, gets in trouble and survives everything, with a
 mind of his own. What exists today is the first step: a body in the world, moving on its own, driven by a simple
@@ -21,11 +21,11 @@ Runs on the [MacNativeGames](https://github.com/ly05010419/MacNativeGames) nativ
 - **He used to be mannequins.** Before that he was three armor-shop mannequins stacked on one spot, which crashed the
   game when you walked up to them (they went looking for the item they were selling). That fix is still in, and
   `survey drop` gets rid of the mannequins.
-- **He walks and runs.** Every frame he moves over the real ground (a physics raycast, so sky islands, rocks and bridges
-  count too) toward wherever his brain says, with Link's own
-  walk, run and dash picked from his speed (and played at a matching speed), turning smoothly to face where he's going,
-  and back to you when he stops. The
-  animations need a small RomFS mod (see "Trying it"); without it he sweats, shivers or pants his way around instead.
+- **He walks and runs.** Every frame he moves toward wherever his brain says, over the real ground (a physics raycast,
+  so sky islands, rocks and bridges count too) and around anything in his way. He uses Link's own walk, run and dash,
+  picked from his speed and played at a matching speed, and turns smoothly to face where he's going, then back to you
+  when he stops. He also looks around, startles and celebrates. The animations need a small RomFS mod (see
+  "Trying it"); without it he sweats, shivers or pants his way around instead.
 - **He doesn't stay gone.** If his body disappears while his brain runs (you die and reload, a loading zone), he's
   back a couple of seconds after you are.
 - **He has a (very small) brain.** Every few seconds he decides what to do:
@@ -41,7 +41,7 @@ Runs on the [MacNativeGames](https://github.com/ly05010419/MacNativeGames) nativ
 
 ## Where he's going
 
-- Real clothes: picking an actual outfit makes him vanish for now
+- Real clothes: an actual outfit doesn't show yet (he turns into a floating head)
 - Doing things, not just standing near you: fighting, climbing, using items, breaking stuff
 - Never dying, whatever you do to him (he already comes back when you die)
 - A smarter brain
@@ -53,13 +53,13 @@ None of this is promised, it's what I'm working toward.
 Only my own code is here: a patch for the MacNativeGames runtime, plus notes. No game files, keys or extracted game
 data. You need your own legally dumped copy of the game, like the port itself does.
 
-- `patches/lonk.patch`: the changes to `games/totk/runtime/world_survey.c` and `game_version.h`. Spawning, the shop
-  crash fix, movement and the brain.
+- `patches/lonk.patch`: the changes to `games/totk/runtime/world_survey.c` and `game_version.h`. Spawning, dressing,
+  animation, the ground and obstacle raycasts, the brain, and the shop crash fix.
 - `patches/BASE_COMMIT`: the MacNativeGames commit the patch applies to.
 - `apply.sh`: applies the patch to a MacNativeGames checkout.
 - `mod/make_mod.py`: builds his animation mod from your own game files (nothing from the game is in this repo).
-- `docs/how-it-works.md`: the reverse-engineering notes. How I found the spawn function in 1.4.3, why the mannequins
-  crashed, how he moves.
+- `docs/how-it-works.md`: the reverse-engineering notes. How I found the spawn function in 1.4.3, how he gets dressed,
+  how an inventory Link learned to walk, how he finds the ground.
 
 ## Trying it
 
@@ -81,18 +81,19 @@ survey lonk start
 That spawns his body 4 m in front of you and runs his brain for an hour (`survey spawn lonk PouchPlayer 4 0 0` plus
 `survey lonk brain 216000`, if you want them separately).
 
-He starts his idle animation and gets dressed on his own. `survey equip <slot> <ArmorName>` puts one piece on him
-(9 head, 10 upper, 11 lower, `-` for the default, an optional dye number after it), and `survey dress` redoes the whole outfit. The old mannequin body
+He starts his idle animation and gets dressed on his own. `survey equip <slot> <ArmorName> [dye]` puts one piece on him
+(9 head, 10 upper, 11 lower, `-` for the default), and `survey dress` redoes the whole outfit. The old mannequin body
 still works (`survey spawn m1 Mannequin_001_Upper` and friends), and `survey drop <name start|all>` removes pieces from
 him again.
 
-You can also force one mood with `survey lonk <stalk|buddy|block|behind|wander|gift|flee|party> <frames>`, send him somewhere with
-`survey lonk goto <metres right> <metres forward> [m/s]` (from you), and stop him with `survey lonk stop`.
+You can also force one mood with `survey lonk <stalk|buddy|block|behind|wander|gift|flee|party> <frames>`, send him
+somewhere with `survey lonk goto <metres right> <metres forward> [m/s]` (from you), and stop him with
+`survey lonk stop`.
 
 ## Known issues
 
-- He only has his underwear. Real armor (`survey equip 10 Armor_001_Upper`) makes him disappear until he's back in
-  the defaults.
+- He only has his underwear. Real armor (`survey equip 10 Armor_001_Upper`) doesn't draw, and hides the body under it,
+  so he turns into a floating head until he's back in the defaults.
 - His feet may still slide a little: the clips' own speeds are my estimates.
 - With the mod installed, the inventory Link walks, runs or dashes in place in the pause menu when you're somewhere cold
   or hot, or out of stamina, and looks around, startles or celebrates when you equip a two-handed sword, a spear or just
