@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..9d77dd5 100644
+index c05d6c3..5e5ff85 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -184,7 +184,7 @@ index c05d6c3..9d77dd5 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,22 +399,747 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,22 +399,756 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -404,7 +404,8 @@ index c05d6c3..9d77dd5 100644
 +    }
 +}
 +/* An actor's animation state: as = [[[[actor+0x228]+0x40]+0x18]+0x18], 0 if any step is null. u32 as+0x130 state,
-+   u32 as+0x18 slots (0x48 apart at [as+0x20]), slot0 playing command name at [slot0+0x10], rate at slot0+0xd0. */
++   u32 as+0x18 slots (pointers 0x48 apart at [as+0x20]), a slot's command name at [slot+0x10], its rate at slot+0xd0.
++   PouchPlayer's slot 0 is the face, 1 the body, 2 the skin colour. */
 +static uintptr_t anim_state(uintptr_t actor) {
 +    uintptr_t p = actor;
 +    static const unsigned offs[] = {0x228, 0x40, 0x18, 0x18};
@@ -470,9 +471,17 @@ index c05d6c3..9d77dd5 100644
 +            ((void (*)(uintptr_t, const void *, bool))set_bool)(bb, &s_key, gait != GAIT_DASH);
 +            fprintf(stderr, "[survey] gait: %s\n", gait_names[gait]);
 +        }
-+        uintptr_t slot0 = read_ptr(read_ptr(as + 0x20));
++        /* the game puts each command in its own slot (0 face, 1 body, 2 skin colour here): find the one playing PauseMenuWait */
++        uint32_t slots = 0;
++        read_mem(as + 0x18, &slots, 4);
++        uintptr_t body = 0, table = read_ptr(as + 0x20);
++        for (uint32_t k = 0; k < slots && k < 8 && table && !body; k++) {
++            uintptr_t slot = read_ptr(table + k * 0x48);
++            char cmd[16] = {0};
++            if (slot && read_mem(read_ptr(slot + 0x10), cmd, sizeof cmd - 1) && !strcmp(cmd, "PauseMenuWait")) body = slot;
++        }
 +        float rate = gait == GAIT_IDLE ? 1.0f : fminf(fmaxf(speed / clip_speed[gait], 0.6f), 1.7f);
-+        if (slot0) memcpy((void *)(slot0 + 0xd0), &rate, sizeof rate);
++        if (body) memcpy((void *)(body + 0xd0), &rate, sizeof rate);
 +    }
 +    lonk_gait = gait;
 +}
@@ -935,7 +944,7 @@ index c05d6c3..9d77dd5 100644
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,6 +1149,10 @@ void runtime_survey_cancel_user(void) {
+@@ -307,6 +1158,10 @@ void runtime_survey_cancel_user(void) {
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
@@ -946,7 +955,7 @@ index c05d6c3..9d77dd5 100644
      fprintf(stderr, "[survey] cancelled: user input\n");
      pthread_mutex_unlock(&survey_lock);
  }
-@@ -315,7 +1161,38 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -315,7 +1170,38 @@ void runtime_survey_tick(uint64_t frame) {
      in_tick = 1;
      pthread_mutex_lock(&survey_lock);
      uintptr_t actor = player_actor();
@@ -985,7 +994,7 @@ index c05d6c3..9d77dd5 100644
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
      } else if (request.kind == 1) {
-@@ -340,7 +1217,15 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -340,7 +1226,15 @@ void runtime_survey_tick(uint64_t frame) {
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }
