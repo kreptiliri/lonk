@@ -117,6 +117,10 @@ spot: both 1520.99). Where it misses, the game's terrain heightmap (the AI node 
 answers 1 or 2) takes over, then Link's own footsteps: a ring of his last 512 positions, one every 25 cm. Letting gravity
 do it doesn't work, because setting the transform every frame keeps gravity from ever catching up.
 
+The same raycast steers him: before each step he probes 1 m ahead at knee height, and if something's there (and it isn't
+a walkable slope, judged by the hit normal at `+0x30`) he tries 45 and then 90 degrees to one side, then the other,
+starting with whichever side worked last so he doesn't dither. Boxed in, he waits.
+
 Walking through Link puts the mannequin's collision above Link's head, which the game reads as a low ceiling, and
 forces a crouch. Lonk keeps 1.1 m away and slides around instead.
 

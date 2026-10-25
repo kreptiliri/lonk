@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..d58d7b5 100644
+index c05d6c3..bc07bfe 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -184,7 +184,7 @@ index c05d6c3..d58d7b5 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,22 +399,766 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,22 +399,794 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -305,7 +305,7 @@ index c05d6c3..d58d7b5 100644
 +   query, vtable [main+0x395d990]+0x10, start at +0x08, end at +0x14, fraction -1 at +0x3c, a collision filter at +0x128
 +   (vtable [main+0x3988178]+0x10, layers 0xfffcffff00000011) pointed to by +0x60; bool 0x1952a4(&query, 0) casts it and
 +   leaves the hit position at +0x24. Unlike the terrain query it sees sky islands, buildings, bridges and rocks. */
-+static int ray_height(float x, float z, float top, float bottom, float *out) {
++static int ray_cast(const float start[3], const float end[3], float hit[3], float normal[3]) {
 +    static const uint32_t w_cast[] = {0x39446008, 0x37184b08, 0xa9ba7bfd, 0xa9016ffc, 0x910003fd, 0xa90267fa};
 +    static int checked, ok;
 +    static bool (*cast)(void *, int);
@@ -319,7 +319,7 @@ index c05d6c3..d58d7b5 100644
 +    _Alignas(16) uint8_t q[0x200];
 +    memset(q, 0, sizeof q);
 +    uintptr_t vt = survey_main + 0x361da10 + 0x10, filter = (uintptr_t)(q + 0x128), filter_vt = survey_main + 0x3929490 + 0x10;
-+    float start[3] = {x, top, z}, end[3] = {x, bottom, z}, fraction = -1;
++    float fraction = -1;
 +    uint32_t one = 1;
 +    uint64_t layers = 0xfffcffff00000011ull, low = 0xffffffffull, all = ~0ull, one64 = 1;
 +    memcpy(q, &vt, 8); memcpy(q + 0x08, start, 12); memcpy(q + 0x14, end, 12); memcpy(q + 0x3c, &fraction, 4);
@@ -327,11 +327,23 @@ index c05d6c3..d58d7b5 100644
 +    memcpy(q + 0x128, &filter_vt, 8); memcpy(q + 0x130, &layers, 8); memcpy(q + 0x138, &low, 8); memcpy(q + 0x140, &all, 8);
 +    memcpy(q + 0x150, &one64, 8);
 +    if (!cast(q, 0)) return 0;
-+    float hit[3];
-+    memcpy(hit, q + 0x24, sizeof hit);
-+    if (!isfinite(hit[1]) || hit[1] > top + 0.01f || hit[1] < bottom - 0.01f) return 0;
++    memcpy(hit, q + 0x24, 12);
++    if (normal) memcpy(normal, q + 0x30, 12);
++    for (int k = 0; k < 3; k++) if (!isfinite(hit[k])) return 0;
++    return 1;
++}
++static int ray_height(float x, float z, float top, float bottom, float *out) {
++    float start[3] = {x, top, z}, end[3] = {x, bottom, z}, hit[3];
++    if (!ray_cast(start, end, hit, NULL) || hit[1] > top + 0.01f || hit[1] < bottom - 0.01f) return 0;
 +    *out = hit[1];
 +    return 1;
++}
++/* Something in the way, knee high, within <reach> m along (dx, dz)? A walkable slope (normal pointing up) doesn't count. */
++static int ray_blocked(const float at[3], float dx, float dz, float reach) {
++    float start[3] = {at[0], at[1] + 0.6f, at[2]}, end[3] = {at[0] + dx * reach, at[1] + 0.6f, at[2] + dz * reach}, hit[3], normal[3];
++    if (!ray_cast(start, end, hit, normal)) return 0;
++    float nl = sqrtf(normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]);
++    return !(nl > 0.5f && nl < 1.5f && normal[1] / nl > 0.65f);
 +}
 +/* PouchPlayer, spawned by us, stays invisible: the pause menu normally binds its model to the UI model scene and switches its
 +   view masks. getModel 0xba8854, model+0x60 = its model scene, bindScene 0x585d58(model, scene), 0x50138c(model, mask) sets
@@ -754,8 +766,24 @@ index c05d6c3..d58d7b5 100644
 +    float before[2] = {a[0], a[2]};
 +    float dx = target[0] - a[0], dz = target[2] - a[2], dist = hypotf(dx, dz);
 +    if (dist > 0.01f) {
-+        float step = fminf(speed / 60.0f, fmaxf(dist - stop, 0.0f));
-+        a[0] += dx / dist * step; a[2] += dz / dist * step;
++        float step = fminf(speed / 60.0f, fmaxf(dist - stop, 0.0f)), ux = dx / dist, uz = dz / dist;
++#if defined(TOTK_GAME_V143)
++        /* around rocks, walls and trees: if the way ahead is blocked, try 45 then 90 degrees off to one side (the side that
++           worked last time first, so he doesn't dither), then the other; boxed in, he stands still */
++        static int steer = 1;
++        if (step > 0.001f && isfinite(a[1]) && ray_blocked(a, ux, uz, 1.0f)) {
++            static const float turns[] = {0.785f, 1.571f};
++            int found = 0;
++            for (int side = 0; side < 2 && !found; side++, steer = -steer)
++                for (int t = 0; t < 2 && !found; t++) {
++                    float r = turns[t] * steer, cx = ux * cosf(r) - uz * sinf(r), cz = ux * sinf(r) + uz * cosf(r);
++                    if (!ray_blocked(a, cx, cz, 1.0f)) { ux = cx; uz = cz; found = 1; }
++                }
++            if (found) steer = -steer;   /* undo the flip the loop did after the side that worked */
++            else step = 0;
++        }
++#endif
++        a[0] += ux * step; a[2] += uz * step;
 +    }
 +    /* Never through the player: overlapping Link reads as a low ceiling and forces a crouch, so keep 1.1 m and slide round */
 +    float ox = a[0] - p[0], oz = a[2] - p[2], od = hypotf(ox, oz);
@@ -954,7 +982,7 @@ index c05d6c3..d58d7b5 100644
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,6 +1168,10 @@ void runtime_survey_cancel_user(void) {
+@@ -307,6 +1196,10 @@ void runtime_survey_cancel_user(void) {
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
@@ -965,7 +993,7 @@ index c05d6c3..d58d7b5 100644
      fprintf(stderr, "[survey] cancelled: user input\n");
      pthread_mutex_unlock(&survey_lock);
  }
-@@ -315,7 +1180,38 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -315,7 +1208,38 @@ void runtime_survey_tick(uint64_t frame) {
      in_tick = 1;
      pthread_mutex_lock(&survey_lock);
      uintptr_t actor = player_actor();
@@ -1004,7 +1032,7 @@ index c05d6c3..d58d7b5 100644
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
      } else if (request.kind == 1) {
-@@ -340,7 +1236,15 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -340,7 +1264,15 @@ void runtime_survey_tick(uint64_t frame) {
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }

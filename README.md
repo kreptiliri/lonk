@@ -93,8 +93,9 @@ You can also force one mood with `survey lonk <stalk|block|behind|wander|gift|fl
   or hot, or out of stamina, and celebrates when you equip a shield with no weapon.
 - Off a ledge (nothing under him within 60 m) he falls back to your footsteps' height and floats.
 - He'll happily block you while standing on thin air over a cliff.
-- Wandering off on his own, he walks straight through rocks and trees (or over them: the raycast lands him on top).
-- He jumps when you jump. He has no idea why.
+- He steers around rocks and walls with a knee-high probe, but thin things (trees, fences) can still slip through, and
+  anything knee high or lower he just walks over.
+- He used to jump when you jumped. The raycast should have fixed that, but I haven't tested it yet.
 
 ## License
 
