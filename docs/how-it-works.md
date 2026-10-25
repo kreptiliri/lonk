@@ -115,7 +115,7 @@ checking the original words. As a bonus, the mannequin turns into a working shop
 every body piece is set to the same anchor point, turned to face Link (yaw only). That keeps the three pieces one
 figure.
 
-Height comes from a physics raycast straight down from 3 m above him, set up the way the AI node
+Height comes from a physics raycast straight down, set up the way the AI node
 `QueryCheckCliffRayCast` (`0x260b30c`) builds one on its stack:
 
 - a 0x178-byte query: vtable `[main+0x395d990]+0x10`, start at `+0x08`, end at `+0x14`, fraction `-1` at `+0x3c`
@@ -125,15 +125,26 @@ Height comes from a physics raycast straight down from 3 m above him, set up the
 It hits whatever Link can stand on, sky islands and rocks included (checked against Link himself, dropped on the same
 spot: both 1520.99). Where it misses, the game's terrain heightmap (the AI node `QueryTerrainGetGroundHeight`:
 `T = [main+0x3add550]`, `scene = 0x2b7332c(T, pos, 1, 0, 300.0)`, then `0x5db4c0(&height, xz, scene, -1, 0, 1, 0)`
-answers 1 or 2) takes over, then Link's own footsteps: a ring of his last 512 positions, one every 25 cm. Letting gravity
-do it doesn't work, because setting the transform every frame keeps gravity from ever catching up.
+answers 1 or 2) was the fallback before he had feet, then Link's own footsteps: a ring of his last 512 positions, one every
+25 cm. Letting gravity do it doesn't work, because setting the transform every frame keeps gravity from ever catching up.
+
+He has feet now. The ray starts a step (0.7 m) above them, not above his head: starting from 3 m above the higher of him
+and Link, a boulder up to 3 m tall counted as floor, so he stepped onto it, and the next ray started higher still. That's
+how he walked up walls and onto cave roofs. Floor lower than his feet and he falls (9.8 m/s², down to that floor);
+floor too steep (normal y under 0.6) and he doesn't step onto it.
 
 The same raycast steers him: before each step he probes 1 m ahead at knee height, and if something's there (and it isn't
 a walkable slope, judged by the hit normal at `+0x30`) he tries 45 and then 90 degrees to one side, then the other,
-starting with whichever side worked last so he doesn't dither. Boxed in, he waits.
+starting with whichever side worked last so he doesn't dither. A ledge counts too: no floor within 2.5 m below his feet
+0.8 m ahead. Boxed in, he waits.
+
+Stranded for 3 seconds (5 m above or below Link, 30 m away, trying to move and not moving, or no floor), he pops back
+next to Link: behind him, else to a side, else in front, wherever a ray finds flat floor at Link's height. The "behind"
+mood's teleport uses the same spot.
 
 Walking through Link puts the mannequin's collision above Link's head, which the game reads as a low ceiling, and
-forces a crouch. Lonk keeps 1.1 m away and slides around instead.
+forces a crouch. Lonk keeps 1.1 m away and slides around instead, unless that would put him in a wall or off a ledge
+(which is how you could shove him through walls).
 
 ## Coming back
 

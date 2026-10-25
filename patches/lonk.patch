@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..9bd467d 100644
+index c05d6c3..c0926ff 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -188,7 +188,7 @@ index c05d6c3..9bd467d 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,22 +403,858 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,22 +403,915 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -336,18 +336,39 @@ index c05d6c3..9bd467d 100644
 +    for (int k = 0; k < 3; k++) if (!isfinite(hit[k])) return 0;
 +    return 1;
 +}
-+static int ray_height(float x, float z, float top, float bottom, float *out) {
-+    float start[3] = {x, top, z}, end[3] = {x, bottom, z}, hit[3];
-+    if (!ray_cast(start, end, hit, NULL) || hit[1] > top + 0.01f || hit[1] < bottom - 0.01f) return 0;
++/* The floor straight down from top to bottom, and how flat it is (up: the normal's y, 1 = flat, 0 = a wall) */
++static int ray_floor(float x, float z, float top, float bottom, float *out, float *up) {
++    float start[3] = {x, top, z}, end[3] = {x, bottom, z}, hit[3], normal[3];
++    if (!ray_cast(start, end, hit, normal) || hit[1] > top + 0.01f || hit[1] < bottom - 0.01f) return 0;
++    float nl = sqrtf(normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]);
 +    *out = hit[1];
++    if (up) *up = nl > 0.5f && nl < 1.5f ? normal[1] / nl : 1;
 +    return 1;
 +}
++static int ray_height(float x, float z, float top, float bottom, float *out) { return ray_floor(x, z, top, bottom, out, NULL); }
 +/* Something in the way, knee high, within <reach> m along (dx, dz)? A walkable slope (normal pointing up) doesn't count. */
 +static int ray_blocked(const float at[3], float dx, float dz, float reach) {
 +    float start[3] = {at[0], at[1] + 0.6f, at[2]}, end[3] = {at[0] + dx * reach, at[1] + 0.6f, at[2] + dz * reach}, hit[3], normal[3];
 +    if (!ray_cast(start, end, hit, normal)) return 0;
 +    float nl = sqrtf(normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]);
 +    return !(nl > 0.5f && nl < 1.5f && normal[1] / nl > 0.65f);
++}
++/* A ledge 0.8 m along (dx, dz): no floor from a step above his feet to 2.5 m below them (a wall too tall to step onto reads
++   the same, but the knee-high probe usually sees that first). */
++static int ray_ledge(const float at[3], float dx, float dz) {
++    float h;
++    return !ray_height(at[0] + dx * 0.8f, at[2] + dz * 0.8f, at[1] + 0.7f, at[1] - 2.5f, &h);
++}
++static int way_blocked(const float at[3], float dx, float dz) { return ray_blocked(at, dx, dz, 1.0f) || ray_ledge(at, dx, dz); }
++/* Somewhere to put him next to the player (p, facing fx, fz): behind, then either side, then in front, 1.5 m away, wherever
++   there's flat floor about as high as the player's. Behind if none. */
++static void spot_near(const float p[3], float fx, float fz, float out[2]) {
++    static const float dirs[4][2] = {{-1, 0}, {0, 1}, {0, -1}, {1, 0}};   /* (forward, right) */
++    for (int i = 0; i < 4; i++) {
++        float x = p[0] + (fx * dirs[i][0] - fz * dirs[i][1]) * 1.5f, z = p[2] + (fz * dirs[i][0] + fx * dirs[i][1]) * 1.5f, h, up;
++        if (ray_floor(x, z, p[1] + 0.7f, p[1] - 1.0f, &h, &up) && up > 0.6f) { out[0] = x; out[1] = z; return; }
++    }
++    out[0] = p[0] - fx * 1.5f; out[1] = p[2] - fz * 1.5f;
 +}
 +/* PouchPlayer, spawned by us, stays invisible: the pause menu normally binds its model to the UI model scene and switches its
 +   view masks. getModel 0xba8854, model+0x60 = its model scene, bindScene 0x585d58(model, scene), 0x50138c(model, mask) sets
@@ -766,7 +787,13 @@ index c05d6c3..9bd467d 100644
 +    switch (lonk_kind) {
 +    case LONK_BLOCK: target[0] = p[0] + fx * 2.5f; target[2] = p[2] + fz * 2.5f; speed = 7; stop = 0.2f; break;
 +    case LONK_BEHIND:
-+        if (entering) { a[0] = p[0] - fx * 1.5f; a[2] = p[2] - fz * 1.5f; }   /* he was always there */
++        if (entering) {   /* he was always there */
++            float at[2] = {p[0] - fx * 1.5f, p[2] - fz * 1.5f};
++#if defined(TOTK_GAME_V143)
++            if (ground_mode == GROUND_TERRAIN) spot_near(p, fx, fz, at);
++#endif
++            a[0] = at[0]; a[2] = at[1];
++        }
 +        speed = 4; stop = 1.2f; break;
 +    case LONK_WANDER:
 +        if (entering && lonk_goto_set) {   /* right of the player is (-fz, fx) */
@@ -815,6 +842,7 @@ index c05d6c3..9bd467d 100644
 +    }
 +    if (lonk_emote_left) { lonk_emote_left--; target[0] = a[0]; target[2] = a[2]; }
 +    float before[2] = {a[0], a[2]};
++    int wanted = 0;   /* he's trying to get somewhere this frame */
 +    float dx = target[0] - a[0], dz = target[2] - a[2], dist = hypotf(dx, dz);
 +    if (dist > 0.01f) {
 +        float step = fminf(speed / 60.0f, fmaxf(dist - stop, 0.0f)), ux = dx / dist, uz = dz / dist;
@@ -822,13 +850,14 @@ index c05d6c3..9bd467d 100644
 +        /* around rocks, walls and trees: if the way ahead is blocked, try 45 then 90 degrees off to one side (the side that
 +           worked last time first, so he doesn't dither), then the other; boxed in, he stands still */
 +        static int steer = 1;
-+        if (step > 0.001f && isfinite(a[1]) && ray_blocked(a, ux, uz, 1.0f)) {
++        wanted = step > 0.001f;
++        if (step > 0.001f && isfinite(a[1]) && way_blocked(a, ux, uz)) {
 +            static const float turns[] = {0.785f, 1.571f};
 +            int found = 0;
 +            for (int side = 0; side < 2 && !found; side++, steer = -steer)
 +                for (int t = 0; t < 2 && !found; t++) {
 +                    float r = turns[t] * steer, cx = ux * cosf(r) - uz * sinf(r), cz = ux * sinf(r) + uz * cosf(r);
-+                    if (!ray_blocked(a, cx, cz, 1.0f)) { ux = cx; uz = cz; found = 1; }
++                    if (!way_blocked(a, cx, cz)) { ux = cx; uz = cz; found = 1; }
 +                }
 +            if (found) steer = -steer;   /* undo the flip the loop did after the side that worked */
 +            else step = 0;
@@ -840,7 +869,11 @@ index c05d6c3..9bd467d 100644
 +    float ox = a[0] - p[0], oz = a[2] - p[2], od = hypotf(ox, oz);
 +    if (od < 1.1f) {
 +        if (od < 0.01f) { ox = -fx; oz = -fz; od = 1; }
-+        a[0] = p[0] + ox / od * 1.1f; a[2] = p[2] + oz / od * 1.1f;
++        int pushable = 1;
++#if defined(TOTK_GAME_V143)
++        if (ground_mode == GROUND_TERRAIN && isfinite(a[1])) pushable = !way_blocked(a, ox / od, oz / od);   /* not into a wall or off a ledge */
++#endif
++        if (pushable) { a[0] = p[0] + ox / od * 1.1f; a[2] = p[2] + oz / od * 1.1f; }
 +    }
 +    /* his speed (m/s, smoothed; a teleport counts as standing still) picks the gait, and moving he faces where he goes */
 +    static float lonk_speed;
@@ -865,14 +898,38 @@ index c05d6c3..9bd467d 100644
 +    static const char *ground_src;
 +    ground_src = "footsteps";
 +#if defined(TOTK_GAME_V143)
-+    if (ground_mode == GROUND_TERRAIN) {   /* a raycast down from above his head, else the heightmap near the player's height, else footsteps */
-+        float h, top = fmaxf(isfinite(a[1]) ? a[1] : p[1], p[1]) + 3;
-+        if (ray_height(a[0], a[2], top, top - 60, &h)) { ground = h; ground_src = "ray"; }
-+        else if (terrain_height(a[0], a[2], p[1] + 2, &h) && fabsf(h - p[1]) < 40) { ground = h; ground_src = "terrain"; }
++    int feet_mode = 0;
++    if (ground_mode == GROUND_TERRAIN) {
++        /* He has feet: the floor is looked for from a step (0.7 m) above them down, so a cave roof or a boulder beside him
++           doesn't count. Lower floor and he falls; none within 60 m and he stays put (and gets lost, below). */
++        static float vy;
++        int snap = (lonk_kind == LONK_BEHIND && entering) || !isfinite(a[1]);
++        float feet = snap ? p[1] : a[1], h, up;
++        feet_mode = 1;
++        if (snap) vy = 0;
++        if (ray_floor(a[0], a[2], feet + 0.7f, feet - 60, &h, &up)) {
++            ground_src = "ray";
++            if (h < feet - 0.05f) { vy -= 9.8f / 60; feet = fmaxf(feet + vy / 60, h); ground_src = "falling"; if (feet == h) vy = 0; }
++            else if (up < 0.6f) { ground_src = "steep"; vy = 0; }   /* a wall's face isn't a step: he doesn't climb it */
++            else { feet += (h - feet) * 0.3f; vy = 0; }
++        } else { ground_src = "none"; vy = 0; }
++        ground = feet;
++        /* lost for 3 s (5 m above or below you, 30 m away, stuck against something, or nothing under him): he's back behind you */
++        static unsigned lost;
++        float far = hypotf(p[0] - a[0], p[2] - a[2]);
++        const char *why = fabsf(feet - p[1]) > 5 ? "height" : far > 30 ? "far" : !strcmp(ground_src, "none") ? "no floor" :
++                          wanted && moved < 0.005f && far > 4 ? "stuck" : NULL;
++        lost = why ? lost + 1 : 0;
++        if (lost > 180) {
++            fprintf(stderr, "[survey] lonk: lost (%s), back behind you\n", why);
++            float at[2];
++            spot_near(p, fx, fz, at);
++            a[0] = at[0]; a[2] = at[1]; ground = p[1]; vy = 0; lost = 0;
++        }
 +    }
 +#endif
 +    /* ease toward the new height (no pops when the nearest footstep changes); a teleport snaps */
-+    if (!(lonk_kind == LONK_BEHIND && entering) && isfinite(a[1]) && fabsf(ground - a[1]) < 30) ground = a[1] + (ground - a[1]) * 0.15f;
++    if (!feet_mode && !(lonk_kind == LONK_BEHIND && entering) && isfinite(a[1]) && fabsf(ground - a[1]) < 30) ground = a[1] + (ground - a[1]) * 0.15f;
 +    for (unsigned i = 0; i < stalker_count; i++) {
 +        float y = ground;
 +        if (ground_mode == GROUND_PHYSICS) read_mem(stalkers[i].actor + ACTOR_POS + 4, &y, sizeof y);   /* keep its own height */
@@ -1050,7 +1107,7 @@ index c05d6c3..9bd467d 100644
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,6 +1264,10 @@ void runtime_survey_cancel_user(void) {
+@@ -307,6 +1321,10 @@ void runtime_survey_cancel_user(void) {
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
@@ -1061,7 +1118,7 @@ index c05d6c3..9bd467d 100644
      fprintf(stderr, "[survey] cancelled: user input\n");
      pthread_mutex_unlock(&survey_lock);
  }
-@@ -315,7 +1276,51 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -315,7 +1333,51 @@ void runtime_survey_tick(uint64_t frame) {
      in_tick = 1;
      pthread_mutex_lock(&survey_lock);
      uintptr_t actor = player_actor();
@@ -1113,7 +1170,7 @@ index c05d6c3..9bd467d 100644
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
      } else if (request.kind == 1) {
-@@ -340,7 +1345,15 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -340,7 +1402,15 @@ void runtime_survey_tick(uint64_t frame) {
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }

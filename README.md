@@ -23,7 +23,8 @@ Runs on the [MacNativeGames](https://github.com/ly05010419/MacNativeGames) nativ
   game when you walked up to them (they went looking for the item they were selling). That fix is still in, and
   `survey drop` gets rid of the mannequins.
 - **He walks and runs.** Every frame he moves toward wherever his brain says, over the real ground (a physics raycast,
-  so sky islands, rocks and bridges count too) and around anything in his way. He uses Link's own walk, run and dash,
+  so sky islands, rocks, bridges and caves count too) and around anything in his way, ledges included: he steps up at most
+  a stair's height, falls if the floor drops out under him, and pops back next to you if he gets stranded. He uses Link's own walk, run and dash,
   picked from his speed and played at a matching speed, and turns smoothly to face where he's going, then back to you
   when he stops. He also looks around, startles and celebrates. (Well, his brain picks them: his arms and legs don't
   move yet, see Known issues.) The animations need a small RomFS mod (see
@@ -97,13 +98,12 @@ somewhere with `survey lonk goto <metres right> <metres forward> [m/s]` (from yo
 - His arms and legs don't move: he glides around stiff. The animation is set, but his body pieces don't follow it yet.
 - He only has his underwear. Real armor (`survey equip 10 Armor_001_Upper`) doesn't draw, and hides the body under it,
   so he turns into a floating head until he's back in the defaults.
-- In caves he can end up walking on the roof, or clip up through a wall you run him into.
 - His feet may still slide a little: the clips' own speeds are my estimates.
 - With the mod installed, the inventory Link walks, runs or dashes in place in the pause menu when you're somewhere cold
   or hot, or out of stamina, and looks around, startles or celebrates when you equip a two-handed sword, a spear or just
   a shield.
-- Off a ledge (nothing under him within 60 m) he falls back to your footsteps' height and floats.
-- He'll happily block you while standing on thin air over a cliff.
+- He doesn't jump, climb or follow you down ledges. He walks around them instead, and if he gets stranded (5 m above or
+  below you, 30 m away, stuck, or no floor) for 3 seconds, he pops back next to you.
 - He steers around rocks and walls with a knee-high probe, but thin things (trees, fences) can still slip through, and
   anything knee high or lower he just walks over.
 
