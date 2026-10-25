@@ -14,9 +14,10 @@ Runs on the [MacNativeGames](https://github.com/ly05010419/MacNativeGames) nativ
 - **He exists.** I spawn him with the game's own actor manager, in the open world, next to you.
 - **He has a body, Link's own.** Link himself can't be spawned twice, so he's the Link from the inventory screen. That
   one looked invisible outside the menu, but it turned out he was just teleporting himself to the middle of the map
-  every frame. Pinned next to you, he's there: bald, in his underwear, standing in his idle pose. His hair counts as
-  part of the outfit, so it's missing until I figure out how to dress him. So is his right arm, which is a separate
-  piece in this game.
+  every frame. Pinned next to you, he's there, standing in his idle pose.
+- **He gets dressed.** Hair, his Zonai right arm and his clothes are all separate pieces of equipment in this game, and
+  the inventory Link never puts any on outside the menu. Now he dresses himself the way the pause menu does it, a second
+  after he spawns: his hair, his arm and Link's default outfit (which is his underwear, so far).
 - **He used to be mannequins.** Before that he was three armor-shop mannequins stacked on one spot, which crashed the
   game when you walked up to them (they went looking for the item they were selling). That fix is still in, and
   `survey drop` gets rid of the mannequins.
@@ -33,7 +34,7 @@ Runs on the [MacNativeGames](https://github.com/ly05010419/MacNativeGames) nativ
 
 ## Where he's going
 
-- Clothes, hair and his right arm back
+- Real clothes: picking an actual outfit makes him vanish for now
 - Walking and running animations, not sliding around in his idle pose
 - Doing things, not just standing near you: fighting, climbing, using items, breaking stuff
 - Never dying, whatever you do to him
@@ -68,7 +69,8 @@ survey spawn lonk PouchPlayer 4 0 0
 survey lonk brain 36000
 ```
 
-He starts his idle animation on his own. The old mannequin body still works (`survey spawn m1 Mannequin_001_Upper`
+He starts his idle animation and gets dressed on his own. `survey equip <slot> <ArmorName>` puts one piece on him
+(9 head, 10 upper, 11 lower, `-` for the default), `survey dress` redoes the whole outfit. The old mannequin body still works (`survey spawn m1 Mannequin_001_Upper`
 and friends), and `survey drop <name start|all>` removes pieces from him again.
 
 You can also force one mood with `survey lonk <stalk|block|behind|wander|gift|flee> <frames>`, and stop him with
@@ -76,9 +78,11 @@ You can also force one mood with `survey lonk <stalk|block|behind|wander|gift|fl
 
 ## Known issues
 
-- He's bald, in his underwear, and missing his right arm.
+- He only has his underwear. Real armor (`survey equip 10 Armor_001_Upper`) makes him disappear until he's back in
+  the defaults.
 - He slides everywhere in his idle pose.
-- The terrain height ignores bridges, buildings and sky islands, so there he falls back to your footsteps.
+- The terrain height ignores bridges, buildings and sky islands, so there he falls back to your footsteps. On a sky
+  island, wandering away from you, that can leave him buried up to the neck.
 - He'll happily block you while standing on thin air over a cliff.
 - Wandering off on his own, he walks straight through rocks and trees.
 - He jumps when you jump. He has no idea why.

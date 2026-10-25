@@ -30,9 +30,27 @@ its transform every frame like any other piece makes it show up. Nothing ever st
 so the patch starts `Nml_Wait` itself, the way the game's own C++ callers do: a 0x30-byte request
 `{actor, name, slot 0, rate 1, -1, -1, 1}` passed to `0x4dc628`.
 
-Still missing: the outfit (hair included) comes from `EquipmentUser_*` blackboard values the menu sets, and the right
-arm is its own actor, `PlayerRaulHand`, which the game attaches to Link's skeleton. Spawned alone it floats in its
-rest pose.
+## Dressing him
+
+The real Player dresses itself when its `EquipmentUser` component starts (`0xc45d8c`), but only if a parameter that
+reads like `IsPouchUser` is set, which it isn't for `PouchPlayer`. That one waits for the pause menu's AI node
+`OneShotChangeEquipmentForPouch` to dress it, so outside the menu he had no hair, no clothes and no right arm.
+
+The patch dresses him the same way the menu does, 60 frames after he spawns:
+
+- `eu = 0xcbffa0(actor)` is his EquipmentUser (`[[actor+0x228]+0x230]`).
+- `0x1b6cd78(eu, slot, &name, -1, 0, 0)` equips one slot. `name` points at a `const char*`, and an empty name means
+  "dress like the player", or the defaults when the game decides the player wears nothing: `Armor_999_Head` (the
+  hair), `Armor_Default_Upper` and `Armor_Default_Lower`.
+- Slots 9, 10 and 11 are head, upper and lower. The Zonai arm is slot 19 ("Extra"), `PlayerRaulHand`, the same thing the
+  real Player equips on itself at startup.
+- The pieces are separate actors, spawned asynchronously; `0x1b7be9c(eu)` turns nonzero when they're all in. Their
+  ActorLinks are at `eu+0xe0+(slot-9)*0x18`, read with `0x1afbe4` (it returns `{actor, holds a reference}`).
+- A pouch user's pieces are made for the menu's model scene, so each one is bound to the world scene like the body.
+  They follow his skeleton by themselves.
+
+Real armor (`Armor_001_Upper`, the Hylian tunic) makes the whole figure disappear, hair included, and putting the
+default back brings him back. Not solved yet.
 
 `survey drop` takes pieces off him. There's no delete call yet, so each one gets view mask 0 (`0x50138c`) and is
 moved 50 m underground.
