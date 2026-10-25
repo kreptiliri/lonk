@@ -95,7 +95,6 @@ You can also force one mood with `survey lonk <stalk|block|behind|wander|gift|fl
 - He'll happily block you while standing on thin air over a cliff.
 - He steers around rocks and walls with a knee-high probe, but thin things (trees, fences) can still slip through, and
   anything knee high or lower he just walks over.
-- He used to jump when you jumped. The raycast should have fixed that, but I haven't tested it yet.
 
 ## License
 
