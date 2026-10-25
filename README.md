@@ -33,8 +33,8 @@ Runs on the [MacNativeGames](https://github.com/ly05010419/MacNativeGames) nativ
 | stalk | walks up and stares at you from a step away |
 | block | sprints into your path |
 | gift | drops an apple at your feet, sometimes a bomb barrel, celebrates, and runs |
-| behind | is suddenly standing right behind you |
-| wander | forgets you exist |
+| behind | is suddenly standing right behind you, and startles if you turn around |
+| wander | forgets you exist, wanders off and looks around |
 
 ## Where he's going
 
@@ -90,7 +90,8 @@ You can also force one mood with `survey lonk <stalk|block|behind|wander|gift|fl
   the defaults.
 - His feet may still slide a little: the clips' own speeds are my estimates.
 - With the mod installed, the inventory Link walks, runs or dashes in place in the pause menu when you're somewhere cold
-  or hot, or out of stamina, and celebrates when you equip a shield with no weapon.
+  or hot, or out of stamina, and looks around, startles or celebrates when you equip a two-handed sword, a spear or just
+  a shield.
 - Off a ledge (nothing under him within 60 m) he falls back to your footsteps' height and floats.
 - He'll happily block you while standing on thin air over a cliff.
 - He steers around rocks and walls with a knee-high probe, but thin things (trees, fences) can still slip through, and

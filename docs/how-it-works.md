@@ -50,7 +50,9 @@ like an idle. His skeleton was fine all along.
   skin colour. Ints go through vtable `+0x30`, bools through `+0x40`, the same way.
 - the int `HoldAnimationType` (the weapon he'd be holding in the menu) set to 5, shield only, makes the idle play the
   menu's `PauseMenu_Equip_Shield`, which the mod turns into the cooking celebration `Demo_Get_Cooking_VeryGood`. That's
-  his party after a gift. Every other clip Link has can be reached the same way, one idle branch at a time. The blackboard is `[as+0x40]` (`as` being his animation state, the same chain `0xba8ed0` walks), and its
+  his party after a gift. 2 and 3 (two-handed sword, spear) do the same with their equip clips, turned into
+  `DemoLookAround_Loop` (he arrives somewhere on a wander and looks around) and `Demo_Surprise` (he's creeping up behind
+  you and you turn round). Every other clip Link has can be reached the same way, one idle branch at a time. The blackboard is `[as+0x40]` (`as` being his animation state, the same chain `0xba8ed0` walks), and its
   vtable `+0x38` sets a float by name: `set(bb, &{"Temperature", 0}, value)`, the way the menu's own
   `ExecutePouchPlayerSetASBBParameter` (`0x241cc08`) does it.
 

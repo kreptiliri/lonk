@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Builds Lonk's RomFS mod from your own game files: his walk, run, dash and party.
+"""Builds Lonk's RomFS mod from your own game files: his walk, run, dash and a few emotes.
 
 The inventory Link (PouchPlayer) has one full-body animation command, the pause menu's PauseMenuWait. It's an idle that
 plays Nml_Cold_Wait, Nml_Wait or Nml_Hot_Wait depending on the ASB blackboard float "Temperature", and Nml_Tired_Wait
-when the bool "Stamina" is false, or the shield-equip clip when the int "HoldAnimationType" is 5. This mod points the
-cold, hot and tired idles at Link's own Nml_Move_Walk, Nml_Move_Run and Nml_Move_Dash, and the shield clip at the cooking
-"great meal" celebration (his party), and the patch drives the blackboard.
+when the bool "Stamina" is false, or one of the menu's weapon-equip clips when the int "HoldAnimationType" is 2, 3 or 5. This mod points the
+cold, hot and tired idles at Link's own Nml_Move_Walk, Nml_Move_Run and Nml_Move_Dash, and the two-handed sword, spear and shield
+clips at looking around, a startle and the cooking "great meal" celebration (his party). The patch drives the blackboard.
 Adding new commands or nodes to the ASB crashes the game, so nothing else changes. (Side effect: with the mod installed,
 the inventory Link walks, runs or dashes in place when you open the menu somewhere cold or hot, or out of stamina, and
-celebrates when you equip a shield with no weapon.)
+looks around, startles or celebrates when you equip a two-handed sword, a spear or just a shield.)
 
 Nothing from the game is in this repo. The script reads AS/PouchPlayer.root.asb.zs and the zstd dictionaries from the RomFS
 that MacNativeGames prepared (extracted/v143/romfs: romfs.bin + index.json), edits it with dt-12345's ASB tool, and writes
@@ -27,7 +27,9 @@ import zstandard
 
 ASB = 'AS/PouchPlayer.root.asb.zs'
 MOVES = {'Nml_Cold_Wait': 'Nml_Move_Walk', 'Nml_Hot_Wait': 'Nml_Move_Run', 'Nml_Tired_Wait': 'Nml_Move_Dash',
-         'PauseMenu_Equip_Shield': 'Demo_Get_Cooking_VeryGood'}
+         'PauseMenu_Equip_Shield': 'Demo_Get_Cooking_VeryGood', 'PauseMenu_Equip_Lsword': 'DemoLookAround_Loop',
+         'PauseMenu_Equip_Spear': 'Demo_Surprise'}
+EXPECTED = 8   # the two-handed sword and spear clips are each used twice
 
 
 def romfs_reader(folder):
@@ -78,8 +80,8 @@ def main():
         if node['Node Type'] == 'SkeletalAnimation' and node['Body'].get('Animation') in MOVES:
             node['Body']['Animation'] = MOVES[node['Body']['Animation']]
             changed += 1
-    if changed != len(MOVES):
-        sys.exit(f'expected {len(MOVES)} idle clips to repoint, found {changed}: not the 1.4.3 ASB?')
+    if changed != EXPECTED:
+        sys.exit(f'expected {EXPECTED} clips to repoint, found {changed}: not the 1.4.3 ASB?')
     AsbFile.from_dict(doc).to_binary(str(work) + '/')
     edited = (work / 'PouchPlayer.root.asb').read_bytes()
 
