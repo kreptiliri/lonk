@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..6498fcc 100644
+index c05d6c3..ab9ab45 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -188,7 +188,7 @@ index c05d6c3..6498fcc 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,22 +403,824 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,22 +403,838 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -980,6 +980,20 @@ index c05d6c3..6498fcc 100644
 +        pthread_mutex_unlock(&survey_lock);
 +        return 1;
 +    }
++    /* "survey lonk start": the whole Lonk in one line, his body (PouchPlayer, 4 m in front) and the brain for an hour */
++    if (!kind && (used = 0, sscanf(line, "survey lonk start %n", &used)) == 0 && used && !line[used]) {
++        pthread_mutex_lock(&survey_lock);
++        int busy = !survey_enabled || request.kind || hold_left || spawn_left;
++        if (!busy) {
++            request.kind = 3; strcpy(request.tag, "lonk"); strcpy(request.name, "PouchPlayer");
++            request.off[0] = 4; request.off[1] = 0; request.off[2] = 0;
++            stalk_left = 216000; stalk_speed = 2.5f; stalk_stop = 1.5f; lonk_brain = 1; lonk_phase_left = 0;
++            atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
++        }
++        pthread_mutex_unlock(&survey_lock);
++        fprintf(stderr, "[survey] lonk: %s\n", busy ? "start rejected (busy or survey off)" : "starting: body + brain");
++        return 1;
++    }
 +    if (!kind && (used = 0, sscanf(line, "survey lonk stop %n", &used)) == 0 && used && !line[used]) {
 +        pthread_mutex_lock(&survey_lock); stalk_left = 0; lonk_brain = 0; pthread_mutex_unlock(&survey_lock);
 +        fprintf(stderr, "[survey] lonk: stopped\n");
@@ -1016,7 +1030,7 @@ index c05d6c3..6498fcc 100644
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,6 +1230,10 @@ void runtime_survey_cancel_user(void) {
+@@ -307,6 +1244,10 @@ void runtime_survey_cancel_user(void) {
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
@@ -1027,7 +1041,7 @@ index c05d6c3..6498fcc 100644
      fprintf(stderr, "[survey] cancelled: user input\n");
      pthread_mutex_unlock(&survey_lock);
  }
-@@ -315,7 +1242,50 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -315,7 +1256,50 @@ void runtime_survey_tick(uint64_t frame) {
      in_tick = 1;
      pthread_mutex_lock(&survey_lock);
      uintptr_t actor = player_actor();
@@ -1078,7 +1092,7 @@ index c05d6c3..6498fcc 100644
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
      } else if (request.kind == 1) {
-@@ -340,7 +1310,15 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -340,7 +1324,15 @@ void runtime_survey_tick(uint64_t frame) {
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }

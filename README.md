@@ -72,12 +72,14 @@ He only runs in the port's test mode, on a copy of your save.
    `pip install zstandard mmh3`).
 4. Start a test session with `TOTK_SURVEY=1`, `TOTK_SLOT_OWNER=<anything but user>`,
    `TOTK_PROFILE_DIR=<a copy of your save folder>`, `TOTK_INPUT_FILE=<commands.txt>` and `TOTK_ROMFS_MODS=<mod folder>`.
-5. Load your save and add these lines to the commands file:
+5. Load your save and add this line to the commands file:
 
 ```
-survey spawn lonk PouchPlayer 4 0 0
-survey lonk brain 36000
+survey lonk start
 ```
+
+That spawns his body 4 m in front of you and runs his brain for an hour (`survey spawn lonk PouchPlayer 4 0 0` plus
+`survey lonk brain 216000`, if you want them separately).
 
 He starts his idle animation and gets dressed on his own. `survey equip <slot> <ArmorName>` puts one piece on him
 (9 head, 10 upper, 11 lower, `-` for the default, an optional dye number after it), and `survey dress` redoes the whole outfit. The old mannequin body
