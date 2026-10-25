@@ -79,8 +79,16 @@ The patch dresses him the same way the menu does, 60 frames after he spawns:
 - A pouch user's pieces are made for the menu's model scene, so each one is bound to the world scene like the body.
   They follow his skeleton by themselves.
 
-Real armor (`Armor_001_Upper`, the Hylian tunic) makes the whole figure disappear, hair included, and putting the
-default back brings him back. Not solved yet.
+Real armor doesn't work yet. What's known:
+
+- Every real piece tried (a hood, two tops, trousers) is invisible, and the body under it gets hidden as it should, so
+  he becomes a floating face. The default pieces, the hair and the arm all draw.
+- The game binds all of his pieces back to the menu's scene every frame, the visible ones too, so the scene isn't it.
+- The same tunic spawned on its own draws fine, in its T-pose. Its draw instance's flags (`instance+0x14`, also at
+  `model+0x2b4`) end in `0x09`; equipped, they end in `0xf8`. Bit 0 looks like "draw in the world view": setting it
+  makes the equipped tunic appear, crumpled at his feet, so its bones aren't being posed at all.
+- Real armor has its own AS, Animation and ColorVariation components, which the defaults don't. My guess is that its
+  skeleton follows its own animation system, which only gets driven in the menu.
 
 `survey drop` takes pieces off him. There's no delete call yet, so each one gets view mask 0 (`0x50138c`) and is
 moved 50 m underground.
