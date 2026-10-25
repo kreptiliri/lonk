@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Builds Lonk's RomFS mod from your own game files: his walk, run, dash and a few emotes.
 
-The inventory Link (PouchPlayer) has one full-body animation command, the pause menu's PauseMenuWait. It's an idle that
-plays Nml_Cold_Wait, Nml_Wait or Nml_Hot_Wait depending on the ASB blackboard float "Temperature", and Nml_Tired_Wait
-when the bool "Stamina" is false, or one of the menu's weapon-equip clips when the int "HoldAnimationType" is 2, 3 or 5. This mod points the
-cold, hot and tired idles at Link's own Nml_Move_Walk, Nml_Move_Run and Nml_Move_Dash, and the two-handed sword, spear and shield
-clips at looking around, a startle and the cooking "great meal" celebration (his party). The patch drives the blackboard.
+The inventory Link (PouchPlayer) has one full-body animation command, the pause menu's PauseMenuWait. Its tree starts
+with a selector on the ASB blackboard int "HoldAnimationType" (the weapon he holds in the menu): 1 to 5 go to the weapon
+poses, anything else to the plain idle. The game never writes that int itself, unlike "Temperature" and "Stamina", which
+the menu's AI sets every frame from where you are (so using those, he fought the game for his walk, and his clip kept
+restarting). This mod points the selector's cases 1 to 5 straight at five of the menu's weapon-equip clips, renamed to
+Link's walk, run, dash, the cooking "great meal" celebration (his party) and a startle. The patch sets the int.
 Adding new commands or nodes to the ASB crashes the game, so nothing else changes. (Side effect: with the mod installed,
-the inventory Link walks, runs or dashes in place when you open the menu somewhere cold or hot, or out of stamina, and
-looks around, startles or celebrates when you equip a two-handed sword, a spear or just a shield.)
+the inventory Link walks, runs, dashes, celebrates or startles when you hold a weapon in the menu.)
 
 Nothing from the game is in this repo. The script reads AS/PouchPlayer.root.asb.zs and the zstd dictionaries from the RomFS
 that MacNativeGames prepared (extracted/v143/romfs: romfs.bin + index.json), edits it with dt-12345's ASB tool, and writes
@@ -26,10 +26,12 @@ from pathlib import Path
 import zstandard
 
 ASB = 'AS/PouchPlayer.root.asb.zs'
-MOVES = {'Nml_Cold_Wait': 'Nml_Move_Walk', 'Nml_Hot_Wait': 'Nml_Move_Run', 'Nml_Tired_Wait': 'Nml_Move_Dash',
-         'PauseMenu_Equip_Shield': 'Demo_Get_Cooking_VeryGood', 'PauseMenu_Equip_Lsword': 'DemoLookAround_Loop',
-         'PauseMenu_Equip_Spear': 'Demo_Surprise'}
-EXPECTED = 8   # the two-handed sword and spear clips are each used twice
+ROOT = 205   # PauseMenuWait's first node: the HoldAnimationType selector
+# HoldAnimationType -> (the weapon-equip clip whose node gets reused, what it plays now). Only reachable from the root's
+# cases 1 to 5, never from the plain idle. The looping moves get the nodes without a frame controller.
+CASES = {1: ('PauseMenu_Equip_Sword', 'Nml_Move_Walk'), 2: ('PauseMenu_Equip_SwordNoShield', 'Nml_Move_Run'),
+         3: ('PauseMenu_Equip_Shield', 'Nml_Move_Dash'), 4: ('PauseMenu_Equip_Lsword', 'Demo_Get_Cooking_VeryGood'),
+         5: ('PauseMenu_Equip_Spear', 'Demo_Surprise')}
 
 
 def romfs_reader(folder):
@@ -75,13 +77,18 @@ def main():
     work.mkdir(parents=True, exist_ok=True)
     tree.to_json(str(work) + '/')
     doc = json.loads((work / 'PouchPlayer.root.json').read_text('utf-8'))
-    changed = 0
-    for node in doc['Nodes']:
-        if node['Node Type'] == 'SkeletalAnimation' and node['Body'].get('Animation') in MOVES:
-            node['Body']['Animation'] = MOVES[node['Body']['Animation']]
-            changed += 1
-    if changed != EXPECTED:
-        sys.exit(f'expected {EXPECTED} clips to repoint, found {changed}: not the 1.4.3 ASB?')
+    nodes = {node['Node Index']: node for node in doc['Nodes']}
+    root = nodes.get(ROOT, {})
+    entries = {c.get('Condition'): c for c in root.get('Body', {}).get('Child Nodes', [])}
+    if root.get('Node Type') != 'IntSelector' or sorted(k for k in entries if k is not None) != [1, 2, 3, 4, 5]:
+        sys.exit('PauseMenuWait\'s first node is not the expected HoldAnimationType selector: not the 1.4.3 ASB?')
+    for case, (clip, now) in CASES.items():
+        leaf = min((n for n in doc['Nodes'] if n['Node Type'] == 'SkeletalAnimation' and n['Body'].get('Animation') == clip),
+                   key=lambda n: n['Node Index'], default=None)
+        if leaf is None:
+            sys.exit(f'no {clip} clip: not the 1.4.3 ASB?')
+        leaf['Body']['Animation'] = now
+        entries[case]['Node Index'] = leaf['Node Index']
     AsbFile.from_dict(doc).to_binary(str(work) + '/')
     edited = (work / 'PouchPlayer.root.asb').read_bytes()
 

@@ -26,8 +26,8 @@ Runs on the [MacNativeGames](https://github.com/ly05010419/MacNativeGames) nativ
   so sky islands, rocks, bridges and caves count too) and around anything in his way, ledges included: he steps up at most
   a stair's height, falls if the floor drops out under him, and pops back next to you if he gets stranded. He uses Link's own walk, run and dash,
   picked from his speed and played at a matching speed, and turns smoothly to face where he's going, then back to you
-  when he stops. He also looks around, startles and celebrates. The animations need a small RomFS mod (see
-  "Trying it"); without it he sweats, shivers or pants his way around instead.
+  when he stops. He also startles and celebrates. The animations need a small RomFS mod (see
+  "Trying it"); without it he strikes the menu's weapon poses, empty-handed, instead.
 - **He doesn't stay gone.** If his body disappears while his brain runs (you die and reload, a loading zone), he's
   back a couple of seconds after you are.
 - **He has a (very small) brain.** Every few seconds he decides what to do:
@@ -39,7 +39,7 @@ Runs on the [MacNativeGames](https://github.com/ly05010419/MacNativeGames) nativ
 | block | sprints into your path |
 | gift | drops an apple at your feet (sometimes a fish, a monster part or a bomb barrel), celebrates, and runs |
 | behind | is suddenly standing right behind you, and startles if you turn around |
-| wander | forgets you exist, wanders off and looks around |
+| wander | forgets you exist and wanders off (somewhere else if he gets stuck) |
 
 ## Where he's going
 
@@ -94,13 +94,14 @@ somewhere with `survey lonk goto <metres right> <metres forward> [m/s]` (from yo
 
 ## Known issues
 
-- While he walks he keeps jumping back to where he was a second ago and walking it again. Not solved yet.
+- He still hitches a little as he walks (the walk carries him forward by itself, and the amount it's undone by is tuned by
+  eye, so far roughly).
+- He doesn't look around anymore when he arrives somewhere on a wander: the menu's pose switch has only five slots.
 - He only has his underwear. Real armor (`survey equip 10 Armor_001_Upper`) doesn't draw, and hides the body under it,
   so he turns into a floating head until he's back in the defaults.
 - His feet may still slide a little: the clips' own speeds are my estimates.
-- With the mod installed, the inventory Link walks, runs or dashes in place in the pause menu when you're somewhere cold
-  or hot, or out of stamina, and looks around, startles or celebrates when you equip a two-handed sword, a spear or just
-  a shield.
+- With the mod installed, the inventory Link walks, runs, dashes, celebrates or startles in the pause menu when you hold
+  a weapon (holding a sword, he walks three steps and snaps back, forever; with a bow he cooks).
 - He doesn't jump, climb or follow you down ledges. He walks around them instead, and if he gets stranded (5 m above or
   below you, 30 m away, stuck, or no floor) for 3 seconds, he pops back next to you.
 - He steers around rocks and walls with a knee-high probe, but thin things (trees, fences) can still slip through, and

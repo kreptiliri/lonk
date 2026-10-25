@@ -37,27 +37,34 @@ menu's `PauseMenuWait`. For a long time Lonk only ever got `FaceDefault` (which 
 `Nml_Wait` (not a command at all: the request is accepted and does nothing), so he stood in his rest pose, which looks
 like an idle. His skeleton was fine all along.
 
-`PauseMenuWait` picks its clip from the ASB blackboard every update: the float `Temperature` chooses `Nml_Cold_Wait`
-(< 0), `Nml_Wait` (0) or `Nml_Hot_Wait` (> 0), and the bool `Stamina` set to false turns the middle one into
-`Nml_Tired_Wait`. So:
+`PauseMenuWait` starts with a selector on the ASB blackboard int `HoldAnimationType` (the weapon he holds in the menu):
+1 to 5 go to the weapon poses, anything else to the plain idle, which picks cold, normal, hot or tired from the
+blackboard's `Temperature` and `Stamina`. The menu's AI node `ExecutePouchPlayerSetASBBParameter` (`0x241cc08`) writes
+those two (and `Burning`, `ShieldEquip`, `Arrow`, `Carrying`, `Size`...) every frame from your state: `Temperature` is -1
+when you're cold, 1 when hot, from flags at `[main+0x3a5ea40]+0x658`. It never writes `HoldAnimationType` for him. So:
 
-- the RomFS mod (`mod/make_mod.py`, built with [dt-12345/asb](https://github.com/dt-12345/asb)) points the cold and hot
-  idles at `Nml_Move_Walk` and `Nml_Move_Run`, and the tired one at `Nml_Move_Dash`. PouchPlayer already loads all of
-  Link's animations.
-- the patch plays `PauseMenuWait` once and then sets the blackboard from his speed every frame: idle below 0.4 m/s,
-  walk up to 3.2, run up to 5.5, dash above (the bands overlap by 0.3 m/s, and a new gait has to hold for 12 frames,
-  because every switch restarts the clip). Every frame, because the game sets `Temperature` itself from where you are:
-  set only when his gait changed, it got overwritten at once, so he only walked where it's cold (with the cold breath
-  and red cheeks of the cold idle, which come with the node, not the clip). The clip plays at his speed divided by the clip's own (estimated) speed, written to the
-  rate of the body's slot (`slot+0xd0`). The game routes each command to its own slot: 0 is the face, 1 the body, 2 the
-  skin colour. Ints go through vtable `+0x30`, bools through `+0x40`, the same way.
-- the int `HoldAnimationType` (the weapon he'd be holding in the menu) set to 5, shield only, makes the idle play the
-  menu's `PauseMenu_Equip_Shield`, which the mod turns into the cooking celebration `Demo_Get_Cooking_VeryGood`. That's
-  his party after a gift. 2 and 3 (two-handed sword, spear) do the same with their equip clips, turned into
-  `DemoLookAround_Loop` (he arrives somewhere on a wander and looks around) and `Demo_Surprise` (he's creeping up behind
-  you and you turn round). Every other clip Link has can be reached the same way, one idle branch at a time. The blackboard is `[as+0x40]` (`as` being his animation state, the same chain `0xba8ed0` walks), and its
-  vtable `+0x38` sets a float by name: `set(bb, &{"Temperature", 0}, value)`, the way the menu's own
-  `ExecutePouchPlayerSetASBBParameter` (`0x241cc08`) does it.
+- the RomFS mod (`mod/make_mod.py`, built with [dt-12345/asb](https://github.com/dt-12345/asb)) points the selector's
+  cases 1 to 5 straight at five of the menu's weapon-equip clips (only reachable from those cases), renamed to
+  `Nml_Move_Walk`, `Nml_Move_Run`, `Nml_Move_Dash`, `Demo_Get_Cooking_VeryGood` (his party after a gift) and
+  `Demo_Surprise` (you turn round on him). PouchPlayer already loads all of Link's animations.
+- the patch plays `PauseMenuWait` once and then sets `HoldAnimationType` every frame, through the blackboard's vtable
+  `+0x30` (int by name; float `+0x38`, bool `+0x40`): `set(bb, &{"HoldAnimationType", 0}, value)`, the blackboard
+  being `[as+0x40]` (`as` = his animation state, the chain `0xba8ed0` walks). Idle below 0.4 m/s, walk up to 3.2, run
+  up to 5.5, dash above; the bands overlap by 0.3 m/s and a new gait has to hold for 12 frames, because every switch
+  restarts the clip. Standing, he's the plain idle, so he shivers in the snow and sweats in the heat by himself.
+- the clip plays at his speed divided by the clip's own (estimated) speed, written to the rate of the body's slot
+  (`slot+0xd0`). The game routes each command to its own slot: 0 is the face, 1 the body, 2 the skin colour.
+
+The first version drove `Temperature` instead (cold idle = walk). Fighting the menu's node over it every frame flipped
+him between the idle and the walk, and each flip restarted the walk: a few steps, snap back, again. He also blushed
+and puffed cold breath in warm caves, since that comes with the cold idle node.
+
+The moves carry him forward inside the clip (root motion): over one loop his body walks ahead of where he's put, then
+snaps back when the clip loops. The real Player's movement absorbs that; nothing does for him. The body slot has the
+loop position, 0 to 1, at `slot+0x1e0` (`+0xf8` counts frames, `+0x1ec` total time), so he's placed behind his spot by
+(metres the clip travels per loop) x (loop position), and the two cancel out. The metres are tuned by eye:
+`survey lonk root <walk> <run> <dash>`. (With the mod installed you can watch the raw clip: hold a sword in the menu
+and the inventory Link walks three steps and snaps back, forever.)
 
 Adding new commands or nodes to the ASB crashes his spawn (a null arena at `0xb6def4` while his animation state is
 built), even a clone of an existing node, and so does pointing a face command at a body node (it starts, nothing moves).
