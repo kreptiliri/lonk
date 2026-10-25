@@ -44,8 +44,11 @@ like an idle. His skeleton was fine all along.
 - the RomFS mod (`mod/make_mod.py`, built with [dt-12345/asb](https://github.com/dt-12345/asb)) points the cold and hot
   idles at `Nml_Move_Walk` and `Nml_Move_Run`, and the tired one at `Nml_Move_Dash`. PouchPlayer already loads all of
   Link's animations.
-- the patch plays `PauseMenuWait` once and then sets the blackboard from his speed: idle below 0.4 m/s, walk up to
-  3.2, run up to 5.5, dash above. The clip plays at his speed divided by the clip's own (estimated) speed, written to the
+- the patch plays `PauseMenuWait` once and then sets the blackboard from his speed every frame: idle below 0.4 m/s,
+  walk up to 3.2, run up to 5.5, dash above (the bands overlap by 0.3 m/s, and a new gait has to hold for 12 frames,
+  because every switch restarts the clip). Every frame, because the game sets `Temperature` itself from where you are:
+  set only when his gait changed, it got overwritten at once, so he only walked where it's cold (with the cold breath
+  and red cheeks of the cold idle, which come with the node, not the clip). The clip plays at his speed divided by the clip's own (estimated) speed, written to the
   rate of the body's slot (`slot+0xd0`). The game routes each command to its own slot: 0 is the face, 1 the body, 2 the
   skin colour. Ints go through vtable `+0x30`, bools through `+0x40`, the same way.
 - the int `HoldAnimationType` (the weapon he'd be holding in the menu) set to 5, shield only, makes the idle play the

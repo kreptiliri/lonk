@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..c0926ff 100644
+index c05d6c3..6e18813 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -188,7 +188,7 @@ index c05d6c3..c0926ff 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,22 +403,915 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,22 +403,930 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -510,12 +510,12 @@ index c05d6c3..c0926ff 100644
 +            if (gait != lonk_gait) fprintf(stderr, "[survey] gait: no blackboard setter (as=%#llx)\n", (unsigned long long)as);
 +            continue;
 +        }
-+        if (gait != lonk_gait) {
-+            ((void (*)(uintptr_t, const void *, int))set_int)(bb, &h_key, hold[gait]);
-+            ((void (*)(uintptr_t, const void *, float))set_float)(bb, &t_key, temperature[gait]);
-+            ((void (*)(uintptr_t, const void *, bool))set_bool)(bb, &s_key, gait != GAIT_DASH);
-+            fprintf(stderr, "[survey] gait: %s\n", gait_names[gait]);
-+        }
++        /* every frame: the game sets Temperature from where you are (the menu Link shivers in the cold), so set once, his
++           legs only walked where it's cold */
++        ((void (*)(uintptr_t, const void *, int))set_int)(bb, &h_key, hold[gait]);
++        ((void (*)(uintptr_t, const void *, float))set_float)(bb, &t_key, temperature[gait]);
++        ((void (*)(uintptr_t, const void *, bool))set_bool)(bb, &s_key, gait != GAIT_DASH);
++        if (gait != lonk_gait) fprintf(stderr, "[survey] gait: %s\n", gait_names[gait]);
 +        /* the game puts each command in its own slot (0 face, 1 body, 2 skin colour here): find the one playing PauseMenuWait */
 +        uint32_t slots = 0;
 +        read_mem(as + 0x18, &slots, 4);
@@ -744,6 +744,21 @@ index c05d6c3..c0926ff 100644
 +#endif
 +/* One frame of Lonk: the behaviour moves the anchor (yaw only; local Z = facing, as spawn_request reads it), then every live
 +   body piece is put there. A piece whose name no longer reads back is dropped. */
++#if defined(TOTK_GAME_V143)
++/* idle, walk, run or dash from his speed. The bands overlap by 0.3 m/s each side and a new gait has to hold for 12 frames:
++   following you he stops and goes, and every switch restarts the clip, so he did a few steps, snapped back, and went on. */
++static int lonk_move_gait(float v) {
++    static const float edge[3] = {0.4f, 3.2f, 5.5f};   /* idle | walk | run | dash */
++    static int g = GAIT_IDLE;
++    static unsigned held;
++    int want = g;
++    while (want < GAIT_DASH && v > edge[want] + 0.3f) want++;
++    while (want > GAIT_IDLE && v < edge[want - 1] - 0.3f) want--;
++    held = want == g ? 0 : held + 1;
++    if (held >= 12) { g = want; held = 0; }
++    return g;
++}
++#endif
 +static void lonk_step(uint64_t frame, uintptr_t player) {
 +    float p[3], rot[9];
 +    if (!read_mem(player + ACTOR_POS, p, sizeof p) || !read_mem(player + ACTOR_ROT, rot, sizeof rot)) return;
@@ -881,7 +896,7 @@ index c05d6c3..c0926ff 100644
 +    lonk_speed += ((moved > 2 ? 0 : moved * 60) - lonk_speed) * 0.2f;
 +    if (lonk_speed > 0.8f && moved > 0.001f) { face_player = 0; dx = mx; dz = mz; }
 +#if defined(TOTK_GAME_V143)
-+    pouch_gait(lonk_emote_left ? (lonk_emote == 2 ? GAIT_LOOK : GAIT_SURPRISE) : lonk_kind == LONK_PARTY ? GAIT_PARTY : lonk_speed < 0.4f ? GAIT_IDLE : lonk_speed < 3.2f ? GAIT_WALK : lonk_speed < 5.5f ? GAIT_RUN : GAIT_DASH, lonk_speed);
++    pouch_gait(lonk_emote_left ? (lonk_emote == 2 ? GAIT_LOOK : GAIT_SURPRISE) : lonk_kind == LONK_PARTY ? GAIT_PARTY : lonk_move_gait(lonk_speed), lonk_speed);
 +#endif
 +    if (buddy_face && lonk_speed < 0.8f) { dx = fx; dz = fz; }   /* standing beside you: same way you face */
 +    float hx = face_player ? p[0] - a[0] : dx, hz = face_player ? p[2] - a[2] : dz, hl = hypotf(hx, hz);
@@ -1107,7 +1122,7 @@ index c05d6c3..c0926ff 100644
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,6 +1321,10 @@ void runtime_survey_cancel_user(void) {
+@@ -307,6 +1336,10 @@ void runtime_survey_cancel_user(void) {
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
@@ -1118,7 +1133,7 @@ index c05d6c3..c0926ff 100644
      fprintf(stderr, "[survey] cancelled: user input\n");
      pthread_mutex_unlock(&survey_lock);
  }
-@@ -315,7 +1333,51 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -315,7 +1348,51 @@ void runtime_survey_tick(uint64_t frame) {
      in_tick = 1;
      pthread_mutex_lock(&survey_lock);
      uintptr_t actor = player_actor();
@@ -1170,7 +1185,7 @@ index c05d6c3..c0926ff 100644
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
      } else if (request.kind == 1) {
-@@ -340,7 +1402,15 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -340,7 +1417,15 @@ void runtime_survey_tick(uint64_t frame) {
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }

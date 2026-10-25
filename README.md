@@ -26,8 +26,7 @@ Runs on the [MacNativeGames](https://github.com/ly05010419/MacNativeGames) nativ
   so sky islands, rocks, bridges and caves count too) and around anything in his way, ledges included: he steps up at most
   a stair's height, falls if the floor drops out under him, and pops back next to you if he gets stranded. He uses Link's own walk, run and dash,
   picked from his speed and played at a matching speed, and turns smoothly to face where he's going, then back to you
-  when he stops. He also looks around, startles and celebrates. (Well, his brain picks them: his arms and legs don't
-  move yet, see Known issues.) The animations need a small RomFS mod (see
+  when he stops. He also looks around, startles and celebrates. The animations need a small RomFS mod (see
   "Trying it"); without it he sweats, shivers or pants his way around instead.
 - **He doesn't stay gone.** If his body disappears while his brain runs (you die and reload, a loading zone), he's
   back a couple of seconds after you are.
@@ -95,7 +94,7 @@ somewhere with `survey lonk goto <metres right> <metres forward> [m/s]` (from yo
 
 ## Known issues
 
-- His arms and legs don't move: he glides around stiff. The animation is set, but his body pieces don't follow it yet.
+- While he walks he keeps jumping back to where he was a second ago and walking it again. Not solved yet.
 - He only has his underwear. Real armor (`survey equip 10 Armor_001_Upper`) doesn't draw, and hides the body under it,
   so he turns into a floating head until he's back in the defaults.
 - His feet may still slide a little: the clips' own speeds are my estimates.
