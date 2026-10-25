@@ -27,8 +27,29 @@ the world, and stacked on one spot they look like a Link with nobody inside. Tha
 `PouchPlayer`, the inventory Link, uses the same model and animations as the real one. It spawns into the world scene
 with its draw masks already on, and looked invisible only because it moves itself to (0, 0, 0) every frame. Setting
 its transform every frame like any other piece makes it show up. Nothing ever starts its animation outside the menu,
-so the patch starts `Nml_Wait` itself, the way the game's own C++ callers do: a 0x30-byte request
+so the patch starts it itself, the way the game's own C++ callers do: a 0x30-byte request
 `{actor, name, slot 0, rate 1, -1, -1, 1}` passed to `0x4dc628`.
+
+## Walking and running
+
+PouchPlayer's ASB (`AS/PouchPlayer.root.asb`) has twelve commands and only one of them moves the whole body: the pause
+menu's `PauseMenuWait`. For a long time Lonk only ever got `FaceDefault` (which the game starts itself, face only) and
+`Nml_Wait` (not a command at all: the request is accepted and does nothing), so he stood in his rest pose, which looks
+like an idle. His skeleton was fine all along.
+
+`PauseMenuWait` picks its clip from the ASB blackboard every update: the float `Temperature` chooses `Nml_Cold_Wait`
+(< 0), `Nml_Wait` (0) or `Nml_Hot_Wait` (> 0). So:
+
+- the RomFS mod (`mod/make_mod.py`, built with [dt-12345/asb](https://github.com/dt-12345/asb)) points the cold and hot
+  idles at `Nml_Move_Walk` and `Nml_Move_Run`. PouchPlayer already loads all of Link's animations.
+- the patch plays `PauseMenuWait` once and then sets `Temperature` from his speed: 0 below 0.4 m/s, -1 up to 3.2 m/s,
+  +1 above. The blackboard is `[as+0x40]` (`as` being his animation state, the same chain `0xba8ed0` walks), and its
+  vtable `+0x38` sets a float by name: `set(bb, &{"Temperature", 0}, value)`, the way the menu's own
+  `ExecutePouchPlayerSetASBBParameter` (`0x241cc08`) does it.
+
+Adding new commands or nodes to the ASB crashes his spawn (a null arena at `0xb6def4` while his animation state is
+built), even a clone of an existing node, and so does pointing a face command at a body node (it starts, nothing moves).
+A plain decode and re-encode of the file loads fine, and so does renaming clips, which is all the mod does.
 
 ## Dressing him
 

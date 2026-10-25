@@ -21,7 +21,9 @@ Runs on the [MacNativeGames](https://github.com/ly05010419/MacNativeGames) nativ
 - **He used to be mannequins.** Before that he was three armor-shop mannequins stacked on one spot, which crashed the
   game when you walked up to them (they went looking for the item they were selling). That fix is still in, and
   `survey drop` gets rid of the mannequins.
-- **He moves.** Every frame he walks over the real terrain toward wherever his brain says, and turns to face you.
+- **He walks and runs.** Every frame he moves over the real terrain toward wherever his brain says, with Link's own
+  walk and run animations picked from his speed, facing where he's going, and he turns to face you when he stops. The
+  animations need a small RomFS mod (see "Trying it"); without it he sweats or shivers his way around instead.
 - **He has a (very small) brain.** Every few seconds he decides what to do:
 
 | Mood | What he does |
@@ -35,7 +37,6 @@ Runs on the [MacNativeGames](https://github.com/ly05010419/MacNativeGames) nativ
 ## Where he's going
 
 - Real clothes: picking an actual outfit makes him vanish for now
-- Walking and running animations, not sliding around in his idle pose
 - Doing things, not just standing near you: fighting, climbing, using items, breaking stuff
 - Never dying, whatever you do to him
 - A smarter brain
@@ -51,6 +52,7 @@ data. You need your own legally dumped copy of the game, like the port itself do
   crash fix, movement and the brain.
 - `patches/BASE_COMMIT`: the MacNativeGames commit the patch applies to.
 - `apply.sh`: applies the patch to a MacNativeGames checkout.
+- `mod/make_mod.py`: builds his animation mod from your own game files (nothing from the game is in this repo).
 - `docs/how-it-works.md`: the reverse-engineering notes. How I found the spawn function in 1.4.3, why the mannequins
   crashed, how he moves.
 
@@ -60,9 +62,12 @@ He only runs in the port's test mode, on a copy of your save.
 
 1. Build MacNativeGames' TotK app at the commit in `patches/BASE_COMMIT`.
 2. `./apply.sh /path/to/MacNativeGames`, then rebuild.
-3. Start a test session with `TOTK_SURVEY=1`, `TOTK_SLOT_OWNER=<anything but user>`,
-   `TOTK_PROFILE_DIR=<a copy of your save folder>` and `TOTK_INPUT_FILE=<commands.txt>`.
-4. Load your save and add these lines to the commands file:
+3. Build the animation mod: `python3 mod/make_mod.py /path/to/MacNativeGames <MacNativeGames build>/extracted/v143/romfs
+   /path/to/dt-12345/asb <mod folder>` (needs [dt-12345/asb](https://github.com/dt-12345/asb) and
+   `pip install zstandard mmh3`).
+4. Start a test session with `TOTK_SURVEY=1`, `TOTK_SLOT_OWNER=<anything but user>`,
+   `TOTK_PROFILE_DIR=<a copy of your save folder>`, `TOTK_INPUT_FILE=<commands.txt>` and `TOTK_ROMFS_MODS=<mod folder>`.
+5. Load your save and add these lines to the commands file:
 
 ```
 survey spawn lonk PouchPlayer 4 0 0
@@ -70,8 +75,9 @@ survey lonk brain 36000
 ```
 
 He starts his idle animation and gets dressed on his own. `survey equip <slot> <ArmorName>` puts one piece on him
-(9 head, 10 upper, 11 lower, `-` for the default), `survey dress` redoes the whole outfit. The old mannequin body still works (`survey spawn m1 Mannequin_001_Upper`
-and friends), and `survey drop <name start|all>` removes pieces from him again.
+(9 head, 10 upper, 11 lower, `-` for the default), and `survey dress` redoes the whole outfit. The old mannequin body
+still works (`survey spawn m1 Mannequin_001_Upper` and friends), and `survey drop <name start|all>` removes pieces from
+him again.
 
 You can also force one mood with `survey lonk <stalk|block|behind|wander|gift|flee> <frames>`, and stop him with
 `survey lonk stop`.
@@ -80,7 +86,8 @@ You can also force one mood with `survey lonk <stalk|block|behind|wander|gift|fl
 
 - He only has his underwear. Real armor (`survey equip 10 Armor_001_Upper`) makes him disappear until he's back in
   the defaults.
-- He slides everywhere in his idle pose.
+- His feet slide a bit: the walk and run play at one speed whatever his actual speed is.
+- With the mod installed, the inventory Link walks or runs in place in the pause menu when you're somewhere cold or hot.
 - The terrain height ignores bridges, buildings and sky islands, so there he falls back to your footsteps. On a sky
   island, wandering away from you, that can leave him buried up to the neck.
 - He'll happily block you while standing on thin air over a cliff.
