@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..af16d27 100644
+index c05d6c3..0d9081a 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -197,7 +197,7 @@ index c05d6c3..af16d27 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,22 +412,1024 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,22 +412,1041 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -789,6 +789,13 @@ index c05d6c3..af16d27 100644
 +    static float last_p[3], player_speed;
 +    float moved_p = hypotf(p[0] - last_p[0], p[2] - last_p[2]);
 +    player_speed += ((moved_p > 2 ? 0 : moved_p * 60) - player_speed) * 0.2f;
++    /* for copying your run or sprint beside you: your speed over about half a second, and a wide gap between the two,
++       or every dip in your sprint flipped his clip (and each flip restarts it) */
++    static float player_pace;
++    static int player_sprinting;
++    player_pace += (player_speed - player_pace) * 0.04f;
++    if (player_pace > 7.6f) player_sprinting = 1;
++    else if (player_pace < 6.6f) player_sprinting = 0;
 +    memcpy(last_p, p, sizeof last_p);
 +    /* footsteps: a new one every 25 cm the player moves */
 +    unsigned last = (trail_head + TRAIL_MAX - 1) % TRAIL_MAX;
@@ -942,7 +949,9 @@ index c05d6c3..af16d27 100644
 +    lonk_speed += ((moved > 2 ? 0 : moved * 60) - lonk_speed) * 0.2f;
 +    if (lonk_speed > 0.8f && moved > 0.001f) { face_player = 0; dx = mx; dz = mz; }
 +#if defined(TOTK_GAME_V143)
-+    pouch_gait(lonk_emote_left ? (lonk_emote == 2 ? GAIT_LOOK : GAIT_SURPRISE) : lonk_kind == LONK_PARTY ? GAIT_PARTY : lonk_move_gait(lonk_speed), lonk_speed);
++    pouch_gait(lonk_emote_left ? (lonk_emote == 2 ? GAIT_LOOK : GAIT_SURPRISE) : lonk_kind == LONK_PARTY ? GAIT_PARTY :
++               lonk_move_gait(lonk_kind == LONK_BUDDY && lonk_speed > 0.8f && player_pace > 1 ? (player_sprinting ? LONK_SPRINT : LONK_RUN) : lonk_speed),
++               lonk_speed);   /* beside you: your run or sprint, not his catching up */
 +#endif
 +    if (buddy_face && lonk_speed < 0.8f) { dx = fx; dz = fz; }   /* standing beside you: same way you face */
 +    float hx = face_player ? p[0] - a[0] : dx, hz = face_player ? p[2] - a[2] : dz, hl = hypotf(hx, hz);
@@ -1039,6 +1048,14 @@ index c05d6c3..af16d27 100644
 +            read_mem(lonk_body + 0x1e0, &loop, sizeof loop);
 +            if (isfinite(loop) && loop >= 0 && loop <= 1) back = lonk_root[lonk_gait] * loop;
 +        }
++        /* a new gait fades in over a few frames, and the old clip's body is still ahead by its own drift meanwhile: keep
++           holding that back, fading out with it, or he pops forward on every switch */
++        static int held_gait = -1;
++        static float carry, last_back;
++        static unsigned carry_left;
++        if (lonk_gait != held_gait) { carry = last_back; carry_left = 10; held_gait = lonk_gait; }
++        last_back = back;
++        if (carry_left) back += carry * carry_left-- / 10.0f;
 +#endif
 +        float matrix[12] = {hz, 0, hx, a[0] - hx * back,
 +                            0,  1, 0,  y,
@@ -1225,7 +1242,7 @@ index c05d6c3..af16d27 100644
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,6 +1439,10 @@ void runtime_survey_cancel_user(void) {
+@@ -307,6 +1456,10 @@ void runtime_survey_cancel_user(void) {
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
@@ -1236,7 +1253,7 @@ index c05d6c3..af16d27 100644
      fprintf(stderr, "[survey] cancelled: user input\n");
      pthread_mutex_unlock(&survey_lock);
  }
-@@ -315,7 +1451,51 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -315,7 +1468,51 @@ void runtime_survey_tick(uint64_t frame) {
      in_tick = 1;
      pthread_mutex_lock(&survey_lock);
      uintptr_t actor = player_actor();
@@ -1288,7 +1305,7 @@ index c05d6c3..af16d27 100644
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
      } else if (request.kind == 1) {
-@@ -340,7 +1520,15 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -340,7 +1537,15 @@ void runtime_survey_tick(uint64_t frame) {
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }
