@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..bca4b10 100644
+index c05d6c3..af16d27 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -40,7 +40,7 @@ index c05d6c3..bca4b10 100644
  #include <limits.h>
  #include <mach/mach.h>
  #include "mach_vm_compat.h"
-@@ -185,6 +188,78 @@ enum { SCENE_SLOT = GAME_ADDR(0x4663f08), FORCE_MATRIX = GAME_ADDR(0x69a18c), AC
+@@ -185,6 +188,80 @@ enum { SCENE_SLOT = GAME_ADDR(0x4663f08), FORCE_MATRIX = GAME_ADDR(0x69a18c), AC
  static uintptr_t survey_main;
  static void (*survey_force)(void *, const float *, uint32_t);
  static _Atomic int survey_enabled;
@@ -101,7 +101,9 @@ index c05d6c3..bca4b10 100644
 +static float stalk_speed = 2.5f, stalk_stop = 1.5f;
 +static int lonk_kind, lonk_brain, lonk_entered, lonk_anchored, lonk_gifted, ground_mode = GROUND_TERRAIN, spawn_body = 1;
 +static float lonk_anchor[3], lonk_wander[3], lonk_flee[2];
-+static float lonk_goto[2], lonk_goto_speed = 1.5f;   /* "survey lonk goto <right> <forward> [m/s]": the next wander goes to this spot (metres from the player) */
++#define LONK_RUN 5.7f      /* m/s, measured off Link: running (holding forward) */
++#define LONK_SPRINT 9.0f   /* and sprinting */
++static float lonk_goto[2], lonk_goto_speed = LONK_RUN;   /* "survey lonk goto <right> <forward> [m/s]": the next wander goes to this spot (metres from the player) */
 +static int lonk_goto_set;
 +static int lonk_emote, lonk_emoted;   /* a one-off emote (GAIT_LOOK / GAIT_SURPRISE) he's doing instead of moving, once per mood */
 +static unsigned lonk_emote_left;
@@ -109,7 +111,7 @@ index c05d6c3..bca4b10 100644
 +   loop: his body ran ahead of where we put him and jumped back every 0.8 s or so. So he's placed that far behind,
 +   times how far into the loop the clip is (the body slot's 0..1 loop position at +0x1e0): metres per loop for idle,
 +   walk, run, dash. "survey lonk root <walk> <run> <dash>" changes them while playing. */
-+static float lonk_root[4] = {0, 1.28f, 3.36f, 5.2f};
++static float lonk_root[4] = {0, 1.44f, 2.9f, 3.7f};   /* tuned by eye with Camille */
 +static uintptr_t lonk_body;   /* his body's animation slot (the one playing PauseMenuWait), found by pouch_gait */
 +static int lonk_trace;   /* "survey lonk trace": his and the player's positions every 3 frames */
 +static unsigned lonk_respawn_left;   /* his body vanished (you died, a loading zone) while the brain runs: he's back after this */
@@ -119,7 +121,7 @@ index c05d6c3..bca4b10 100644
  _Atomic int runtime_survey_pending;
  /* The frame-end sync, read by hle_nvn.c (built once for all versions): *(sys+[0]), then +[1] through one more pointer if
     [1] >= 0. 1.4.3's frame controller (main+0x2db94c) first waits on *(*(sys+0x150)+0x78), found with TOTK_SURVEY_DEBUG. */
-@@ -194,7 +269,7 @@ const int32_t runtime_survey_sync[2] = {0x150, 0x78};
+@@ -194,7 +271,7 @@ const int32_t runtime_survey_sync[2] = {0x150, 0x78};
  const int32_t runtime_survey_sync[2] = {0x1d8, -1};
  #endif
  static pthread_mutex_t survey_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -128,7 +130,7 @@ index c05d6c3..bca4b10 100644
  static unsigned hold_left;
  static float hold_xyz[3];
  static char hold_tag[64];
-@@ -254,6 +329,44 @@ static uintptr_t player_actor(void) {
+@@ -254,6 +331,44 @@ static uintptr_t player_actor(void) {
      }
      return 0;
  }
@@ -173,7 +175,7 @@ index c05d6c3..bca4b10 100644
  void runtime_survey_init(Module *m) {
      const char *enabled = getenv("TOTK_SURVEY");
      if (!enabled || strcmp(enabled, "1")) return;
-@@ -272,6 +385,21 @@ void runtime_survey_init(Module *m) {
+@@ -272,6 +387,21 @@ void runtime_survey_init(Module *m) {
          runtime_fail("survey requires verified game-version forceSetMatrix entry");
      survey_main = (uintptr_t)m->base;
      survey_force = (void (*)(void *, const float *, uint32_t))(m->base + FORCE_MATRIX);
@@ -195,7 +197,7 @@ index c05d6c3..bca4b10 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,22 +410,1008 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,22 +412,1024 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -529,8 +531,20 @@ index c05d6c3..bca4b10 100644
 +            char cmd[16] = {0};
 +            if (slot && read_mem(read_ptr(slot + 0x10), cmd, sizeof cmd - 1) && !strcmp(cmd, "PauseMenuWait")) body = slot;
 +        }
-+        float rate = gait < GAIT_WALK || gait > GAIT_DASH ? 1.0f : fminf(fmaxf(speed / clip_speed[gait], 0.6f), 1.7f);
++        /* the rate that makes his steps match the ground he covers: lonk_root metres per loop, and the loop position
++           moves k per frame per unit of rate (measured as he goes, per gait), so rate = speed / (60 * metres * k) */
++        static float k_loop[4] = {0, 1 / 40.0f, 1 / 40.0f, 1 / 40.0f}, last_loop = -1, last_rate;
++        static int last_gait = -1;
++        float loop = -1;
++        if (body) read_mem(body + 0x1e0, &loop, sizeof loop);
++        if (gait >= GAIT_WALK && gait <= GAIT_DASH && gait == last_gait && last_rate > 0 && loop > last_loop && loop - last_loop < 0.2f)
++            k_loop[gait] += ((loop - last_loop) / last_rate - k_loop[gait]) * 0.05f;
++        float rate = 1.0f;
++        if (gait >= GAIT_WALK && gait <= GAIT_DASH)
++            rate = lonk_root[gait] > 0.1f && k_loop[gait] > 0 ? speed / (60 * lonk_root[gait] * k_loop[gait]) : speed / clip_speed[gait];
++        rate = gait < GAIT_WALK || gait > GAIT_DASH ? 1.0f : fminf(fmaxf(rate, 0.4f), 2.5f);
 +        if (body) memcpy((void *)(body + 0xd0), &rate, sizeof rate);
++        last_loop = loop; last_rate = rate; last_gait = gait;
 +        lonk_body = body;
 +    }
 +    lonk_gait = gait;
@@ -750,15 +764,17 @@ index c05d6c3..bca4b10 100644
 +/* One frame of Lonk: the behaviour moves the anchor (yaw only; local Z = facing, as spawn_request reads it), then every live
 +   body piece is put there. A piece whose name no longer reads back is dropped. */
 +#if defined(TOTK_GAME_V143)
-+/* idle, walk, run or dash from his speed. The bands overlap by 0.3 m/s each side and a new gait has to hold for 12 frames:
-+   following you he stops and goes, and every switch restarts the clip, so he did a few steps, snapped back, and went on. */
++/* idle, run or dash from his speed (no walk: Camille's call, Link mostly runs or sprints too). The bands overlap by
++   0.3 m/s each side and a new gait has to hold for 12 frames: following you he stops and goes, and every switch restarts
++   the clip, so he did a few steps, snapped back, and went on. */
 +static int lonk_move_gait(float v) {
-+    static const float edge[3] = {0.4f, 3.2f, 5.5f};   /* idle | walk | run | dash */
++    static const float edge[3] = {0.4f, 0.4f, 7.3f};   /* idle | (walk, unused) | run | dash */
 +    static int g = GAIT_IDLE;
 +    static unsigned held;
 +    int want = g;
 +    while (want < GAIT_DASH && v > edge[want] + 0.3f) want++;
 +    while (want > GAIT_IDLE && v < edge[want - 1] - 0.3f) want--;
++    if (want == GAIT_WALK) want = v > edge[0] ? GAIT_RUN : GAIT_IDLE;
 +    held = want == g ? 0 : held + 1;
 +    if (held >= 12) { g = want; held = 0; }
 +    return g;
@@ -805,7 +821,7 @@ index c05d6c3..bca4b10 100644
 +    int face_player = 1, buddy_face = 0, entering = !lonk_entered;
 +    lonk_entered = 1;
 +    switch (lonk_kind) {
-+    case LONK_BLOCK: target[0] = p[0] + fx * 2.5f; target[2] = p[2] + fz * 2.5f; speed = 7; stop = 0.2f; break;
++    case LONK_BLOCK: target[0] = p[0] + fx * 2.5f; target[2] = p[2] + fz * 2.5f; speed = LONK_SPRINT; stop = 0.2f; break;
 +    case LONK_BEHIND:
 +        if (entering) {   /* he was always there */
 +            float at[2] = {p[0] - fx * 1.5f, p[2] - fz * 1.5f};
@@ -814,15 +830,15 @@ index c05d6c3..bca4b10 100644
 +#endif
 +            a[0] = at[0]; a[2] = at[1];
 +        }
-+        speed = 4; stop = 1.2f; break;
++        speed = LONK_RUN; stop = 1.2f; break;
 +    case LONK_WANDER:
 +        if (entering && lonk_goto_set) {   /* right of the player is (-fz, fx) */
 +            lonk_wander[0] = p[0] - fz * lonk_goto[0] + fx * lonk_goto[1]; lonk_wander[2] = p[2] + fx * lonk_goto[0] + fz * lonk_goto[1];
 +            lonk_goto_set = 0;
-+        } else if (entering) { float r = frand(0, 6.2832f), d = frand(4, 10); lonk_wander[0] = a[0] + cosf(r) * d; lonk_wander[2] = a[2] + sinf(r) * d; lonk_goto_speed = 1.5f; }
++        } else if (entering) { float r = frand(0, 6.2832f), d = frand(4, 10); lonk_wander[0] = a[0] + cosf(r) * d; lonk_wander[2] = a[2] + sinf(r) * d; lonk_goto_speed = LONK_RUN; }
 +        target[0] = lonk_wander[0]; target[2] = lonk_wander[2]; speed = lonk_goto_speed; stop = 0.3f; face_player = 0; break;
 +    case LONK_GIFT:
-+        speed = 4; stop = 2;
++        speed = LONK_RUN; stop = 2;
 +        if (!lonk_gifted && hypotf(p[0] - a[0], p[2] - a[2]) < 2.4f && !spawn_left) {
 +            float off[3] = {1.2f, frand(-1, 1), 1.0f};
 +            spawn_body = 0;
@@ -838,7 +854,7 @@ index c05d6c3..bca4b10 100644
 +        if (entering) side = arc4random_uniform(2) ? 1 : -1;
 +        target[0] = p[0] - fz * 1.6f * side + fx * 0.3f; target[2] = p[2] + fx * 1.6f * side + fz * 0.3f;
 +        float off = hypotf(target[0] - a[0], target[2] - a[2]);
-+        speed = fminf(fmaxf(player_speed * 1.05f + off * 2, 1.0f), 9.0f); stop = 0.15f;
++        speed = fminf(fmaxf(player_speed * 1.05f + off * 2, 1.0f), LONK_SPRINT + 1); stop = 0.15f;
 +        if (off < 0.6f) { face_player = 0; buddy_face = 1; }
 +        break;
 +    }
@@ -852,7 +868,7 @@ index c05d6c3..bca4b10 100644
 +            if (l < 0.01f) { ax = -fx; az = -fz; l = 1; }
 +            lonk_flee[0] = ax / l; lonk_flee[1] = az / l;
 +        }
-+        target[0] = a[0] + lonk_flee[0] * 5; target[2] = a[2] + lonk_flee[1] * 5; speed = 7; stop = 0; face_player = 0; break;
++        target[0] = a[0] + lonk_flee[0] * 5; target[2] = a[2] + lonk_flee[1] * 5; speed = LONK_SPRINT; stop = 0; face_player = 0; break;
 +    default: break;
 +    }
 +    /* emotes: arrived somewhere on a wander, he looks around; creeping up behind you and you turn round, he startles */
@@ -934,9 +950,11 @@ index c05d6c3..bca4b10 100644
 +    hx /= hl; hz /= hl;
 +    /* turn toward that over a few frames instead of snapping; a teleport (behind) snaps */
 +    static float face[2] = {0, 1};
-+    if (!(lonk_kind == LONK_BEHIND && entering)) {
-+        float tx = face[0] + (hx - face[0]) * 0.18f, tz = face[1] + (hz - face[1]) * 0.18f, tl = hypotf(tx, tz);
-+        if (tl > 0.01f) { hx = tx / tl; hz = tz / tl; }
++    if (!(lonk_kind == LONK_BEHIND && entering)) {   /* by angle: blending the two directions got stuck on a U-turn */
++        float now = atan2f(face[1], face[0]), want = atan2f(hz, hx), d = remainderf(want - now, 6.2832f);
++        float turn = d * 0.18f;
++        if (fabsf(turn) < 0.03f) turn = fabsf(d) < 0.03f ? d : copysignf(0.03f, d);
++        hx = cosf(now + turn); hz = sinf(now + turn);
 +    }
 +    face[0] = hx; face[1] = hz;
 +    float ground = ground_mode == GROUND_TRAIL || ground_mode == GROUND_TERRAIN ? trail_height(a[0], a[2], p[1]) : p[1];
@@ -1164,7 +1182,7 @@ index c05d6c3..bca4b10 100644
 +        if (!busy) {
 +            request.kind = 3; strcpy(request.tag, "lonk"); strcpy(request.name, "PouchPlayer");
 +            request.off[0] = 4; request.off[1] = 0; request.off[2] = 0;
-+            stalk_left = 216000; stalk_speed = 2.5f; stalk_stop = 1.5f; lonk_brain = 1; lonk_phase_left = 0;
++            stalk_left = 216000; stalk_speed = LONK_RUN; stalk_stop = 1.5f; lonk_brain = 1; lonk_phase_left = 0;
 +            atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
 +        }
 +        pthread_mutex_unlock(&survey_lock);
@@ -1207,7 +1225,7 @@ index c05d6c3..bca4b10 100644
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,6 +1421,10 @@ void runtime_survey_cancel_user(void) {
+@@ -307,6 +1439,10 @@ void runtime_survey_cancel_user(void) {
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
@@ -1218,7 +1236,7 @@ index c05d6c3..bca4b10 100644
      fprintf(stderr, "[survey] cancelled: user input\n");
      pthread_mutex_unlock(&survey_lock);
  }
-@@ -315,7 +1433,51 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -315,7 +1451,51 @@ void runtime_survey_tick(uint64_t frame) {
      in_tick = 1;
      pthread_mutex_lock(&survey_lock);
      uintptr_t actor = player_actor();
@@ -1270,7 +1288,7 @@ index c05d6c3..bca4b10 100644
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
      } else if (request.kind == 1) {
-@@ -340,7 +1502,15 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -340,7 +1520,15 @@ void runtime_survey_tick(uint64_t frame) {
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }

@@ -52,8 +52,10 @@ when you're cold, 1 when hot, from flags at `[main+0x3a5ea40]+0x658`. It never w
   being `[as+0x40]` (`as` = his animation state, the chain `0xba8ed0` walks). Idle below 0.4 m/s, walk up to 3.2, run
   up to 5.5, dash above; the bands overlap by 0.3 m/s and a new gait has to hold for 12 frames, because every switch
   restarts the clip. Standing, he's the plain idle, so he shivers in the snow and sweats in the heat by himself.
-- the clip plays at his speed divided by the clip's own (estimated) speed, written to the rate of the body's slot
-  (`slot+0xd0`). The game routes each command to its own slot: 0 is the face, 1 the body, 2 the skin colour.
+- no walk (Camille's call: Link mostly runs or sprints, and the slow walk looked off): idle, run below 7.3 m/s, sprint
+  above, at Link's own speeds measured from a trace (5.7 running, 9 sprinting). The clip's rate (`slot+0xd0`) makes his
+  steps match the ground: the loop position moves k per frame per unit of rate (measured as he goes), and a loop
+  covers the clip's root motion, so rate = speed / (60 x metres per loop x k). The game routes each command to its own slot: 0 is the face, 1 the body, 2 the skin colour.
 
 The first version drove `Temperature` instead (cold idle = walk). Fighting the menu's node over it every frame flipped
 him between the idle and the walk, and each flip restarted the walk: a few steps, snap back, again. He also blushed
