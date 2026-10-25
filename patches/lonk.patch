@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..ab9ab45 100644
+index c05d6c3..9bd467d 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -188,7 +188,7 @@ index c05d6c3..ab9ab45 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,22 +403,838 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,22 +403,858 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -614,7 +614,7 @@ index c05d6c3..ab9ab45 100644
 +    uintptr_t (*get_eu)(uintptr_t) = (uintptr_t (*)(uintptr_t))game_fn(0xcbffa0, w_eu, 4);
 +    return get_eu ? get_eu(actor) : 0;
 +}
-+static void dress_show(uintptr_t eu, uintptr_t world);
++static unsigned dress_show(uintptr_t eu, uintptr_t world, bool quiet);
 +static void dress_log(const char *when, uintptr_t player) {
 +    static const uint32_t w_done[] = {0x52887508, 0x8b080008, 0xb9400109, 0x7100053f, 0x54000500, 0xb9400909};
 +    uint32_t (*all_created)(uintptr_t) = (uint32_t (*)(uintptr_t))game_fn(0x1b7be9c, w_done, 6);
@@ -634,15 +634,32 @@ index c05d6c3..ab9ab45 100644
 +            static const uint32_t w_model[] = {0xf9411408, 0xb4000168, 0xf9400500, 0xb4000100, 0xf9400008};
 +            uintptr_t (*get_model)(uintptr_t) = (uintptr_t (*)(uintptr_t))game_fn(0xba8854, w_model, 5);
 +            uintptr_t world_model = get_model ? get_model(player) : 0;
-+            dress_show(eu, world_model ? read_ptr(world_model + 0x60) : 0);
++            dress_show(eu, world_model ? read_ptr(world_model + 0x60) : 0, false);
 +        }
 +    }
++}
++/* Every frame once he's dressed: the game keeps putting his pieces back in the menu's scene (that's the flashing, then no legs), so they
++   go back to the world scene each frame. Logs how often that was needed every 10 s. */
++static void dress_keep(uintptr_t player) {
++    static const uint32_t w_done[] = {0x52887508, 0x8b080008, 0xb9400109, 0x7100053f, 0x54000500, 0xb9400909};
++    static const uint32_t w_model[] = {0xf9411408, 0xb4000168, 0xf9400500, 0xb4000100, 0xf9400008};
++    static unsigned frames, moved;
++    uint32_t (*all_created)(uintptr_t) = (uint32_t (*)(uintptr_t))game_fn(0x1b7be9c, w_done, 6);
++    uintptr_t (*get_model)(uintptr_t) = (uintptr_t (*)(uintptr_t))game_fn(0xba8854, w_model, 5);
++    if (!all_created || !get_model) return;
++    uintptr_t world_model = get_model(player), world = world_model ? read_ptr(world_model + 0x60) : 0;
++    for (unsigned i = 0; i < stalker_count; i++) {
++        if (strcmp(stalkers[i].name, "PouchPlayer")) continue;
++        uintptr_t eu = pouch_eu(stalkers[i].actor);
++        if (eu && world && all_created(eu)) moved += dress_show(eu, world, true);
++    }
++    if (++frames == 600) { fprintf(stderr, "[survey] dress keep: %u pieces moved back to the world in 600 frames\n", moved); frames = moved = 0; }
 +}
 +/* The pieces the equipment user made for slots 9 (head) to 19 (extra) sit in ActorLinks at eu+0xe0+(slot-9)*0x18. get 0x1afbe4(link) returns
 +   {actor, holds a reference} through x8 (the reference is a count at actor+0x1b0, dropped the way 0x1b6cd78 drops it).
 +   A pouch user's pieces may be made for the menu's own scene, so each one is bound to the world scene and drawn everywhere,
 +   like the body (pouch_show). */
-+static void dress_show(uintptr_t eu, uintptr_t world) {
++static unsigned dress_show(uintptr_t eu, uintptr_t world, bool quiet) {
 +    static const uint32_t w_valid[] = {0xa9bd7bfd, 0xf9000bf5, 0xa9024ff4, 0x910003fd, 0xb9401008};
 +    static const uint32_t w_get[] = {0xd10183ff, 0xa9017bfd, 0xf90013f9, 0xa9035ff8, 0xa90457f6};
 +    static const uint32_t w_model[] = {0xf9411408, 0xb4000168, 0xf9400500, 0xb4000100, 0xf9400008};
@@ -654,7 +671,8 @@ index c05d6c3..ab9ab45 100644
 +    uintptr_t (*get_model)(uintptr_t) = (uintptr_t (*)(uintptr_t))game_fn(0xba8854, w_model, 5);
 +    void (*bind)(uintptr_t, uintptr_t) = (void (*)(uintptr_t, uintptr_t))game_fn(0x585d58, w_bind, 5);
 +    void (*set_mask)(uintptr_t, uint32_t) = (void (*)(uintptr_t, uint32_t))game_fn(0x50138c, w_mask, 5);
-+    if (!valid || !get || !get_model || !bind || !set_mask) { fprintf(stderr, "[survey] dress show: function mismatch\n"); return; }
++    if (!valid || !get || !get_model || !bind || !set_mask) { fprintf(stderr, "[survey] dress show: function mismatch\n"); return 0; }
++    unsigned moved = 0;
 +    for (unsigned slot = 9; slot <= 19; slot++) {
 +        uintptr_t link = eu + 0xe0 + (slot - 9) * 0x18;
 +        if (!valid(link)) continue;
@@ -666,18 +684,20 @@ index c05d6c3..ab9ab45 100644
 +        if (model && world && scene != world) {
 +            bind(model, world);
 +            set_mask(model, 0xffffffffu);
-+            fprintf(stderr, "[survey] dress show: slot %u %s (%#llx) model=%#llx scene %#llx -> %#llx\n", slot, text, (unsigned long long)ref.actor,
++            moved++;
++            if (!quiet) fprintf(stderr, "[survey] dress show: slot %u %s (%#llx) model=%#llx scene %#llx -> %#llx\n", slot, text, (unsigned long long)ref.actor,
 +                    (unsigned long long)model, (unsigned long long)scene, (unsigned long long)world);
 +        }
 +        if (ref.held) __atomic_fetch_sub((int32_t *)(ref.actor + 0x1b0), 1, __ATOMIC_SEQ_CST);
 +    }
++    return moved;
 +}
 +static void dress_run(void) {
 +    static const uint32_t w_equip[] = {0xd10383ff, 0xa9087bfd, 0xa9096ffc, 0xa90a67fa, 0xa90b5ff8, 0xa90c57f6};
 +    void (*equip)(uintptr_t, uint32_t, const char **, int32_t, bool, bool) =
 +        (void (*)(uintptr_t, uint32_t, const char **, int32_t, bool, bool))game_fn(0x1b6cd78, w_equip, 6);
 +    if (!equip) { fprintf(stderr, "[survey] dress: function mismatch\n"); return; }
-+    static const char *empty = "", *hand = "PlayerRaulHand";
++    static const char *empty = "", *hand = "PlayerRaulHand", *hair = "Armor_999_Head", *upper = "Armor_Default_Upper", *lower = "Armor_Default_Lower";
 +    static char held[64];   /* the game may keep the name pointer */
 +    snprintf(held, sizeof held, "%s", dress_name);
 +    static const char *one;
@@ -689,12 +709,12 @@ index c05d6c3..ab9ab45 100644
 +        if (dress_slot >= 0) {
 +            equip(eu, (uint32_t)dress_slot, held[0] ? &one : &empty, held[0] ? dress_dye : -1, 0, 0);
 +            fprintf(stderr, "[survey] dress: slot %d <- \"%s\"\n", dress_slot, held);
-+        } else {
-+            equip(eu, 9, &empty, -1, 0, 0);
-+            equip(eu, 10, &empty, -1, 0, 0);
-+            equip(eu, 11, &empty, -1, 0, 0);
++        } else {   /* by name: "" copies the player's outfit, and real armor doesn't draw on him (he'd be a floating head) */
++            equip(eu, 9, &hair, -1, 0, 0);
++            equip(eu, 10, &upper, -1, 0, 0);
++            equip(eu, 11, &lower, -1, 0, 0);
 +            equip(eu, 19, &hand, -1, 0, 0);
-+            fprintf(stderr, "[survey] dress: head, upper, lower like the player, arm %s\n", hand);
++            fprintf(stderr, "[survey] dress: %s, %s, %s, arm %s\n", hair, upper, lower, hand);
 +        }
 +        dress_watch = 600;
 +    }
@@ -1030,18 +1050,18 @@ index c05d6c3..ab9ab45 100644
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,6 +1244,10 @@ void runtime_survey_cancel_user(void) {
+@@ -307,6 +1264,10 @@ void runtime_survey_cancel_user(void) {
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
 +#ifdef SURVEY_SPAWN
 +    /* a spawn in flight keeps being watched (gifts, body pieces): the user is playing, not cancelling it */
-+    if (stalk_left || spawn_left || pouch_idle_left || drop_request[0] || dress_left || dress_watch || lonk_respawn_left) atomic_store(&runtime_survey_pending, 1);
++    if (stalk_left || spawn_left || pouch_idle_left || drop_request[0] || dress_left || dress_watch || lonk_respawn_left || stalker_count) atomic_store(&runtime_survey_pending, 1);
 +#endif
      fprintf(stderr, "[survey] cancelled: user input\n");
      pthread_mutex_unlock(&survey_lock);
  }
-@@ -315,7 +1256,50 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -315,7 +1276,51 @@ void runtime_survey_tick(uint64_t frame) {
      in_tick = 1;
      pthread_mutex_lock(&survey_lock);
      uintptr_t actor = player_actor();
@@ -1070,6 +1090,7 @@ index c05d6c3..ab9ab45 100644
 +    if (pouch_idle_left && actor && !--pouch_idle_left && !pouch_anim("PauseMenuWait") && --pouch_idle_tries) pouch_idle_left = 30;
 +    if (dress_left && actor && !--dress_left) dress_run();
 +    if (dress_watch && actor && (--dress_watch % 30) == 0) dress_log(dress_watch ? "waiting" : "done watching", actor);
++    else if (stalker_count && actor) dress_keep(actor);
 +    if (anim_info_request && actor) {
 +        anim_info_request = 0;
 +        anim_log("player", actor);
@@ -1092,7 +1113,7 @@ index c05d6c3..ab9ab45 100644
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
      } else if (request.kind == 1) {
-@@ -340,7 +1324,15 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -340,7 +1345,15 @@ void runtime_survey_tick(uint64_t frame) {
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }
@@ -1100,7 +1121,7 @@ index c05d6c3..ab9ab45 100644
 +done:
 +    atomic_store_explicit(&runtime_survey_pending, request.kind || hold_left || spawn_left || stalk_left || pouch_request || height_request || peek_request[0] ||
 +                          pouch_anim_name[0] || pouch_place_request || anim_info_request || drop_request[0] || pouch_idle_left ||
-+                          dress_left || dress_watch || lonk_respawn_left,
++                          dress_left || dress_watch || lonk_respawn_left || stalker_count,
 +                          memory_order_release);
 +#else
      atomic_store_explicit(&runtime_survey_pending, request.kind || hold_left, memory_order_release);

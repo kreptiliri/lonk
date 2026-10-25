@@ -77,13 +77,14 @@ The patch dresses him the same way the menu does, 60 frames after he spawns:
 - The pieces are separate actors, spawned asynchronously; `0x1b7be9c(eu)` turns nonzero when they're all in. Their
   ActorLinks are at `eu+0xe0+(slot-9)*0x18`, read with `0x1afbe4` (it returns `{actor, holds a reference}`).
 - A pouch user's pieces are made for the menu's model scene, so each one is bound to the world scene like the body.
-  They follow his skeleton by themselves.
+  The game binds them back to the menu's scene every frame (all four pieces, every frame), so the patch rebinds them
+  every frame for as long as he's around. Rebinding only for the first 10 seconds made his legs and arm flash and then
+  vanish. They don't follow his animation yet: he's stiff.
 
 Real armor doesn't work yet. What's known:
 
 - Every real piece tried (a hood, two tops, trousers) is invisible, and the body under it gets hidden as it should, so
   he becomes a floating face. The default pieces, the hair and the arm all draw.
-- The game binds all of his pieces back to the menu's scene every frame, the visible ones too, so the scene isn't it.
 - The same tunic spawned on its own draws fine, in its T-pose. Its draw instance's flags (`instance+0x14`, also at
   `model+0x2b4`) end in `0x09`; equipped, they end in `0xf8`. Bit 0 looks like "draw in the world view": setting it
   makes the equipped tunic appear, crumpled at his feet, so its bones aren't being posed at all.

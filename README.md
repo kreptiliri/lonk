@@ -17,14 +17,16 @@ Runs on the [MacNativeGames](https://github.com/ly05010419/MacNativeGames) nativ
   every frame. Pinned next to you, he's there, standing in his idle pose.
 - **He gets dressed.** Hair, his Zonai right arm and his clothes are all separate pieces of equipment in this game, and
   the inventory Link never puts any on outside the menu. Now he dresses himself the way the pause menu does it, a second
-  after he spawns: his hair, his arm and Link's default outfit (which is his underwear, so far).
+  after he spawns: his ponytail, his arm and Link's default outfit (his underwear; he doesn't copy yours). The game drags
+  those pieces back into the menu's 3D scene every frame, so he pulls them back out every frame too.
 - **He used to be mannequins.** Before that he was three armor-shop mannequins stacked on one spot, which crashed the
   game when you walked up to them (they went looking for the item they were selling). That fix is still in, and
   `survey drop` gets rid of the mannequins.
 - **He walks and runs.** Every frame he moves toward wherever his brain says, over the real ground (a physics raycast,
   so sky islands, rocks and bridges count too) and around anything in his way. He uses Link's own walk, run and dash,
   picked from his speed and played at a matching speed, and turns smoothly to face where he's going, then back to you
-  when he stops. He also looks around, startles and celebrates. The animations need a small RomFS mod (see
+  when he stops. He also looks around, startles and celebrates. (Well, his brain picks them: his arms and legs don't
+  move yet, see Known issues.) The animations need a small RomFS mod (see
   "Trying it"); without it he sweats, shivers or pants his way around instead.
 - **He doesn't stay gone.** If his body disappears while his brain runs (you die and reload, a loading zone), he's
   back a couple of seconds after you are.
@@ -92,8 +94,10 @@ somewhere with `survey lonk goto <metres right> <metres forward> [m/s]` (from yo
 
 ## Known issues
 
+- His arms and legs don't move: he glides around stiff. The animation is set, but his body pieces don't follow it yet.
 - He only has his underwear. Real armor (`survey equip 10 Armor_001_Upper`) doesn't draw, and hides the body under it,
   so he turns into a floating head until he's back in the defaults.
+- In caves he can end up walking on the roof, or clip up through a wall you run him into.
 - His feet may still slide a little: the clips' own speeds are my estimates.
 - With the mod installed, the inventory Link walks, runs or dashes in place in the pause menu when you're somewhere cold
   or hot, or out of stamina, and looks around, startles or celebrates when you equip a two-handed sword, a spear or just
