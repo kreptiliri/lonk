@@ -128,6 +128,8 @@ forces a crouch. Lonk keeps 1.1 m away and slides around instead.
 
 ## The brain
 
-Every 6 to 12 seconds a weighted dice roll picks a behaviour: stalk 30, block 20, gift 20, behind 15, wander 15, never
-two gifts in a row. A gift spawns `Item_Fruit_A` (75%) or `BarrelBomb` (25%) next to Link through the same spawn call,
+Every 6 to 12 seconds a weighted dice roll picks a behaviour: stalk 25, buddy, block, behind, wander and gift 15 each,
+never two gifts in a row. Buddy walks 1.6 m to one side of Link at Link's own (smoothed) speed. A gift spawns an apple
+(`Item_Fruit_A`), a fish (`Item_FishGet_A`), a monster part (`Item_Enemy_01`) or a `BarrelBomb` next to Link through the
+same spawn call,
 then Lonk celebrates for two and a half seconds and flees for four.

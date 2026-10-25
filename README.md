@@ -31,8 +31,9 @@ Runs on the [MacNativeGames](https://github.com/ly05010419/MacNativeGames) nativ
 | Mood | What he does |
 |---|---|
 | stalk | walks up and stares at you from a step away |
+| buddy | walks beside you at your pace, looking where you look |
 | block | sprints into your path |
-| gift | drops an apple at your feet, sometimes a bomb barrel, celebrates, and runs |
+| gift | drops an apple at your feet (sometimes a fish, a monster part or a bomb barrel), celebrates, and runs |
 | behind | is suddenly standing right behind you, and startles if you turn around |
 | wander | forgets you exist, wanders off and looks around |
 
@@ -77,11 +78,11 @@ survey lonk brain 36000
 ```
 
 He starts his idle animation and gets dressed on his own. `survey equip <slot> <ArmorName>` puts one piece on him
-(9 head, 10 upper, 11 lower, `-` for the default), and `survey dress` redoes the whole outfit. The old mannequin body
+(9 head, 10 upper, 11 lower, `-` for the default, an optional dye number after it), and `survey dress` redoes the whole outfit. The old mannequin body
 still works (`survey spawn m1 Mannequin_001_Upper` and friends), and `survey drop <name start|all>` removes pieces from
 him again.
 
-You can also force one mood with `survey lonk <stalk|block|behind|wander|gift|flee|party> <frames>`, send him somewhere with
+You can also force one mood with `survey lonk <stalk|buddy|block|behind|wander|gift|flee|party> <frames>`, send him somewhere with
 `survey lonk goto <metres right> <metres forward> [m/s]` (from you), and stop him with `survey lonk stop`.
 
 ## Known issues
