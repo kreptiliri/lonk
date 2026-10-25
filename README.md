@@ -26,6 +26,8 @@ Runs on the [MacNativeGames](https://github.com/ly05010419/MacNativeGames) nativ
   walk, run and dash picked from his speed (and played at a matching speed), turning smoothly to face where he's going,
   and back to you when he stops. The
   animations need a small RomFS mod (see "Trying it"); without it he sweats, shivers or pants his way around instead.
+- **He doesn't stay gone.** If his body disappears while his brain runs (you die and reload, a loading zone), he's
+  back a couple of seconds after you are.
 - **He has a (very small) brain.** Every few seconds he decides what to do:
 
 | Mood | What he does |
@@ -41,7 +43,7 @@ Runs on the [MacNativeGames](https://github.com/ly05010419/MacNativeGames) nativ
 
 - Real clothes: picking an actual outfit makes him vanish for now
 - Doing things, not just standing near you: fighting, climbing, using items, breaking stuff
-- Never dying, whatever you do to him
+- Never dying, whatever you do to him (he already comes back when you die)
 - A smarter brain
 
 None of this is promised, it's what I'm working toward.

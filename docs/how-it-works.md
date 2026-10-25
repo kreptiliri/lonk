@@ -126,6 +126,13 @@ starting with whichever side worked last so he doesn't dither. Boxed in, he wait
 Walking through Link puts the mannequin's collision above Link's head, which the game reads as a low ceiling, and
 forces a crouch. Lonk keeps 1.1 m away and slides around instead.
 
+## Coming back
+
+Every frame each body piece's name is read back from the actor (`actor+0x218`); a piece that no longer reads back is
+forgotten. If that was PouchPlayer and the brain is running, Lonk respawns two seconds after the player stands somewhere
+real again: the player actor that exists on the loading screen sits at the origin, so that doesn't count. Tested by
+dropping Link from 150 m: game over, Continue, and he's back, dressed, picking his next mood.
+
 ## The brain
 
 Every 6 to 12 seconds a weighted dice roll picks a behaviour: stalk 25, buddy, block, behind, wander and gift 15 each,

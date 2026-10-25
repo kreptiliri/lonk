@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..c75a7c8 100644
+index c05d6c3..6498fcc 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -40,7 +40,7 @@ index c05d6c3..c75a7c8 100644
  #include <limits.h>
  #include <mach/mach.h>
  #include "mach_vm_compat.h"
-@@ -185,6 +188,70 @@ enum { SCENE_SLOT = GAME_ADDR(0x4663f08), FORCE_MATRIX = GAME_ADDR(0x69a18c), AC
+@@ -185,6 +188,71 @@ enum { SCENE_SLOT = GAME_ADDR(0x4663f08), FORCE_MATRIX = GAME_ADDR(0x69a18c), AC
  static uintptr_t survey_main;
  static void (*survey_force)(void *, const float *, uint32_t);
  static _Atomic int survey_enabled;
@@ -105,13 +105,14 @@ index c05d6c3..c75a7c8 100644
 +static int lonk_goto_set;
 +static int lonk_emote, lonk_emoted;   /* a one-off emote (GAIT_LOOK / GAIT_SURPRISE) he's doing instead of moving, once per mood */
 +static unsigned lonk_emote_left;
++static unsigned lonk_respawn_left;   /* his body vanished (you died, a loading zone) while the brain runs: he's back after this */
 +static float trail[TRAIL_MAX][3];   /* the player's recent footsteps: ground heights Lonk can stand on */
 +static unsigned trail_count, trail_head;
 +#endif
  _Atomic int runtime_survey_pending;
  /* The frame-end sync, read by hle_nvn.c (built once for all versions): *(sys+[0]), then +[1] through one more pointer if
     [1] >= 0. 1.4.3's frame controller (main+0x2db94c) first waits on *(*(sys+0x150)+0x78), found with TOTK_SURVEY_DEBUG. */
-@@ -194,7 +261,7 @@ const int32_t runtime_survey_sync[2] = {0x150, 0x78};
+@@ -194,7 +262,7 @@ const int32_t runtime_survey_sync[2] = {0x150, 0x78};
  const int32_t runtime_survey_sync[2] = {0x1d8, -1};
  #endif
  static pthread_mutex_t survey_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -120,7 +121,7 @@ index c05d6c3..c75a7c8 100644
  static unsigned hold_left;
  static float hold_xyz[3];
  static char hold_tag[64];
-@@ -254,6 +321,44 @@ static uintptr_t player_actor(void) {
+@@ -254,6 +322,44 @@ static uintptr_t player_actor(void) {
      }
      return 0;
  }
@@ -165,7 +166,7 @@ index c05d6c3..c75a7c8 100644
  void runtime_survey_init(Module *m) {
      const char *enabled = getenv("TOTK_SURVEY");
      if (!enabled || strcmp(enabled, "1")) return;
-@@ -272,6 +377,21 @@ void runtime_survey_init(Module *m) {
+@@ -272,6 +378,21 @@ void runtime_survey_init(Module *m) {
          runtime_fail("survey requires verified game-version forceSetMatrix entry");
      survey_main = (uintptr_t)m->base;
      survey_force = (void (*)(void *, const float *, uint32_t))(m->base + FORCE_MATRIX);
@@ -187,7 +188,7 @@ index c05d6c3..c75a7c8 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,22 +402,823 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,22 +403,824 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -725,6 +726,7 @@ index c05d6c3..c75a7c8 100644
 +        if (!name || !read_mem(name, text, sizeof text - 1) || strcmp(text, stalkers[i].name) ||
 +            !read_mem(actor + ACTOR_POS, pos, sizeof pos) || !valid_xyz(pos)) {
 +            fprintf(stderr, "[survey] lonk: dropped %s (%#llx)\n", stalkers[i].name, (unsigned long long)actor);
++            if (lonk_brain && !strcmp(stalkers[i].name, "PouchPlayer")) lonk_respawn_left = 120;
 +            stalkers[i] = stalkers[--stalker_count];
 +            continue;
 +        }
@@ -1014,18 +1016,18 @@ index c05d6c3..c75a7c8 100644
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,6 +1228,10 @@ void runtime_survey_cancel_user(void) {
+@@ -307,6 +1230,10 @@ void runtime_survey_cancel_user(void) {
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
 +#ifdef SURVEY_SPAWN
 +    /* a spawn in flight keeps being watched (gifts, body pieces): the user is playing, not cancelling it */
-+    if (stalk_left || spawn_left || pouch_idle_left || drop_request[0] || dress_left || dress_watch) atomic_store(&runtime_survey_pending, 1);
++    if (stalk_left || spawn_left || pouch_idle_left || drop_request[0] || dress_left || dress_watch || lonk_respawn_left) atomic_store(&runtime_survey_pending, 1);
 +#endif
      fprintf(stderr, "[survey] cancelled: user input\n");
      pthread_mutex_unlock(&survey_lock);
  }
-@@ -315,7 +1240,38 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -315,7 +1242,50 @@ void runtime_survey_tick(uint64_t frame) {
      in_tick = 1;
      pthread_mutex_lock(&survey_lock);
      uintptr_t actor = player_actor();
@@ -1033,6 +1035,18 @@ index c05d6c3..c75a7c8 100644
 +    if (spawn_left) spawn_watch(frame);
 +    if (request.kind == 3 && actor) { spawn_body = 1; spawn_request(request.tag, request.name, request.off, frame, actor); request.kind = 0; }
 +    if (stalk_left && actor) { lonk_step(frame, actor); if (!--stalk_left) fprintf(stderr, "[survey] lonk: done\n"); }
++    /* never gone for long: once the player stands somewhere real again (not the loading screen's origin), he respawns */
++    if (lonk_respawn_left && actor && !spawn_left && !request.kind) {
++        float pp[3];
++        int real = read_mem(actor + ACTOR_POS, pp, sizeof pp) && valid_xyz(pp) && (fabsf(pp[0]) > 1 || fabsf(pp[2]) > 1);
++        if (!real) lonk_respawn_left = 120;
++        else if (!--lonk_respawn_left) {
++            float off[3] = {4, 0, 0};
++            fprintf(stderr, "[survey] lonk: he's back\n");
++            spawn_body = 1; lonk_anchored = 0;
++            spawn_request("lonk", "PouchPlayer", off, frame, actor);
++        }
++    }
 +#if defined(TOTK_GAME_V143)
 +    if (pouch_request && actor) { pouch_request = 0; pouch_show(actor); }
 +    if (peek_request[0] && actor) { peek_run(actor); peek_request[0] = 0; }
@@ -1064,7 +1078,7 @@ index c05d6c3..c75a7c8 100644
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
      } else if (request.kind == 1) {
-@@ -340,7 +1296,15 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -340,7 +1310,15 @@ void runtime_survey_tick(uint64_t frame) {
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }
@@ -1072,7 +1086,7 @@ index c05d6c3..c75a7c8 100644
 +done:
 +    atomic_store_explicit(&runtime_survey_pending, request.kind || hold_left || spawn_left || stalk_left || pouch_request || height_request || peek_request[0] ||
 +                          pouch_anim_name[0] || pouch_place_request || anim_info_request || drop_request[0] || pouch_idle_left ||
-+                          dress_left || dress_watch,
++                          dress_left || dress_watch || lonk_respawn_left,
 +                          memory_order_release);
 +#else
      atomic_store_explicit(&runtime_survey_pending, request.kind || hold_left, memory_order_release);
