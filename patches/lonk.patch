@@ -1,4 +1,32 @@
+diff --git a/games/totk/runtime/game_version.h b/games/totk/runtime/game_version.h
+index 9179e3c..95d94aa 100644
+--- a/games/totk/runtime/game_version.h
++++ b/games/totk/runtime/game_version.h
+@@ -35,6 +35,13 @@
+ #define GAME_ADDR_0xe995c4 0xbdb48c
+ #define GAME_ADDR_0x2aa4fa0 0x2bb79f0
+ #define GAME_ADDR_0x453f648 0x398b348
++/* Survey spawn only (world_survey.c "survey spawn"): engine::actor::ActorMgr::requestCreateActorAsync and
++   ActorMgr::sInstance (1.0.0 addresses from aquacluck/totk-lotuskit syms). The 1.4.3 function is the only one of the
++   five "Pack/Actor/" + ".pack" + "ActorMgr" string users with 1.0.0's entry (same register saves, ldr [x29,#0x68] then
++   ldrb [x0,#0xe1]), the same CreateArg field reads (+0x48..+0x88) and stack arguments; 87 of its 108 callers load x0
++   through one GOT slot (main+0x395e008) that holds sInstance, as 87 of 105 do in 1.0.0 (slot 0x4557b48). */
++#define GAME_ADDR_0xa5fdf8 0x599670
++#define GAME_ADDR_0x46479e0 0x3ad7450
+ #elif defined(TOTK_GAME_V112)
+ #define TOTK_GAME_VERSION "1.1.2"
+ #define TOTK_GAME_DIR "v112"
+@@ -155,6 +162,8 @@
+ #define GAME_ADDR_0x453f648 0x453f648
+ #define GAME_ADDR_0x8f6cbc 0x8f6cbc
+ #define GAME_ADDR_0xce3fec 0xce3fec
++#define GAME_ADDR_0xa5fdf8 0xa5fdf8   /* survey spawn: ActorMgr::requestCreateActorAsync (lotuskit syms) */
++#define GAME_ADDR_0x46479e0 0x46479e0 /* survey spawn: ActorMgr::sInstance (lotuskit syms; GOT slot 0x4557b48) */
+ #define GAME_OUTPUT_CALL_WORD 0x94000082u
+ #endif
+ #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
+index c05d6c3..f61f3e9 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -12,7 +40,7 @@ diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey
  #include <limits.h>
  #include <mach/mach.h>
  #include "mach_vm_compat.h"
-@@ -185,6 +188,55 @@
+@@ -185,6 +188,59 @@ enum { SCENE_SLOT = GAME_ADDR(0x4663f08), FORCE_MATRIX = GAME_ADDR(0x69a18c), AC
  static uintptr_t survey_main;
  static void (*survey_force)(void *, const float *, uint32_t);
  static _Atomic int survey_enabled;
@@ -55,8 +83,12 @@ diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey
 +enum { STALK_MAX = 16, TRAIL_MAX = 512 };
 +enum { LONK_STALK, LONK_BLOCK, LONK_BEHIND, LONK_WANDER, LONK_GIFT, LONK_FLEE, LONK_KINDS };
 +static const char *const lonk_names[LONK_KINDS] = {"stalk", "block", "behind", "wander", "gift", "flee"};
-+enum { GROUND_PLAYER, GROUND_PHYSICS, GROUND_TRAIL };
-+static const char *const ground_names[] = {"player", "physics", "trail"};
++enum { GROUND_PLAYER, GROUND_PHYSICS, GROUND_TRAIL, GROUND_TERRAIN, GROUND_MODES };
++static const char *const ground_names[GROUND_MODES] = {"player", "physics", "trail", "terrain"};
++static int pouch_request, height_request;
++static char peek_request[256];   /* "survey peek <base> <hex off>... <bytes>", read on the next game frame */
++static char pouch_anim_name[64];   /* "survey pouchanim <Name>" */
++static int pouch_place_request, anim_info_request;
 +static struct { uintptr_t actor; char name[64]; } stalkers[STALK_MAX];
 +static unsigned stalker_count, stalk_left, lonk_phase_left;
 +static float stalk_speed = 2.5f, stalk_stop = 1.5f;
@@ -68,7 +100,7 @@ diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey
  _Atomic int runtime_survey_pending;
  /* The frame-end sync, read by hle_nvn.c (built once for all versions): *(sys+[0]), then +[1] through one more pointer if
     [1] >= 0. 1.4.3's frame controller (main+0x2db94c) first waits on *(*(sys+0x150)+0x78), found with TOTK_SURVEY_DEBUG. */
-@@ -194,7 +246,7 @@
+@@ -194,7 +250,7 @@ const int32_t runtime_survey_sync[2] = {0x150, 0x78};
  const int32_t runtime_survey_sync[2] = {0x1d8, -1};
  #endif
  static pthread_mutex_t survey_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -77,11 +109,10 @@ diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey
  static unsigned hold_left;
  static float hold_xyz[3];
  static char hold_tag[64];
-@@ -253,7 +305,45 @@
-         }
+@@ -254,6 +310,44 @@ static uintptr_t player_actor(void) {
      }
      return 0;
-+}
+ }
 +#if defined(SURVEY_SPAWN) && defined(TOTK_GAME_V143)
 +/* Spawned shop props (Mannequin_001_*) crash 0.5 s after the player comes near. The player's interaction search
 +   (main+0x5e3294) finds the mannequin's type-0x17 entry and main+0x21368b4 -> +0x2136620 looks up the actor's outgoing
@@ -118,12 +149,12 @@ diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey
 +    memcpy(m->base + SITE, patched, sizeof patched);
 +    fprintf(stderr, "[survey] link-count guard: main+%#x counts 0 links for a null node (spawned mannequins have no ForSale link)\n", (unsigned)SITE);
 +#endif
- }
++}
 +#endif
  void runtime_survey_init(Module *m) {
      const char *enabled = getenv("TOTK_SURVEY");
      if (!enabled || strcmp(enabled, "1")) return;
-@@ -272,6 +362,21 @@
+@@ -272,6 +366,21 @@ void runtime_survey_init(Module *m) {
          runtime_fail("survey requires verified game-version forceSetMatrix entry");
      survey_main = (uintptr_t)m->base;
      survey_force = (void (*)(void *, const float *, uint32_t))(m->base + FORCE_MATRIX);
@@ -145,7 +176,7 @@ diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,22 +387,249 @@
+@@ -282,22 +391,460 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -230,6 +261,180 @@ diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey
 +    }
 +    return y;
 +}
++#if defined(TOTK_GAME_V143)
++/* Game functions found statically (1.4.3 only), each called only when its first words match. */
++static void *game_fn(uintptr_t off, const uint32_t *words, size_t n) {
++    return memcmp((const void *)(survey_main + off), words, n * 4) ? NULL : (void *)(survey_main + off);
++}
++/* The terrain heightmap query behind the AI node QueryTerrainGetGroundHeight (main+0x272350c): T = [main+0x3add550],
++   scene = 0x2b7332c(T, pos, 1, 0, 300), 0x5db4c0(&height, xz, scene, -1, 0, 1, 0) answers 1 or 2. No buildings or sky islands. */
++static int terrain_height(float x, float z, float probe_y, float *out) {
++    static const uint32_t w_scene[] = {0xf0007b08, 0x9133c108, 0xf9400108, 0xb4000da8, 0xd10283ff};
++    static const uint32_t w_height[] = {0xb40055a2, 0xf940044b, 0xb400556b, 0xd10283ff, 0xa9057bfd};
++    static void *(*scene_fn)(void *, const float *, int, int, float);
++    static int (*height_fn)(float *, const float *, void *, int, int, int, int);
++    static int checked;
++    if (!checked) {
++        checked = 1;
++        scene_fn = (void *(*)(void *, const float *, int, int, float))game_fn(0x2b7332c, w_scene, 5);
++        height_fn = (int (*)(float *, const float *, void *, int, int, int, int))game_fn(0x5db4c0, w_height, 5);
++        fprintf(stderr, "[survey] terrain query: scene %s, height %s\n", scene_fn ? "ok" : "MISMATCH", height_fn ? "ok" : "MISMATCH");
++    }
++    void *t = (void *)read_ptr(survey_main + 0x3add550);
++    if (!scene_fn || !height_fn || !t) return 0;
++    float pos[3] = {x, probe_y, z}, xz[2] = {x, z}, h = NAN;
++    void *scene = scene_fn(t, pos, 1, 0, 300.0f);
++    if (!scene) return 0;
++    int r = height_fn(&h, xz, scene, -1, 0, 1, 0);
++    if ((r != 1 && r != 2) || !isfinite(h)) return 0;
++    *out = h;
++    return 1;
++}
++/* PouchPlayer, spawned by us, stays invisible: the pause menu normally binds its model to the UI model scene and switches its
++   view masks. getModel 0xba8854, model+0x60 = its model scene, bindScene 0x585d58(model, scene), 0x50138c(model, mask) sets
++   every draw instance's view mask (instances: min(u32 model+0x10, u16 model+0x248) at [model+0x18], mask at inst+8).
++   The world scene is read from the player's own model. Logs before and after. */
++/* "survey peek <base> <off>... <bytes>": base is pouch, pmodel (its model), player, plmodel, main or a hex address; every
++   offset but the last is followed as a pointer (addr = [addr+off]), then <bytes> (<= 256) at addr+last are logged as words
++   and floats. Read-only. */
++static void peek_run(uintptr_t player) {
++    static const uint32_t w_model[] = {0xf9411408, 0xb4000168, 0xf9400500, 0xb4000100, 0xf9400008};
++    uintptr_t (*get_model)(uintptr_t) = (uintptr_t (*)(uintptr_t))game_fn(0xba8854, w_model, 5);
++    char buf[256], *save = NULL, *tok[24];
++    int n = 0;
++    snprintf(buf, sizeof buf, "%s", peek_request);
++    for (char *t = strtok_r(buf, " \t\r\n", &save); t && n < 24; t = strtok_r(NULL, " \t\r\n", &save)) tok[n++] = t;
++    if (n < 3) { fprintf(stderr, "[survey] peek: expected <base> <off>... <bytes>\n"); return; }
++    uintptr_t pouch = 0, addr = 0;
++    for (unsigned i = 0; i < stalker_count; i++) if (!strcmp(stalkers[i].name, "PouchPlayer")) pouch = stalkers[i].actor;
++    if (!strcmp(tok[0], "pouch")) addr = pouch;
++    else if (!strcmp(tok[0], "pmodel")) addr = pouch && get_model ? get_model(pouch) : 0;
++    else if (!strcmp(tok[0], "player")) addr = player;
++    else if (!strcmp(tok[0], "plmodel")) addr = get_model ? get_model(player) : 0;
++    else if (!strcmp(tok[0], "main")) addr = survey_main;
++    else addr = (uintptr_t)strtoull(tok[0], NULL, 16);
++    for (int i = 1; i < n - 2 && addr; i++) addr = read_ptr(addr + (uintptr_t)strtoull(tok[i], NULL, 16));
++    if (addr) addr += (uintptr_t)strtoull(tok[n - 2], NULL, 16);
++    unsigned bytes = (unsigned)strtoul(tok[n - 1], NULL, 0);
++    if (bytes > 256) bytes = 256;
++    bytes &= ~3u;
++    uint32_t w[64] = {0};
++    if (!addr || !bytes || !read_mem(addr, w, bytes)) { fprintf(stderr, "[survey] peek %s: unreadable (addr %#llx)\n", peek_request, (unsigned long long)addr); return; }
++    fprintf(stderr, "[survey] peek %s @ %#llx\n", peek_request, (unsigned long long)addr);
++    for (unsigned i = 0; i < bytes / 4; i += 4) {
++        char line[200]; size_t len = (size_t)snprintf(line, sizeof line, "[survey]   +%03x:", i * 4);
++        for (unsigned k = i; k < i + 4 && k < bytes / 4; k++) { float f; memcpy(&f, &w[k], 4); len += (size_t)snprintf(line + len, sizeof line - len, " %08x(%g)", w[k], f); }
++        fprintf(stderr, "%s\n", line);
++    }
++}
++/* An actor's animation state: as = [[[[actor+0x228]+0x40]+0x18]+0x18], 0 if any step is null. u32 as+0x130 state,
++   u32 as+0x18 slots (0x48 apart at [as+0x20]), slot0 playing command name at [slot0+0x10], rate at slot0+0xd0. */
++static uintptr_t anim_state(uintptr_t actor) {
++    uintptr_t p = actor;
++    static const unsigned offs[] = {0x228, 0x40, 0x18, 0x18};
++    for (unsigned i = 0; i < 4 && p; i++) p = read_ptr(p + offs[i]);
++    return p;
++}
++static void anim_log(const char *who, uintptr_t actor) {
++    uintptr_t as = anim_state(actor);
++    uint32_t a24 = 0, a28 = 0; read_mem(actor + 0x24, &a24, 4); read_mem(actor + 0x28, &a28, 4);
++    if (!as) { fprintf(stderr, "[survey] anim %s: actor=%#llx +24=%u +28=%#x no animation state\n", who, (unsigned long long)actor, a24, a28); return; }
++    uint32_t state = 0, slots = 0; read_mem(as + 0x130, &state, 4); read_mem(as + 0x18, &slots, 4);
++    uintptr_t slot0 = read_ptr(read_ptr(as + 0x20));
++    char cmd[64] = {0}; float rate = NAN;
++    if (slot0) { read_mem(read_ptr(slot0 + 0x10), cmd, sizeof cmd - 1); read_mem(slot0 + 0xd0, &rate, 4); }
++    fprintf(stderr, "[survey] anim %s: actor=%#llx +24=%u +28=%#x as=%#llx state=%u slots=%u slot0=%#llx cmd=\"%s\" rate=%g\n", who,
++            (unsigned long long)actor, a24, a28, (unsigned long long)as, state, slots, (unsigned long long)slot0, cmd, rate);
++}
++/* Start an animation command the way the game's own C++ callers do (0x1876efc, 0x1bc8dec): bool 0x4dc628(&req, 0). */
++static void pouch_anim(const char *name) {
++    static const uint32_t w_play[] = {0xd10683ff, 0xa9157bfd, 0xf900b3fc, 0xa9175ff8, 0xa91857f6, 0xa9194ff4};
++    bool (*play)(void *, int) = (bool (*)(void *, int))game_fn(0x4dc628, w_play, 6);
++    if (!play) { fprintf(stderr, "[survey] pouchanim: function mismatch\n"); return; }
++    static char held[64];   /* the game may keep the name pointer */
++    snprintf(held, sizeof held, "%s", name);
++    for (unsigned i = 0; i < stalker_count; i++) {
++        if (strcmp(stalkers[i].name, "PouchPlayer")) continue;
++        uintptr_t actor = stalkers[i].actor;
++        anim_log("pouch before", actor);
++        if (!anim_state(actor)) { fprintf(stderr, "[survey] pouchanim: no animation chain, not calling\n"); continue; }
++        struct { uintptr_t actor; const char *name; uint32_t zero; float rate, a, b; uint8_t on, f21, f22, pad[5]; void *tail; } req;
++        _Static_assert(sizeof req == 0x30, "animation request is 0x30 bytes");
++        memset(&req, 0, sizeof req);
++        req.actor = actor; req.name = held; req.rate = 1.0f; req.a = req.b = -1.0f; req.on = 1;
++        bool ok = play(&req, 0);
++        fprintf(stderr, "[survey] pouchanim: %s -> %d\n", held, ok);
++        anim_log("pouch after", actor);
++    }
++}
++/* Place PouchPlayer with the game's own set-transform, as the menu does: 0x2ba758(actor, &arg, 0); arg = position, row-major
++   rotation, scale, 8 zero bytes at +0x40, flags 7 at +0x48. Facing the player, where it already stands. */
++static void pouch_place(uintptr_t player) {
++    static const uint32_t w_set[] = {0xaa0103e8, 0x52800029, 0x1ac22121, 0xaa0803e2, 0x141c6b2b, 0x39408008};
++    void (*set_transform)(uintptr_t, void *, int) = (void (*)(uintptr_t, void *, int))game_fn(0x2ba758, w_set, 6);
++    if (!set_transform) { fprintf(stderr, "[survey] pouchplace: function mismatch\n"); return; }
++    float pp[3] = {0};
++    read_mem(player + ACTOR_POS, pp, sizeof pp);
++    for (unsigned i = 0; i < stalker_count; i++) {
++        if (strcmp(stalkers[i].name, "PouchPlayer")) continue;
++        float pos[3];
++        if (!read_mem(stalkers[i].actor + ACTOR_POS, pos, sizeof pos)) continue;
++        float hx = pp[0] - pos[0], hz = pp[2] - pos[2], hl = hypotf(hx, hz);
++        if (hl < 0.01f) { hx = 0; hz = 1; hl = 1; }
++        hx /= hl; hz /= hl;
++        struct { float pos[3], rot[9], scale[3]; uint8_t pad3c[4], zero40[8]; uint8_t flags; uint8_t pad[7]; } arg;
++        _Static_assert(sizeof arg == 0x50, "set-transform argument is 0x50 bytes");
++        memset(&arg, 0, sizeof arg);
++        memcpy(arg.pos, pos, sizeof pos);
++        float rot[9] = {hz, 0, hx, 0, 1, 0, -hx, 0, hz};
++        memcpy(arg.rot, rot, sizeof rot);
++        arg.scale[0] = arg.scale[1] = arg.scale[2] = 1; arg.flags = 7;
++        set_transform(stalkers[i].actor, &arg, 0);
++        fprintf(stderr, "[survey] pouchplace: set at %.2f,%.2f,%.2f\n", pos[0], pos[1], pos[2]);
++    }
++}
++static void pouch_show(uintptr_t player) {
++    static const uint32_t w_model[] = {0xf9411408, 0xb4000168, 0xf9400500, 0xb4000100, 0xf9400008};
++    static const uint32_t w_bind[] = {0xaa0003e8, 0xf9403000, 0xf100001f, 0xfa411004, 0x54000081};
++    static const uint32_t w_mask[] = {0x79449008, 0xb9401009, 0x6b08013f, 0x1a883128, 0x34000168};
++    uintptr_t (*get_model)(uintptr_t) = (uintptr_t (*)(uintptr_t))game_fn(0xba8854, w_model, 5);
++    void (*bind)(uintptr_t, uintptr_t) = (void (*)(uintptr_t, uintptr_t))game_fn(0x585d58, w_bind, 5);
++    void (*set_mask)(uintptr_t, uint32_t) = (void (*)(uintptr_t, uint32_t))game_fn(0x50138c, w_mask, 5);
++    if (!get_model || !bind || !set_mask) {
++        fprintf(stderr, "[survey] pouch: function mismatch model=%d bind=%d mask=%d\n", !!get_model, !!bind, !!set_mask); return;
++    }
++    uintptr_t world_model = get_model(player), world = world_model ? read_ptr(world_model + 0x60) : 0;
++    uintptr_t table = read_ptr(survey_main + 0x3adade8), entries = table ? read_ptr(table + 0x48) : 0;
++    fprintf(stderr, "[survey] pouch: player model=%#llx scene=%#llx | table entry0=%#llx [entry0]=%#llx entry1=%#llx [entry1]=%#llx\n",
++            (unsigned long long)world_model, (unsigned long long)world, (unsigned long long)entries, (unsigned long long)read_ptr(entries),
++            (unsigned long long)(entries + 0x60), (unsigned long long)read_ptr(entries + 0x60));
++    int found = 0;
++    for (unsigned i = 0; i < stalker_count; i++) {
++        if (strcmp(stalkers[i].name, "PouchPlayer")) continue;
++        found = 1;
++        uintptr_t model = get_model(stalkers[i].actor);
++        if (!model) { fprintf(stderr, "[survey] pouch: actor %#llx has no model\n", (unsigned long long)stalkers[i].actor); continue; }
++        for (int pass = 0; pass < 2; pass++) {
++            uint32_t n = 0; uint16_t n2 = 0;
++            read_mem(model + 0x10, &n, 4); read_mem(model + 0x248, &n2, 2);
++            if (n2 < n) n = n2;
++            uintptr_t arr = read_ptr(model + 0x18);
++            char masks[256] = {0}; size_t len = 0;
++            for (uint32_t k = 0; k < n && k < 24; k++) {
++                uint32_t mask = 0; read_mem(read_ptr(arr + k * 0x38) + 8, &mask, 4);
++                len += (size_t)snprintf(masks + len, sizeof masks - len, " %x", mask);
++                if (len >= sizeof masks) break;
++            }
++            fprintf(stderr, "[survey] pouch: %s model=%#llx scene=%#llx instances=%u masks:%s\n", pass ? "after" : "before",
++                    (unsigned long long)model, (unsigned long long)read_ptr(model + 0x60), n, masks);
++            if (pass) break;
++            if (world && read_ptr(model + 0x60) != world) bind(model, world);
++            set_mask(model, 0xffffffffu);
++        }
++    }
++    if (!found) fprintf(stderr, "[survey] pouch: no spawned PouchPlayer (survey spawn <tag> PouchPlayer first)\n");
++}
++#endif
 +/* One frame of Lonk: the behaviour moves the anchor (yaw only; local Z = facing, as spawn_request reads it), then every live
 +   body piece is put there. A piece whose name no longer reads back is dropped. */
 +static void lonk_step(uint64_t frame, uintptr_t player) {
@@ -301,7 +506,13 @@ diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey
 +    float hx = face_player ? p[0] - a[0] : dx, hz = face_player ? p[2] - a[2] : dz, hl = hypotf(hx, hz);
 +    if (hl < 0.01f) { hx = -fx; hz = -fz; hl = 1; }
 +    hx /= hl; hz /= hl;
-+    float ground = ground_mode == GROUND_TRAIL ? trail_height(a[0], a[2], p[1]) : p[1];
++    float ground = ground_mode == GROUND_TRAIL || ground_mode == GROUND_TERRAIN ? trail_height(a[0], a[2], p[1]) : p[1];
++#if defined(TOTK_GAME_V143)
++    if (ground_mode == GROUND_TERRAIN) {   /* the heightmap where it answers near the player's height, footsteps elsewhere */
++        float h;
++        if (terrain_height(a[0], a[2], p[1] + 2, &h) && fabsf(h - p[1]) < 40) ground = h;
++    }
++#endif
 +    /* ease toward the new height (no pops when the nearest footstep changes); a teleport snaps */
 +    if (!(lonk_kind == LONK_BEHIND && entering) && isfinite(a[1]) && fabsf(ground - a[1]) < 30) ground = a[1] + (ground - a[1]) * 0.15f;
 +    for (unsigned i = 0; i < stalker_count; i++) {
@@ -356,10 +567,41 @@ diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey
 +    char word[16] = {0};
 +    if (!kind && (used = 0, sscanf(line, "survey ground %15s %n", word, &used)) == 1 && used && !line[used]) {
 +        int mode = -1;
-+        for (int g = 0; g < 3; g++) if (!strcmp(word, ground_names[g])) mode = g;
-+        if (mode < 0) { fprintf(stderr, "[survey] rejected: ground <player|physics|trail>\n"); return 1; }
++        for (int g = 0; g < GROUND_MODES; g++) if (!strcmp(word, ground_names[g])) mode = g;
++        if (mode < 0) { fprintf(stderr, "[survey] rejected: ground <player|physics|trail|terrain>\n"); return 1; }
 +        pthread_mutex_lock(&survey_lock); ground_mode = mode; pthread_mutex_unlock(&survey_lock);
 +        fprintf(stderr, "[survey] lonk: ground=%s\n", ground_names[mode]);
++        return 1;
++    }
++    /* "survey pouch": make spawned PouchPlayers draw; "survey height": log the terrain height under the player */
++    if (!kind && !strncmp(line, "survey peek ", 12)) {
++        pthread_mutex_lock(&survey_lock);
++        snprintf(peek_request, sizeof peek_request, "%s", line + 12);
++        peek_request[strcspn(peek_request, "\r\n")] = 0;
++        atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
++        pthread_mutex_unlock(&survey_lock);
++        return 1;
++    }
++    char anim[64] = {0};
++    if (!kind && (used = 0, sscanf(line, "survey pouchanim %63[A-Za-z0-9_] %n", anim, &used)) == 1 && used && !line[used]) {
++        pthread_mutex_lock(&survey_lock); snprintf(pouch_anim_name, sizeof pouch_anim_name, "%s", anim);
++        atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release); pthread_mutex_unlock(&survey_lock);
++        return 1;
++    }
++    int place = (used = 0, sscanf(line, "survey pouchplace %n", &used)) == 0 && used && !line[used];
++    int info = (used = 0, sscanf(line, "survey animinfo %n", &used)) == 0 && used && !line[used];
++    if (!kind && (place || info)) {
++        pthread_mutex_lock(&survey_lock); if (place) pouch_place_request = 1; else anim_info_request = 1;
++        atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release); pthread_mutex_unlock(&survey_lock);
++        return 1;
++    }
++    int pouch = (used = 0, sscanf(line, "survey pouch %n", &used)) == 0 && used && !line[used];
++    int height = !pouch && (used = 0, sscanf(line, "survey height %n", &used)) == 0 && used && !line[used];
++    if (!kind && (pouch || height)) {
++        pthread_mutex_lock(&survey_lock);
++        if (pouch) pouch_request = 1; else height_request = 1;
++        atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
++        pthread_mutex_unlock(&survey_lock);
 +        return 1;
 +    }
 +    if (!kind && (used = 0, sscanf(line, "survey lonk stop %n", &used)) == 0 && used && !line[used]) {
@@ -398,7 +640,7 @@ diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,6 +639,10 @@
+@@ -307,6 +854,10 @@ void runtime_survey_cancel_user(void) {
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
@@ -409,7 +651,7 @@ diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey
      fprintf(stderr, "[survey] cancelled: user input\n");
      pthread_mutex_unlock(&survey_lock);
  }
-@@ -315,7 +651,15 @@
+@@ -315,7 +866,32 @@ void runtime_survey_tick(uint64_t frame) {
      in_tick = 1;
      pthread_mutex_lock(&survey_lock);
      uintptr_t actor = player_actor();
@@ -417,6 +659,23 @@ diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey
 +    if (spawn_left) spawn_watch(frame);
 +    if (request.kind == 3 && actor) { spawn_body = 1; spawn_request(request.tag, request.name, request.off, frame, actor); request.kind = 0; }
 +    if (stalk_left && actor) { lonk_step(frame, actor); if (!--stalk_left) fprintf(stderr, "[survey] lonk: done\n"); }
++#if defined(TOTK_GAME_V143)
++    if (pouch_request && actor) { pouch_request = 0; pouch_show(actor); }
++    if (peek_request[0] && actor) { peek_run(actor); peek_request[0] = 0; }
++    if (pouch_anim_name[0] && actor) { pouch_anim(pouch_anim_name); pouch_anim_name[0] = 0; }
++    if (pouch_place_request && actor) { pouch_place_request = 0; pouch_place(actor); }
++    if (anim_info_request && actor) {
++        anim_info_request = 0;
++        anim_log("player", actor);
++        for (unsigned i = 0; i < stalker_count; i++) anim_log(stalkers[i].name, stalkers[i].actor);
++    }
++    if (height_request && actor) {
++        float p[3], h = NAN;
++        height_request = 0;
++        int ok = read_mem(actor + ACTOR_POS, p, sizeof p) && terrain_height(p[0], p[2], p[1] + 2, &h);
++        fprintf(stderr, "[survey] height: ok=%d terrain=%.2f player=%.2f\n", ok, h, p[1]);
++    }
++#endif
 +#endif
      if (!actor) {
 +#ifdef SURVEY_SPAWN
@@ -425,43 +684,18 @@ diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
      } else if (request.kind == 1) {
-@@ -340,7 +684,12 @@
+@@ -340,7 +916,14 @@ void runtime_survey_tick(uint64_t frame) {
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }
 +#ifdef SURVEY_SPAWN
 +done:
-+    atomic_store_explicit(&runtime_survey_pending, request.kind || hold_left || spawn_left || stalk_left, memory_order_release);
++    atomic_store_explicit(&runtime_survey_pending, request.kind || hold_left || spawn_left || stalk_left || pouch_request || height_request || peek_request[0] ||
++                          pouch_anim_name[0] || pouch_place_request || anim_info_request,
++                          memory_order_release);
 +#else
      atomic_store_explicit(&runtime_survey_pending, request.kind || hold_left, memory_order_release);
 +#endif
      pthread_mutex_unlock(&survey_lock);
      in_tick = 0;
  }
-diff --git a/games/totk/runtime/game_version.h b/games/totk/runtime/game_version.h
-index 9179e3c..95d94aa 100644
---- a/games/totk/runtime/game_version.h
-+++ b/games/totk/runtime/game_version.h
-@@ -35,6 +35,13 @@
- #define GAME_ADDR_0xe995c4 0xbdb48c
- #define GAME_ADDR_0x2aa4fa0 0x2bb79f0
- #define GAME_ADDR_0x453f648 0x398b348
-+/* Survey spawn only (world_survey.c "survey spawn"): engine::actor::ActorMgr::requestCreateActorAsync and
-+   ActorMgr::sInstance (1.0.0 addresses from aquacluck/totk-lotuskit syms). The 1.4.3 function is the only one of the
-+   five "Pack/Actor/" + ".pack" + "ActorMgr" string users with 1.0.0's entry (same register saves, ldr [x29,#0x68] then
-+   ldrb [x0,#0xe1]), the same CreateArg field reads (+0x48..+0x88) and stack arguments; 87 of its 108 callers load x0
-+   through one GOT slot (main+0x395e008) that holds sInstance, as 87 of 105 do in 1.0.0 (slot 0x4557b48). */
-+#define GAME_ADDR_0xa5fdf8 0x599670
-+#define GAME_ADDR_0x46479e0 0x3ad7450
- #elif defined(TOTK_GAME_V112)
- #define TOTK_GAME_VERSION "1.1.2"
- #define TOTK_GAME_DIR "v112"
-@@ -155,6 +162,8 @@
- #define GAME_ADDR_0x453f648 0x453f648
- #define GAME_ADDR_0x8f6cbc 0x8f6cbc
- #define GAME_ADDR_0xce3fec 0xce3fec
-+#define GAME_ADDR_0xa5fdf8 0xa5fdf8   /* survey spawn: ActorMgr::requestCreateActorAsync (lotuskit syms) */
-+#define GAME_ADDR_0x46479e0 0x46479e0 /* survey spawn: ActorMgr::sInstance (lotuskit syms; GOT slot 0x4557b48) */
- #define GAME_OUTPUT_CALL_WORD 0x94000082u
- #endif
- #ifndef GAME_NAME
