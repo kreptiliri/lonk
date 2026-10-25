@@ -97,12 +97,18 @@ checking the original words. As a bonus, the mannequin turns into a working shop
 every body piece is set to the same anchor point, turned to face Link (yaw only). That keeps the three pieces one
 figure.
 
-Height comes from the game's terrain query, the one behind the AI node `QueryTerrainGetGroundHeight`:
+Height comes from a physics raycast straight down from 3 m above him, set up the way the AI node
+`QueryCheckCliffRayCast` (`0x260b30c`) builds one on its stack:
+
+- a 0x178-byte query: vtable `[main+0x395d990]+0x10`, start at `+0x08`, end at `+0x14`, fraction `-1` at `+0x3c`
+- a collision filter at `+0x128` (vtable `[main+0x3988178]+0x10`, layers `0xfffcffff00000011`), pointed to by `+0x60`
+- `bool 0x1952a4(&query, 0)` casts it and leaves the hit position at `+0x24`. Its cleanup calls are empty.
+
+It hits whatever Link can stand on, sky islands and rocks included (checked against Link himself, dropped on the same
+spot: both 1520.99). Where it misses, the game's terrain heightmap (the AI node `QueryTerrainGetGroundHeight`:
 `T = [main+0x3add550]`, `scene = 0x2b7332c(T, pos, 1, 0, 300.0)`, then `0x5db4c0(&height, xz, scene, -1, 0, 1, 0)`
-answers 1 or 2 on success. It's the heightmap only, so where it doesn't answer (or answers far from Link's height,
-like on a bridge) Lonk falls back to Link's own footsteps: a ring of his last 512 positions, one every 25 cm, using the
-nearest one. Letting gravity do it doesn't work, because setting the transform every frame keeps gravity from ever
-catching up, and he sinks into hills.
+answers 1 or 2) takes over, then Link's own footsteps: a ring of his last 512 positions, one every 25 cm. Letting gravity
+do it doesn't work, because setting the transform every frame keeps gravity from ever catching up.
 
 Walking through Link puts the mannequin's collision above Link's head, which the game reads as a low ceiling, and
 forces a crouch. Lonk keeps 1.1 m away and slides around instead.

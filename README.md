@@ -21,7 +21,8 @@ Runs on the [MacNativeGames](https://github.com/ly05010419/MacNativeGames) nativ
 - **He used to be mannequins.** Before that he was three armor-shop mannequins stacked on one spot, which crashed the
   game when you walked up to them (they went looking for the item they were selling). That fix is still in, and
   `survey drop` gets rid of the mannequins.
-- **He walks and runs.** Every frame he moves over the real terrain toward wherever his brain says, with Link's own
+- **He walks and runs.** Every frame he moves over the real ground (a physics raycast, so sky islands, rocks and bridges
+  count too) toward wherever his brain says, with Link's own
   walk and run animations picked from his speed, facing where he's going, and he turns to face you when he stops. The
   animations need a small RomFS mod (see "Trying it"); without it he sweats or shivers his way around instead.
 - **He has a (very small) brain.** Every few seconds he decides what to do:
@@ -79,8 +80,8 @@ He starts his idle animation and gets dressed on his own. `survey equip <slot> <
 still works (`survey spawn m1 Mannequin_001_Upper` and friends), and `survey drop <name start|all>` removes pieces from
 him again.
 
-You can also force one mood with `survey lonk <stalk|block|behind|wander|gift|flee> <frames>`, and stop him with
-`survey lonk stop`.
+You can also force one mood with `survey lonk <stalk|block|behind|wander|gift|flee> <frames>`, send him somewhere with
+`survey lonk goto <metres right> <metres forward>` (from you), and stop him with `survey lonk stop`.
 
 ## Known issues
 
@@ -88,10 +89,9 @@ You can also force one mood with `survey lonk <stalk|block|behind|wander|gift|fl
   the defaults.
 - His feet slide a bit: the walk and run play at one speed whatever his actual speed is.
 - With the mod installed, the inventory Link walks or runs in place in the pause menu when you're somewhere cold or hot.
-- The terrain height ignores bridges, buildings and sky islands, so there he falls back to your footsteps. On a sky
-  island, wandering away from you, that can leave him buried up to the neck.
+- Off a ledge (nothing under him within 60 m) he falls back to your footsteps' height and floats.
 - He'll happily block you while standing on thin air over a cliff.
-- Wandering off on his own, he walks straight through rocks and trees.
+- Wandering off on his own, he walks straight through rocks and trees (or over them: the raycast lands him on top).
 - He jumps when you jump. He has no idea why.
 
 ## License
