@@ -24,8 +24,8 @@ Runs on the [MacNativeGames](https://github.com/ly05010419/MacNativeGames) nativ
   `survey drop` gets rid of the mannequins.
 - **He walks and runs.** Every frame he moves toward wherever his brain says, over the real ground (a physics raycast,
   so sky islands, rocks, bridges and caves count too) and around anything in his way, ledges included: he steps up at most
-  a stair's height, falls if the floor drops out under him, and pops back next to you if he gets stranded. He uses Link's own walk, run and dash,
-  picked from his speed and played at a matching speed, and turns smoothly to face where he's going, then back to you
+  a stair's height, falls if the floor drops out under him, and pops back next to you if he gets stranded. He uses Link's own run and sprint
+  (5.7 and 9 m/s, measured off Link), picked from his speed and played so his steps match the ground, and turns smoothly to face where he's going, then back to you
   when he stops. He also startles and celebrates. The animations need a small RomFS mod (see
   "Trying it"); without it he strikes the menu's weapon poses, empty-handed, instead.
 - **He doesn't stay gone.** If his body disappears while his brain runs (you die and reload, a loading zone), he's
