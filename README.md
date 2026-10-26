@@ -60,6 +60,7 @@ data. You need your own legally dumped copy of the game, like the port itself do
 - `patches/BASE_COMMIT`: the MacNativeGames commit the patch applies to.
 - `apply.sh`: applies the patch to a MacNativeGames checkout.
 - `mod/make_mod.py`: builds his animation mod from your own game files (nothing from the game is in this repo).
+- `tools/plugin.sh`: builds his code as a hot-reload plugin (see below).
 - `docs/how-it-works.md`: the reverse-engineering notes. How I found the spawn function in 1.4.3, how he gets dressed,
   how an inventory Link learned to walk, how he finds the ground.
 
@@ -91,6 +92,14 @@ him again.
 You can also force one mood with `survey lonk <stalk|buddy|block|behind|wander|gift|flee|party> <frames>`, send him
 somewhere with `survey lonk goto <metres right> <metres forward> [m/s]` (from you), and stop him with
 `survey lonk stop`.
+
+### Changing him without rebuilding the app
+
+Rebuilding the app takes minutes. Start the test session with `TOTK_LONK_PLUGIN=<path>/lonk.dylib` as well, then after
+each change to `world_survey.c` run `tools/plugin.sh /path/to/MacNativeGames <MacNativeGames build> <path>/lonk.dylib`
+(about a second). The running game picks it up within half a second and swaps his code without a restart. He doesn't
+even notice: his state (where he is, his mood, his clothes) carries over, unless the change added or removed some of it,
+and then he starts fresh. `survey reload` forces a reload.
 
 ## Known issues
 
