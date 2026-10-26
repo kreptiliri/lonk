@@ -94,6 +94,7 @@ That spawns him 4 m in front of you and runs his brain for an hour.
 | `survey lonk <mood> <frames>` | force a mood: `stalk`, `buddy`, `block`, `behind`, `wander`, `gift`, `flee`, `party`, `fight`, `hide` |
 | `survey lonk emote <name>` | `look`, `lookup`, `eat`, `meal`, `drink`, `yuck`, `jump`, `sulk`, `surprise` |
 | `survey lonk goto <right> <forward> [m/s]` | send him somewhere (metres from you) |
+| `survey lonk nobuddy` / `survey lonk buddyok` | he stops / starts picking buddy mode himself (your whistle still calls him) |
 | `survey lonk stop` | stop his brain |
 | `survey equip <slot> <Name> [dye]` | put one piece on him (0 weapon, 7 bow, 8 shield, 9 head, 10 upper, 11 lower; `-` copies yours) |
 | `survey spawn prop <Name> [forward [sideways [up]]]` | spawn something on its own (an enemy, to watch him pick a fight) |
