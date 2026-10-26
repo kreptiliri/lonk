@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..41e5898 100644
+index c05d6c3..b05b510 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -234,7 +234,7 @@ index c05d6c3..41e5898 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,22 +435,1525 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,22 +435,1542 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -303,8 +303,16 @@ index c05d6c3..41e5898 100644
 +    fprintf(stderr, "[survey] lonk: -> %s (%u frames)\n", lonk_names[kind], frames);
 +}
 +/* The dice: mostly stalking, sometimes in the way, a gift, a wander or right behind you. */
++static float lonk_pace;   /* the player's speed over the last few seconds (m/s), and how long they've stood still */
++static unsigned lonk_still;
++static int lonk_climate;   /* the player is freezing or too hot (the menu's flags): he'd like to bring a pepper or a melon */
 +static void lonk_roll(void) {
 +    unsigned weight[LONK_KINDS] = {25, 15, 15, 15, 15, 0, 0, 15, 0, 10};   /* fights start when he sees an enemy */
++    /* what you're doing changes the dice: on the move he sticks with you, standing about he plays, cold or hot he brings
++       you something */
++    if (lonk_pace > 3) { weight[LONK_BUDDY] = 35; weight[LONK_STALK] = 30; weight[LONK_WANDER] = 3; weight[LONK_HIDE] = 0; weight[LONK_GIFT] = 8; }
++    else if (lonk_still > 600) { weight[LONK_WANDER] = 22; weight[LONK_HIDE] = 18; weight[LONK_GIFT] = 20; weight[LONK_BEHIND] = 20; weight[LONK_BUDDY] = 8; }
++    if (lonk_climate) weight[LONK_GIFT] += 25;
 +    static int last_kind = -1;
 +    if (last_kind == LONK_GIFT) weight[LONK_GIFT] = 0;   /* no two gifts in a row */
 +    unsigned total = 0, pick;
@@ -1137,6 +1145,15 @@ index c05d6c3..41e5898 100644
 +    static float player_pace;
 +    static int player_sprinting;
 +    player_pace += (player_speed - player_pace) * 0.04f;
++    lonk_pace += (player_speed - lonk_pace) * 0.01f;
++    lonk_still = player_speed < 0.3f ? lonk_still + 1 : 0;
++#if defined(TOTK_GAME_V143)
++    if (frame % 60 == 0) {
++        uintptr_t global = read_ptr(survey_main + 0x395ea40), state = global ? read_ptr(global) : 0;
++        uint64_t flags = 0;
++        lonk_climate = state && read_mem(state + 0x658, &flags, sizeof flags) && (flags >> 39 & 3);
++    }
++#endif
 +    if (player_pace > 7.6f) player_sprinting = 1;
 +    else if (player_pace < 6.6f) player_sprinting = 0;
 +    memcpy(last_p, p, sizeof last_p);
@@ -1763,7 +1780,7 @@ index c05d6c3..41e5898 100644
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,15 +1963,77 @@ void runtime_survey_cancel_user(void) {
+@@ -307,15 +1980,77 @@ void runtime_survey_cancel_user(void) {
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
@@ -1841,7 +1858,7 @@ index c05d6c3..41e5898 100644
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
      } else if (request.kind == 1) {
-@@ -340,8 +2058,152 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -340,8 +2075,152 @@ void runtime_survey_tick(uint64_t frame) {
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }
