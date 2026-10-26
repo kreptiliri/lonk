@@ -239,6 +239,12 @@ makes it look like he dove there).
   blocked for a third of a second or hasn't got any closer for two thirds, he jumps: upward speed sqrt(2 g (height +
   0.6 m)), the jump clip, and he keeps heading for you in the air (aiming 0.6 m from you, so he lands beside you, not at
   the foot). The knee-high wall check rises with his feet, so he moves on once he's above the edge. 4 s between tries.
+- Hide and seek (a mood of its own, weight 10): 24 directions, 6 to 14 m, each walkable in a straight line
+  (`path_free`, at least 6 m), with floor at the end, and hidden: a ray from your eyes (1.6 m up) to his chest there
+  hits something at least 0.8 m before it. He runs there and faces you; within 3 m you've found him (startle, flee);
+  after 25 s he gives up and follows you again.
+- Block can't always get in front of you (a wall in the way): stuck for a second there, he follows you instead. Before,
+  he got "lost", popped behind you, and tried again, every 3 seconds.
 - Buddy mode, both standing still for 7 s: now and then he looks up, looks around, snacks or drinks.
 
 ## Coming back
