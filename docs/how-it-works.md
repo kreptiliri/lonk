@@ -41,7 +41,7 @@ like an idle. His skeleton was fine all along.
 1 to 5 go to the weapon poses, anything else to the plain idle, which picks cold, normal, hot or tired from the
 blackboard's `Temperature` and `Stamina`. The menu's AI node `ExecutePouchPlayerSetASBBParameter` (`0x241cc08`) writes
 those two (and `Burning`, `ShieldEquip`, `Arrow`, `Carrying`, `Size`...) every frame from your state: `Temperature` is -1
-when you're cold, 1 when hot, from flags at `[main+0x3a5ea40]+0x658`. It never writes `HoldAnimationType` for him. So:
+when you're cold, 1 when hot, from flags at `[[main+0x395ea40]]+0x658` (the GOT slot is `0x395ea40`; Ghidra calls it `DAT_03a5ea40`). It never writes `HoldAnimationType` for him. So:
 
 - the RomFS mod (`mod/make_mod.py`, built with [dt-12345/asb](https://github.com/dt-12345/asb)) points the selector's
   cases 1 to 5 straight at five of the menu's weapon-equip clips (only reachable from those cases), renamed to
@@ -218,6 +218,17 @@ So every 15 frames he casts 16 chest-high rays out to 18 m (characters on: `0xff
 actor named `Enemy_*` within 6 m of his height is "seen" for 3 seconds. Tested with a spawned Bokoblin: "spotted
 Enemy_Bokoblin_Junior, 10.4 m away", then the fight (bomb barrel spawned at an exact spot halfway to it, startle, flee
 from the enemy, not from you), and another 25 s later. The same scan found the shrine gate and you (`Player`).
+
+Enemies aren't always a fight: one time in three he startles and hides behind you instead (the "behind" mood's teleport
+makes it look like he dove there).
+
+## Small things
+
+- Gifts: freezing (the player's cold flag), he brings a spicy pepper (`Item_Fruit_I`, the only fruit with `ResistCold`);
+  too hot, a hydromelon (`Item_Fruit_F`, `ResistHot`). The flags are bits 39 and 40 of `[[main+0x395ea40]]+0x658`, the
+  ones the menu turns into `Temperature`, and `+0x6ec` right next to them is the temperature where you stand (15 degrees
+  in the Temple of Time).
+- Buddy mode, both standing still for 7 s: now and then he looks up, looks around, snacks or drinks.
 
 ## Coming back
 

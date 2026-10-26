@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..a7aae03 100644
+index c05d6c3..71c7e9c 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -230,7 +230,7 @@ index c05d6c3..a7aae03 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,22 +432,1435 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,22 +432,1461 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -1158,7 +1158,8 @@ index c05d6c3..a7aae03 100644
 +    if (lonk_brain && !lonk_phase_left) lonk_roll();
 +    if (lonk_phase_left) lonk_phase_left--;
 +#if defined(TOTK_GAME_V143)
-+    /* he keeps an eye out: an enemy seen in the last 3 s, and (with his brain on, once every 25 s) he picks a fight */
++    /* he keeps an eye out: an enemy seen in the last 3 s, and (with his brain on, once every 25 s) he picks a fight, or
++       one time in three hides behind you */
 +    if (lonk_fight_cooldown) lonk_fight_cooldown--;
 +    if (lonk_enemy_left) lonk_enemy_left--;
 +    if (frame % 15 == 0 && ground_mode == GROUND_TERRAIN && isfinite(lonk_anchor[1])) {
@@ -1171,8 +1172,13 @@ index c05d6c3..a7aae03 100644
 +    }
 +    if (lonk_brain && lonk_enemy_left && !lonk_fight_cooldown && lonk_kind != LONK_FIGHT && lonk_kind != LONK_GIFT &&
 +        lonk_kind != LONK_PARTY && lonk_kind != LONK_FLEE) {
-+        fprintf(stderr, "[survey] lonk: picks a fight\n");
-+        lonk_enter(LONK_FIGHT, 600);
++        if (arc4random_uniform(3) == 0) {   /* or not: sometimes he hides behind you instead */
++            fprintf(stderr, "[survey] lonk: hides behind you\n");
++            lonk_enter(LONK_BEHIND, 300); lonk_emote_start(GAIT_SURPRISE); lonk_fight_cooldown = 900;
++        } else {
++            fprintf(stderr, "[survey] lonk: picks a fight\n");
++            lonk_enter(LONK_FIGHT, 600);
++        }
 +    }
 +#endif
 +    float *a = lonk_anchor, target[3] = {p[0], p[1], p[2]}, speed = stalk_speed, stop = stalk_stop;
@@ -1200,9 +1206,20 @@ index c05d6c3..a7aae03 100644
 +        if (!lonk_gifted && hypotf(p[0] - a[0], p[2] - a[2]) < 2.4f && !spawn_left) {
 +            float off[3] = {1.2f, frand(-1, 1), 1.0f};
 +            spawn_body = 0;
-+            /* mostly an apple; sometimes a fish, a monster part or a bomb barrel */
++            /* mostly an apple; sometimes a fish, a monster part or a bomb barrel. Freezing, a spicy pepper; too hot, a
++               hydromelon (the player's cold and hot flags, bits 39 and 40 of [[main+0x395ea40]]+0x658, as the menu reads them;
++               +0x6ec is the temperature where you are, in degrees) */
 +            static const char *const gifts[] = {"Item_Fruit_A", "Item_Fruit_A", "Item_Fruit_A", "Item_FishGet_A", "Item_Enemy_01", "BarrelBomb", "BarrelBomb"};
-+            spawn_request("gift", gifts[arc4random_uniform(sizeof gifts / sizeof *gifts)], off, frame, player);
++            const char *gift = gifts[arc4random_uniform(sizeof gifts / sizeof *gifts)];
++#if defined(TOTK_GAME_V143)
++            uintptr_t global = read_ptr(survey_main + 0x395ea40), state = global ? read_ptr(global) : 0;   /* a GOT slot: twice */
++            uint64_t flags = 0;
++            if (state && read_mem(state + 0x658, &flags, sizeof flags) && arc4random_uniform(4)) {
++                if (flags >> 39 & 1) gift = "Item_Fruit_I";
++                else if (flags >> 40 & 1) gift = "Item_Fruit_F";
++            }
++#endif
++            spawn_request("gift", gift, off, frame, player);
 +            lonk_enter(LONK_PARTY, 150);   /* a little celebration first, then he runs */
 +            lonk_gifted = 1;
 +        }
@@ -1247,6 +1264,15 @@ index c05d6c3..a7aae03 100644
 +            lonk_emote_start(pick[arc4random_uniform(sizeof pick / sizeof *pick)]);
 +        } else if (lonk_kind == LONK_BEHIND && !entering && ll > 0.5f && ll < 4 && (fx * lx + fz * lz) / ll > 0.8f) lonk_emote_start(GAIT_SURPRISE);
 +        if (lonk_emote_left) lonk_emoted = 1;
++    }
++    /* standing about with you for a while (buddy, both still), now and then he looks up or around, or has a snack */
++    static unsigned idle_frames;
++    if (lonk_kind == LONK_BUDDY && player_speed < 0.3f && hypotf(target[0] - a[0], target[2] - a[2]) < 0.3f) idle_frames++;
++    else idle_frames = 0;
++    if (idle_frames > 420 && !lonk_emote_left && arc4random_uniform(800) == 0) {
++        static const int pick[] = {GAIT_LOOKUP, GAIT_LOOKUP, GAIT_LOOK, GAIT_LOOK, GAIT_EAT, GAIT_DRINK};
++        lonk_emote_start(pick[arc4random_uniform(sizeof pick / sizeof *pick)]);
++        idle_frames = 240;
 +    }
 +    /* you jumped: so does he, a moment later (if he's not busy and can see you) */
 +    static float last_py, calm_frames;
@@ -1669,7 +1695,7 @@ index c05d6c3..a7aae03 100644
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,6 +1870,10 @@ void runtime_survey_cancel_user(void) {
+@@ -307,6 +1896,10 @@ void runtime_survey_cancel_user(void) {
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
@@ -1680,7 +1706,7 @@ index c05d6c3..a7aae03 100644
      fprintf(stderr, "[survey] cancelled: user input\n");
      pthread_mutex_unlock(&survey_lock);
  }
-@@ -315,7 +1882,58 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -315,7 +1908,58 @@ void runtime_survey_tick(uint64_t frame) {
      in_tick = 1;
      pthread_mutex_lock(&survey_lock);
      uintptr_t actor = player_actor();
@@ -1739,7 +1765,7 @@ index c05d6c3..a7aae03 100644
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
      } else if (request.kind == 1) {
-@@ -340,8 +1958,149 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -340,8 +1984,149 @@ void runtime_survey_tick(uint64_t frame) {
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }
