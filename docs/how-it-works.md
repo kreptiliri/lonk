@@ -212,7 +212,8 @@ tried to move he got somewhere (`lonk stats` in the log every 10 s).
 
 Stranded for 3 seconds (5 m above or below Link or 30 m away while getting nowhere, 60 m away, stuck against something,
 or no floor), he pops back next to Link: behind him, else to a side, else in front, wherever a ray finds flat floor at
-Link's height. Up a staircase or off on a run of his own is fine. The "behind" mood's teleport uses the same spot.
+Link's height. Up a staircase or off on a run of his own is fine. Following you for 4 s without getting any closer
+(pacing along a ledge he can't get over) counts as lost too. The "behind" mood's teleport uses the same spot.
 
 Walking through Link puts the mannequin's collision above Link's head, which the game reads as a low ceiling, and
 forces a crouch. Lonk keeps 1.1 m away and slides around instead, unless that would put him in a wall or off a ledge
@@ -244,8 +245,9 @@ makes it look like he dove there).
   ones the menu turns into `Temperature`, and `+0x6ec` right next to them is the temperature where you stand (15 degrees
   in the Temple of Time).
 - Ledges, following you (stalk, buddy, block, behind, gift): when you're 1.5 to 12 m below him, ledges stop counting as
-  walls, so he walks off and the falling code takes him down. When you're 1.2 to 7 m above and within 9 m, and he's been
-  blocked for a third of a second or hasn't got any closer for two thirds, he jumps: upward speed sqrt(2 g (height +
+  walls, so he walks off and the falling code takes him down. When you're 0.6 to 7 m above and within 20 m, and he's been
+  blocked for a quarter of a second or hasn't got any closer for three quarters, he jumps (Camille found it first: when
+  he paced along a ledge, jumping made him copy the jump, and that got him over): upward speed sqrt(2 g (height +
   0.6 m)), the jump clip, and he keeps heading for you in the air (aiming 0.6 m from you, so he lands beside you, not at
   the foot). The knee-high wall check rises with his feet, so he moves on once he's above the edge. 4 s between tries.
 - Hide and seek (a mood of its own, weight 10): 24 directions, 6 to 14 m, each walkable in a straight line
