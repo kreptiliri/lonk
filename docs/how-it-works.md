@@ -144,6 +144,10 @@ So `survey lonk twin` gives you matching outfits: it equips slots 9 to 11 with a
 "whatever the player has on" (the reason his first outfit was a floating head). Once a second it reads the names of your
 own pieces (your EquipmentUser has the same layout), and a slot that changed is copied onto him again.
 
+Outfits: every armor set uses one number for its three pieces (`Armor_1046_Head/Upper/Lower` is the froggy set), and the
+names come from the game's own text (`Mals/USen.Product.142.sarc.zs`, `ActorMsg/PouchContent.msbt`, `Armor_*_Name`).
+Some names appear under several numbers (upgraded copies), so `survey lonk outfit` uses the lowest one of each.
+
 Weapons work the same way: slots 0 (weapon), 7 (bow) and 8 (shield), and the empty name copies yours. The game adds the
 sheath and the quiver by itself. All of an equipment user's pieces sit in one array of ActorLinks from `eu+0x20`, 0x18
 apart, in their own order (weapon 0, bow 3, shield 4, head 8, upper 9, lower 10, sheath 11, quiver 14, the arm 18; found
