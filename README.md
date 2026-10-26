@@ -92,8 +92,9 @@ still works (`survey spawn m1 Mannequin_001_Upper` and friends), and `survey dro
 him again.
 
 He has emotes of his own: arriving somewhere on a wander he looks around, looks up at the sky, or has a snack (a bite of
-something, a whole meal, a drink), which is sometimes gross. When you jump, he jumps too, a moment later. Keep shoving
-him and he sulks. `survey lonk emote <look|lookup|eat|meal|drink|yuck|jump|sulk|surprise>` plays one now.
+something, a whole meal, a drink), which is sometimes gross. He also watches what you do: you jump, he jumps a moment
+later; you get hit, he startles; you open a chest or cook something great, he celebrates; you cook something bad, he
+makes the disgusted face; you climb or glide, he looks up at you. Keep shoving him and he sulks. `survey lonk emote <look|lookup|eat|meal|drink|yuck|jump|sulk|surprise>` plays one now.
 
 Following you, he hops off ledges to come down to you, and when you're up on one (1 to 7 m) and he can't find his way
 up, he jumps up to you, as high as it takes.
