@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..3b23320 100644
+index c05d6c3..4b6fc61 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -125,8 +125,8 @@ index c05d6c3..3b23320 100644
 +static KEEP float lonk_anchor[3], lonk_wander[3], lonk_flee[2];
 +#define LONK_RUN 5.7f      /* m/s, measured off Link: running (holding forward) */
 +#define LONK_SPRINT 9.0f   /* and sprinting */
-+#define LONK_GRAVITY 24.6f   /* m/s/s: Link's standing jump, from a trace, is 0.77 m high and 0.5 s long (2.5 times real gravity) */
-+#define LONK_JUMP 6.2f       /* and leaves the ground at 6.2 m/s */
++#define LONK_GRAVITY 32.0f   /* m/s/s: Link's standing jump, traced frame by frame, is 0.64 m high and 0.4 s long (3 times real gravity) */
++#define LONK_JUMP 6.4f       /* and leaves the ground at 6.4 m/s */
 +static KEEP float lonk_goto[2], lonk_goto_speed = LONK_RUN;   /* "survey lonk goto <right> <forward> [m/s]": the next wander goes to this spot (metres from the player) */
 +static KEEP int lonk_goto_set;
 +static KEEP int lonk_emote, lonk_emoted;   /* a one-off emote (its gait: GAIT_LOOK, GAIT_EAT...) he's doing instead of moving, once per mood */
@@ -237,7 +237,7 @@ index c05d6c3..3b23320 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,22 +438,1612 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,22 +438,1613 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -1098,7 +1098,7 @@ index c05d6c3..3b23320 100644
 +/* how long each emote lasts (frames); the jump is as long as he's in the air, about */
 +static void lonk_emote_start(int gait) {
 +    static const unsigned frames[GAITS] = {[GAIT_LOOK] = 180, [GAIT_SURPRISE] = 100, [GAIT_EAT] = 150, [GAIT_MEAL] = 200, [GAIT_YUCK] = 120,
-+                                           [GAIT_JUMP] = 32, [GAIT_DRINK] = 150, [GAIT_SULK] = 160, [GAIT_LOOKUP] = 150};
++                                           [GAIT_JUMP] = 28, [GAIT_DRINK] = 150, [GAIT_SULK] = 160, [GAIT_LOOKUP] = 150};
 +    lonk_emote = gait; lonk_emote_left = frames[gait] ? frames[gait] : 120;
 +    fprintf(stderr, "[survey] lonk: emote %s\n", gait_names[gait]);
 +}
@@ -1432,13 +1432,14 @@ index c05d6c3..3b23320 100644
 +    int got_on = hypotf(a[0] - before[0], a[2] - before[1]) > 0.02f;
 +    if (wanted) { st_want++; if (got_on) st_moved++; }
 +    lonk_blocked = wanted && !got_on ? lonk_blocked + 1 : 0;   /* frames in a row he's tried and not moved */
-+    /* you're up on a ledge (1 to 7 m above, close) and he's been stuck at its foot: he jumps up to you, just high enough */
++    /* you're up on a ledge (more than a step, 0.6 to 7 m above, close) and he's been stuck at its foot or sliding along
++       it: he jumps up to you, just high enough */
 +    float rise = p[1] - a[1], gap = hypotf(target[0] - a[0], target[2] - a[2]);
 +    static float closest;   /* not getting any closer (sliding along the ledge's foot counts as stuck too) */
 +    static unsigned no_gain, jump_rest;   /* and not hopping on the spot: 4 s between tries */
 +    if (gap < closest - 0.3f || gap > closest + 3) { closest = gap; no_gain = 0; } else no_gain++;
 +    if (jump_rest) jump_rest--;
-+    if (follows && (lonk_blocked > 20 || no_gain > 60) && rise > 1.8f && rise < 7 && hypotf(p[0] - a[0], p[2] - a[2]) < 9 &&
++    if (follows && (lonk_blocked > 15 || no_gain > 45) && rise > 0.6f && rise < 7 && hypotf(p[0] - a[0], p[2] - a[2]) < 9 &&
 +        !lonk_emote_left && lonk_jump == 0 && !jump_rest) {
 +        no_gain = 0; jump_rest = 240;
 +        lonk_jump = sqrtf(2 * LONK_GRAVITY * (rise + 0.6f));
@@ -1853,7 +1854,7 @@ index c05d6c3..3b23320 100644
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,15 +2053,77 @@ void runtime_survey_cancel_user(void) {
+@@ -307,15 +2054,77 @@ void runtime_survey_cancel_user(void) {
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
@@ -1931,7 +1932,7 @@ index c05d6c3..3b23320 100644
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
      } else if (request.kind == 1) {
-@@ -340,8 +2148,152 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -340,8 +2149,152 @@ void runtime_survey_tick(uint64_t frame) {
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }

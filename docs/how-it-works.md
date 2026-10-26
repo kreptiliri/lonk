@@ -100,9 +100,10 @@ within 3 m and facing him (he runs), `HorseCall` (he comes: buddy mode), `OpenTr
 `UltraHandStart`, `LookAround*`, `Talk`, `TalkHello` (looks around). The names come from the Player's ASB command list (532 of them). Tested: jump, a
 spawned Bokoblin hitting the player (`DamageL`, `DamageS`), the whistle, and a sword swing at him (`CutS1`).
 
-The copycat jump: on the player's `Jump`, Lonk starts the jump clip, and once it's actually playing his feet get 6.2 m/s upwards and the falling code does the rest:
-0.77 m up, half a second in the air, like Link's own (measured from a trace of the player's height: that takes gravity
-of 24.6 m/s², 2.5 times the real thing; with real gravity he floated for a second and Camille noticed straight away). Shoved for 1.5 seconds (you within 1.2 m, moving), he sulks.
+The copycat jump: on the player's `Jump`, Lonk starts the jump clip, and once it's actually playing his feet get 6.4 m/s upwards and the falling code does the rest:
+0.64 m up, 0.4 s in the air, like Link's own (traced frame by frame from the player's height: that takes gravity of
+32 m/s², about 3 times the real thing; with real gravity he floated for a second and Camille noticed straight away,
+and my first, coarser measurement still had him a little high). He takes off on the same frame as you. Shoved for 1.5 seconds (you within 1.2 m, moving), he sulks.
 
 Floor rays: the filter I copied from the game's cliff check (`0xfffcffff00000011`) also hits big invisible volumes
 (bit 4 of the low word). The Temple of Time's hall sits inside a 15 m tall one, so every floor ray "hit" right where it
@@ -194,7 +195,7 @@ answers 1 or 2) was the fallback before he had feet, then Link's own footsteps: 
 
 He has feet now. The ray starts a step (0.7 m) above them, not above his head: starting from 3 m above the higher of him
 and Link, a boulder up to 3 m tall counted as floor, so he stepped onto it, and the next ray started higher still. That's
-how he walked up walls and onto cave roofs. Floor lower than his feet and he falls (Link's 24.6 m/s², down to that floor);
+how he walked up walls and onto cave roofs. Floor lower than his feet and he falls (Link's 32 m/s², down to that floor);
 floor too steep (normal y under 0.6) and he doesn't step onto it.
 
 The same raycast steers him: before each step he probes 1 m ahead at chest height (anything there is a wall) and at knee height, and if something's there (and it isn't
