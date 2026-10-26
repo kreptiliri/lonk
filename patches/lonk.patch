@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..e7eb10d 100644
+index c05d6c3..2f9bcc7 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -235,7 +235,7 @@ index c05d6c3..e7eb10d 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,22 +436,1588 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,22 +436,1609 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -304,6 +304,7 @@ index c05d6c3..e7eb10d 100644
 +    fprintf(stderr, "[survey] lonk: -> %s (%u frames)\n", lonk_names[kind], frames);
 +}
 +/* The dice: mostly stalking, sometimes in the way, a gift, a wander or right behind you. */
++static int lonk_no_buddy;
 +static float lonk_pace;   /* the player's speed over the last few seconds (m/s), and how long they've stood still */
 +static unsigned lonk_still;
 +static int lonk_climate;   /* the player is freezing or too hot (the menu's flags): he'd like to bring a pepper or a melon */
@@ -314,6 +315,7 @@ index c05d6c3..e7eb10d 100644
 +    if (lonk_pace > 3) { weight[LONK_BUDDY] = 35; weight[LONK_STALK] = 30; weight[LONK_WANDER] = 3; weight[LONK_HIDE] = 0; weight[LONK_GIFT] = 8; }
 +    else if (lonk_still > 600) { weight[LONK_WANDER] = 22; weight[LONK_HIDE] = 18; weight[LONK_GIFT] = 20; weight[LONK_BEHIND] = 20; weight[LONK_BUDDY] = 8; }
 +    if (lonk_climate) weight[LONK_GIFT] += 25;
++    if (lonk_no_buddy) weight[LONK_BUDDY] = 0;   /* "survey lonk nobuddy": he never picks buddy himself (your whistle still works) */
 +    static int last_kind = -1;
 +    if (last_kind == LONK_GIFT) weight[LONK_GIFT] = 0;   /* no two gifts in a row */
 +    unsigned total = 0, pick;
@@ -718,10 +720,12 @@ index c05d6c3..e7eb10d 100644
 +        }
 +        /* the mod's selector keeps the loop phase when he switches (run and sprint flow into each other), so an emote
 +           would start where his loop is: it waits (a moment) for the loop to come round */
-+        if (gait != lonk_gait && gait >= GAIT_PARTY && !hop && lonk_body) {
++        if (gait != lonk_gait && gait >= GAIT_PARTY && gait != GAIT_JUMP && !hop && lonk_body) {   /* a jump can't wait: it's a short pose anyway */
 +            float phase = 0;
 +            read_mem(lonk_body + 0x1e0, &phase, sizeof phase);
-+            if (phase > 0.06f) { waiting = 1; continue; }
++            static unsigned waited;   /* not forever: a one-shot clip (the jump) sits at 1.0 and never comes round */
++            if (phase > 0.06f && phase < 0.995f && ++waited < 40) { waiting = 1; continue; }
++            waited = 0;
 +        }
 +        if (use_item[gait] && !hop) ((void (*)(uintptr_t, const void *, const char *))set_string)(bb, &u_key, use_item[gait]);
 +        ((void (*)(uintptr_t, const void *, int))set_int)(bb, &h_key, hop ? 0 : hold[gait]);
@@ -746,7 +750,7 @@ index c05d6c3..e7eb10d 100644
 +        float rate = 1.0f;
 +        if (gait >= GAIT_WALK && gait <= GAIT_DASH)
 +            rate = lonk_root[gait] > 0.1f && k_loop[gait] > 0 ? speed / (60 * lonk_root[gait] * k_loop[gait]) : speed / clip_speed[gait];
-+        rate = gait < GAIT_WALK || gait > GAIT_DASH ? 1.0f : fminf(fmaxf(rate, 0.4f), 2.5f);
++        rate = gait < GAIT_WALK || gait > GAIT_DASH ? 1.0f : fminf(fmaxf(rate, 0.75f), 2.5f);   /* never slow motion */
 +        if (body) memcpy((void *)(body + 0xd0), &rate, sizeof rate);
 +        last_loop = loop; last_rate = rate; last_gait = gait;
 +        lonk_body = body;
@@ -1227,7 +1231,9 @@ index c05d6c3..e7eb10d 100644
 +    switch (lonk_kind) {
 +    case LONK_BLOCK: target[0] = p[0] + fx * 2.5f; target[2] = p[2] + fz * 2.5f; speed = LONK_SPRINT; stop = 0.2f; break;
 +    case LONK_BEHIND:
-+        if (entering) {   /* he was always there */
++        if (entering && ((a[0] - p[0]) * fx + (a[2] - p[2]) * fz < 0 || hypotf(a[0] - p[0], a[2] - p[2]) < 3)) {   /* he was always there */
++            /* (only while he's out of your sight already, behind you or right next to you: in front of you, the pop
++               looked like a teleport, so then he just runs round to you) */
 +            float at[2] = {p[0] - fx * 1.5f, p[2] - fz * 1.5f};
 +#if defined(TOTK_GAME_V143)
 +            if (ground_mode == GROUND_TERRAIN) spot_near(p, fx, fz, at);
@@ -1375,7 +1381,10 @@ index c05d6c3..e7eb10d 100644
 +    else if (shoved) shoved--;
 +    if (shoved > 90 && !lonk_emote_left) { lonk_emote_start(GAIT_SULK); shoved = 0; }
 +    if (lonk_emote_left) {
-+        if (!--lonk_emote_left && lonk_emote == GAIT_EAT && arc4random_uniform(3) == 0) lonk_emote_start(GAIT_YUCK);   /* ew */
++        if (!--lonk_emote_left) {
++            lonk_jump = 0;   /* a jump that never took off doesn't go off later */
++            if (lonk_emote == GAIT_EAT && arc4random_uniform(3) == 0) lonk_emote_start(GAIT_YUCK);   /* ew */
++        }
 +        if (lonk_emote != GAIT_JUMP) { target[0] = a[0]; target[2] = a[2]; }   /* he jumps on the go */
 +        else if (p[1] > a[1] - 0.5f && stop > 0.6f) stop = 0.6f;   /* jumping up to you: lands next to you, not at the foot */
 +    }
@@ -1386,6 +1395,9 @@ index c05d6c3..e7eb10d 100644
 +    lonk_drop_ok = follows && isfinite(a[1]) && p[1] < a[1] - 1.5f && p[1] > a[1] - 12;
 +    float dx = target[0] - a[0], dz = target[2] - a[2], dist = hypotf(dx, dz);
 +    if (dist > 0.01f) {
++        /* he only has a run: slower than about 4 m/s it played as slow motion (stalk crept at 2.5), so he moves at a run
++           or not at all, except beside you, where he keeps your pace */
++        if (lonk_kind != LONK_BUDDY) speed = fmaxf(speed, 4.0f);
 +        float step = fminf(speed / 60.0f, fmaxf(dist - stop, 0.0f)), ux = dx / dist, uz = dz / dist;
 +#if defined(TOTK_GAME_V143)
 +        /* around rocks, walls and trees: if the way ahead is blocked, try 30, 45, 90 then 120 degrees off to one side (the side
@@ -1421,7 +1433,7 @@ index c05d6c3..e7eb10d 100644
 +    static unsigned no_gain, jump_rest;   /* and not hopping on the spot: 4 s between tries */
 +    if (gap < closest - 0.3f || gap > closest + 3) { closest = gap; no_gain = 0; } else no_gain++;
 +    if (jump_rest) jump_rest--;
-+    if (follows && (lonk_blocked > 20 || no_gain > 40) && rise > 1.2f && rise < 7 && hypotf(p[0] - a[0], p[2] - a[2]) < 9 &&
++    if (follows && (lonk_blocked > 20 || no_gain > 60) && rise > 1.8f && rise < 7 && hypotf(p[0] - a[0], p[2] - a[2]) < 9 &&
 +        !lonk_emote_left && lonk_jump == 0 && !jump_rest) {
 +        no_gain = 0; jump_rest = 240;
 +        lonk_jump = sqrtf(2 * 9.8f * (rise + 0.6f));
@@ -1719,6 +1731,15 @@ index c05d6c3..e7eb10d 100644
 +        atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release); pthread_mutex_unlock(&survey_lock);
 +        return 1;
 +    }
++    int nobuddy = (used = 0, sscanf(line, "survey lonk nobuddy %n", &used)) == 0 && used && !line[used];
++    if (!kind && (nobuddy || ((used = 0, sscanf(line, "survey lonk buddyok %n", &used)) == 0 && used && !line[used]))) {
++        pthread_mutex_lock(&survey_lock);
++        lonk_no_buddy = nobuddy;
++        if (nobuddy && lonk_kind == LONK_BUDDY && lonk_brain) lonk_phase_left = 0;   /* and out of it now: he rolls again */
++        fprintf(stderr, "[survey] lonk: buddy mode %s\n", nobuddy ? "off (whistle still calls him)" : "back on");
++        pthread_mutex_unlock(&survey_lock);
++        return 1;
++    }
 +    int twin = (used = 0, sscanf(line, "survey lonk twin %n", &used)) == 0 && used && !line[used];
 +    if (!kind && (twin || ((used = 0, sscanf(line, "survey lonk naked %n", &used)) == 0 && used && !line[used]))) {
 +        pthread_mutex_lock(&survey_lock);
@@ -1827,7 +1848,7 @@ index c05d6c3..e7eb10d 100644
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,15 +2027,77 @@ void runtime_survey_cancel_user(void) {
+@@ -307,15 +2048,77 @@ void runtime_survey_cancel_user(void) {
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
@@ -1905,7 +1926,7 @@ index c05d6c3..e7eb10d 100644
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
      } else if (request.kind == 1) {
-@@ -340,8 +2122,152 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -340,8 +2143,152 @@ void runtime_survey_tick(uint64_t frame) {
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }
