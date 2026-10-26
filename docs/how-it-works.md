@@ -247,6 +247,12 @@ makes it look like he dove there).
   he got "lost", popped behind you, and tried again, every 3 seconds.
 - Buddy mode, both standing still for 7 s: now and then he looks up, looks around, snacks or drinks.
 
+## What he costs
+
+The `lonk stats` line (every 10 s) also says how long the survey's frame tick took: about 0.2 ms a frame on average
+with the whole brain running (floor and wall rays, the enemy scan, dressing, the animation), 1 ms at worst, on an M4
+MacBook Air. A frame at 60 fps has 16.7 ms.
+
 ## Coming back
 
 Every frame each body piece's name is read back from the actor (`actor+0x218`); a piece that no longer reads back is
