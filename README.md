@@ -95,7 +95,12 @@ He has emotes of his own: arriving somewhere on a wander he looks around, looks 
 something, a whole meal, a drink), which is sometimes gross. When you jump, he jumps too, a moment later. Keep shoving
 him and he sulks. `survey lonk emote <look|lookup|eat|meal|drink|yuck|jump|sulk|surprise>` plays one now.
 
-You can also force one mood with `survey lonk <stalk|buddy|block|behind|wander|gift|flee|party> <frames>`, send him
+He keeps an eye out, too: when he sees an enemy (within 18 m), he picks a fight. He sprints at it, plants a bomb barrel
+right next to it, startles at what he's done, and runs. Lighting it is your job. (Once every 25 seconds, with his brain
+on. `survey spawn prop <ActorName> [forward [sideways [up]]]` spawns something on its own, an enemy for instance, to try
+it.)
+
+You can also force one mood with `survey lonk <stalk|buddy|block|behind|wander|gift|flee|party|fight> <frames>`, send him
 somewhere with `survey lonk goto <metres right> <metres forward> [m/s]` (from you), and stop him with
 `survey lonk stop`.
 

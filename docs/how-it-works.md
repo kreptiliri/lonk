@@ -203,6 +203,22 @@ Walking through Link puts the mannequin's collision above Link's head, which the
 forces a crouch. Lonk keeps 1.1 m away and slides around instead, unless that would put him in a wall or off a ledge
 (which is how you could shove him through walls).
 
+## Seeing enemies
+
+To pick fights he has to see enemies, and there's no actor list I could find (lotuskit only tracks the "resident" actors,
+and scanning the actor manager's memory for his own pointer only found heap noise). Rays turned out to be the way. The
+game's AI node `QueryPhysicsRaycastIsHitDynamicActor` (vtable found through its name string: `getName` at `0x26f0760`,
+its run method `0x26f0448`) casts the same query as his floor ray and then reads the actor off the hit: the body at
+`q+0x170`, its ActorLink at `[body+0x110]+0x18` (through `0x1cf46d4`), and the actor at `[link object+0x40]` while
+`[object+0x48]` still matches the link's id (`0x5fe3b0` does it with a reference). The query's 64-bit filter: the high
+word is a collision mask (the game takes it from a preset table, `0xb693dc(filter, preset, 1)` writes `filter+0xc`), the
+low word says what kinds of bodies count: bit 0 the world, bit 1 characters, bit 4 big invisible volumes.
+
+So every 15 frames he casts 16 chest-high rays out to 18 m (characters on: `0xfffcffff00000003`), and the nearest hit
+actor named `Enemy_*` within 6 m of his height is "seen" for 3 seconds. Tested with a spawned Bokoblin: "spotted
+Enemy_Bokoblin_Junior, 10.4 m away", then the fight (bomb barrel spawned at an exact spot halfway to it, startle, flee
+from the enemy, not from you), and another 25 s later. The same scan found the shrine gate and you (`Player`).
+
 ## Coming back
 
 Every frame each body piece's name is read back from the actor (`actor+0x218`); a piece that no longer reads back is

@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..737618c 100644
+index c05d6c3..a8deddb 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -100,8 +100,8 @@ index c05d6c3..737618c 100644
 +   through forceSetMatrix, yaw only. "survey stalk <frames> [m/s [stop m]]" walks it to the player; "survey lonk ..." runs
 +   the behaviours or the dice brain. Survives user input (the user is playing). */
 +enum { STALK_MAX = 16, TRAIL_MAX = 512 };
-+enum { LONK_STALK, LONK_BLOCK, LONK_BEHIND, LONK_WANDER, LONK_GIFT, LONK_FLEE, LONK_PARTY, LONK_BUDDY, LONK_KINDS };
-+static const char *const lonk_names[LONK_KINDS] = {"stalk", "block", "behind", "wander", "gift", "flee", "party", "buddy"};
++enum { LONK_STALK, LONK_BLOCK, LONK_BEHIND, LONK_WANDER, LONK_GIFT, LONK_FLEE, LONK_PARTY, LONK_BUDDY, LONK_FIGHT, LONK_KINDS };
++static const char *const lonk_names[LONK_KINDS] = {"stalk", "block", "behind", "wander", "gift", "flee", "party", "buddy", "fight"};
 +enum { GROUND_PLAYER, GROUND_PHYSICS, GROUND_TRAIL, GROUND_TERRAIN, GROUND_MODES };
 +static const char *const ground_names[GROUND_MODES] = {"player", "physics", "trail", "terrain"};
 +static KEEP int pouch_request, height_request;
@@ -230,7 +230,7 @@ index c05d6c3..737618c 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,22 +432,1304 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,22 +432,1434 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -245,6 +245,7 @@ index c05d6c3..737618c 100644
 +    }
 +    return 0;
 +}
++static const float *spawn_where;   /* set: the next spawn goes exactly there instead of relative to the player */
 +static void spawn_request(const char *tag, const char *name, const float *off, uint64_t frame, uintptr_t player) {
 +    float pos[3], rot[9];
 +    void *mgr = (void *)read_ptr(survey_main + SPAWN_MGR);
@@ -257,6 +258,7 @@ index c05d6c3..737618c 100644
 +    memset(&arg, 0, sizeof arg);
 +    /* off = {forward m, sideways m, up m}; default 2, 0, 1.5 */
 +    arg.position[0] = pos[0] + (off[0] * fx - off[1] * fz) / len; arg.position[1] = pos[1] + off[2]; arg.position[2] = pos[2] + (off[0] * fz + off[1] * fx) / len;
++    if (spawn_where) memcpy(arg.position, spawn_where, sizeof arg.position);
 +    arg.rotation[0] = arg.rotation[4] = arg.rotation[8] = 1.0f;
 +    arg.scale[0] = arg.scale[1] = arg.scale[2] = 1.0f;
 +    arg.name = "";
@@ -298,7 +300,7 @@ index c05d6c3..737618c 100644
 +}
 +/* The dice: mostly stalking, sometimes in the way, a gift, a wander or right behind you. */
 +static void lonk_roll(void) {
-+    unsigned weight[LONK_KINDS] = {25, 15, 15, 15, 15, 0, 0, 15};
++    unsigned weight[LONK_KINDS] = {25, 15, 15, 15, 15, 0, 0, 15, 0};   /* fights start when he sees an enemy */
 +    static int last_kind = -1;
 +    if (last_kind == LONK_GIFT) weight[LONK_GIFT] = 0;   /* no two gifts in a row */
 +    unsigned total = 0, pick;
@@ -380,6 +382,17 @@ index c05d6c3..737618c 100644
 +    if (normal) memcpy(normal, q + 0x30, 12);
 +    for (int k = 0; k < 3; k++) if (!isfinite(hit[k])) return 0;
 +    return 1;
++}
++/* The actor a ray hit, if it hit one: the hit body is at q+0x170, its ActorLink at [body+0x110]+0x18 (a {?, object, id}
++   link: the actor is [object+0x40] while [object+0x48] still holds the id). The game's QueryPhysicsRaycastIsHitDynamicActor
++   (0x26f0448) reads it the same way, through 0x1cf46d4 and 0x5fe3b0. */
++static uintptr_t ray_hit_actor(void) {
++    uintptr_t body = ray_last ? read_ptr((uintptr_t)(ray_last + 0x170)) : 0, holder = body ? read_ptr(body + 0x110) : 0;
++    if (!holder) return 0;
++    uintptr_t link = holder + 0x18, object = read_ptr(link + 8);
++    uint32_t id = 0, now = 0;
++    if (!object || !read_mem(link + 0x10, &id, 4) || id == 0xffffffffu || !read_mem(object + 0x48, &now, 4) || now != id) return 0;
++    return read_ptr(object + 0x40);
 +}
 +/* The floor straight down from top to bottom, and how flat it is (up: the normal's y, 1 = flat, 0 = a wall) */
 +static int ray_floor(float x, float z, float top, float bottom, float *out, float *up) {
@@ -512,6 +525,67 @@ index c05d6c3..737618c 100644
 +    uintptr_t pouch = 0, addr = 0;
 +    for (unsigned i = 0; i < stalker_count; i++) if (!strcmp(stalkers[i].name, "PouchPlayer")) pouch = stalkers[i].actor;
 +    if (n == 1 && !strcmp(tok[0], "euscan")) { eu_scan(pouch ? pouch_eu(pouch) : 0); return; }
++    if (n == 1 && !strcmp(tok[0], "mgrscan")) {   /* where the actor manager points at his body (or into it), 2 pointers deep */
++        uintptr_t mgr = read_ptr(survey_main + SPAWN_MGR), want = pouch;
++        fprintf(stderr, "[survey] mgrscan: mgr %#llx looking for his actor %#llx\n", (unsigned long long)mgr, (unsigned long long)want);
++        static uint64_t w1[0x800], w2[0x2000];
++        if (!mgr || !want || !read_mem(mgr, w1, sizeof w1)) return;
++        for (unsigned i = 0; i < 0x800; i++) {
++            if (w1[i] >= want && w1[i] < want + 0x4b8) fprintf(stderr, "[survey] mgrscan: mgr+%#x = actor+%#llx\n", i * 8, (unsigned long long)(w1[i] - want));
++            uintptr_t q = (uintptr_t)w1[i];
++            if (q < 0x100000000ull || q > 0x7fffffffffffull || (q & 7)) continue;
++            size_t got = 0;
++            for (got = sizeof w2; got >= 0x100 && !read_mem(q, w2, got); got /= 2) {}
++            for (unsigned k = 0; k < got / 8; k++)
++                if (w2[k] >= want && w2[k] < want + 0x4b8) fprintf(stderr, "[survey] mgrscan: [mgr+%#x]+%#x = actor+%#llx\n", i * 8, k * 8, (unsigned long long)(w2[k] - want));
++        }
++        return;
++    }
++    if (n == 2 && !strcmp(tok[0], "actors")) {   /* "survey peek actors <mgr field>": the actor pointers in [mgr+field], named */
++        uintptr_t mgr = read_ptr(survey_main + SPAWN_MGR), arr = mgr ? read_ptr(mgr + strtoull(tok[1], NULL, 16)) : 0;
++        static uint64_t chunk[0x400];
++        unsigned found = 0, shown = 0;
++        for (unsigned base = 0; arr && base < 0x8000; base += 0x400) {
++            if (!read_mem(arr + base * 8, chunk, sizeof chunk)) { fprintf(stderr, "[survey] actors: unreadable at %u\n", base); break; }
++            for (unsigned k = 0; k < 0x400; k++) {
++                uintptr_t act = (uintptr_t)chunk[k], nm = act > 0x100000000ull && act < 0x7fffffffffffull ? read_ptr(act + GAME_ACTOR_NAME) : 0;
++                char text[48] = {0}; float pos[3] = {0};
++                uintptr_t vt = nm ? read_ptr(act) : 0;
++                if (!nm || vt < survey_main || vt > survey_main + 0x5000000 || !read_mem(nm, text, sizeof text - 1) || !isalpha((unsigned char)text[0])) continue;
++                int ok = 1;
++                for (char *c = text; *c; c++) if (!isalnum((unsigned char)*c) && *c != '_') ok = 0;
++                if (!ok || !read_mem(act + ACTOR_POS, pos, sizeof pos) || !valid_xyz(pos)) continue;
++                found++;
++                if (shown < 80) { shown++; fprintf(stderr, "[survey] actors: %u %s at %.1f,%.1f,%.1f\n", base + k, text, pos[0], pos[1], pos[2]); }
++            }
++        }
++        fprintf(stderr, "[survey] actors: %u named\n", found);
++        return;
++    }
++    if (n == 1 && !strcmp(tok[0], "around")) {   /* what 24 chest-high rays from him hit within 15 m, by actor name */
++        float at[3];
++        if (!pouch || !read_mem(pouch + ACTOR_POS, at, sizeof at)) return;
++        for (int k = 0; k < 24; k++) {
++            float r = k * 6.2832f / 24, st[3] = {at[0] + cosf(r) * 0.5f, at[1] + 1.0f, at[2] + sinf(r) * 0.5f}, en[3] = {at[0] + cosf(r) * 15, at[1] + 1.0f, at[2] + sinf(r) * 15}, hit[3];
++            if (!ray_cast(st, en, hit, NULL)) continue;
++            uintptr_t who = ray_hit_actor();
++            char text[64] = "-";
++            if (who) read_mem(read_ptr(who + GAME_ACTOR_NAME), text, sizeof text - 1);
++            fprintf(stderr, "[survey] around: %3d deg %.1f m %s\n", k * 15, hypotf(hit[0] - at[0], hit[2] - at[2]), text);
++        }
++        return;
++    }
++    if (n == 1 && !strcmp(tok[0], "scene")) {   /* the scene's components and their param paths */
++        uintptr_t module = read_ptr(survey_main + SCENE_SLOT), scene = module ? read_ptr(module + 0x1e8) : 0;
++        int count = 0; read_mem(scene + 0x50, &count, 4);
++        uintptr_t components = read_ptr(scene + 0x58);
++        for (int i = 0; i < count && i < 128; ++i) {
++            uintptr_t c = read_ptr(components + i * 8), ref = read_ptr(c + 8);
++            char name[200] = {0}; read_mem(ref, name, sizeof name - 1);
++            fprintf(stderr, "[survey] scene component %d %#llx %s\n", i, (unsigned long long)c, name);
++        }
++        return;
++    }
 +    if (n == 2 && !strcmp(tok[0], "bones")) {
 +        uintptr_t who = !strcmp(tok[1], "player") ? player : pouch, model = who && get_model ? get_model(who) : 0;
 +        float pos[3];
@@ -978,6 +1052,31 @@ index c05d6c3..737618c 100644
 +#endif
 +static unsigned lonk_stat_detour, lonk_stat_boxed, lonk_stat_stuck, lonk_stat_lost, lonk_blocked;
 +static int lonk_jump;   /* a copycat jump waiting for its clip to start; then his feet leave the ground */
++static float lonk_enemy[3], lonk_flee_from[3];   /* the enemy he last saw; what the next flee runs from (else you) */
++static unsigned lonk_enemy_left, lonk_fight_cooldown;
++static int lonk_flee_from_set;
++#if defined(TOTK_GAME_V143)
++/* Any enemy around him? 16 chest-high rays out to 18 m (turned half a step every other look, so they cover the gaps),
++   with characters included (bit 1 of the low word), and the nearest hit actor named Enemy_* within 6 m of his height. */
++static int lonk_look_enemy(const float a[3], uint64_t frame, float out[3], char name[64]) {
++    uint64_t keep = ray_layers;
++    float best = 1e9f;
++    ray_layers = 0xfffcffff00000003ull;
++    for (int k = 0; k < 16; k++) {
++        float r = (k + (frame / 15 % 2) * 0.5f) * 6.2832f / 16, dx = cosf(r), dz = sinf(r), hit[3], pos[3];
++        float st[3] = {a[0] + dx * 0.5f, a[1] + 1.0f, a[2] + dz * 0.5f}, en[3] = {a[0] + dx * 18, a[1] + 1.0f, a[2] + dz * 18};
++        if (!ray_cast(st, en, hit, NULL)) continue;
++        uintptr_t who = ray_hit_actor();
++        char text[64] = {0};
++        if (!who || !read_mem(read_ptr(who + GAME_ACTOR_NAME), text, sizeof text - 1) || strncmp(text, "Enemy_", 6) ||
++            !read_mem(who + ACTOR_POS, pos, sizeof pos) || !valid_xyz(pos) || fabsf(pos[1] - a[1]) > 6) continue;
++        float d = hypotf(pos[0] - a[0], pos[2] - a[2]);
++        if (d < best) { best = d; memcpy(out, pos, sizeof pos); snprintf(name, 64, "%s", text); }
++    }
++    ray_layers = keep;
++    return best < 1e8f;
++}
++#endif
 +/* how long each emote lasts (frames); the jump is as long as he's in the air, about */
 +static void lonk_emote_start(int gait) {
 +    static const unsigned frames[GAITS] = {[GAIT_LOOK] = 180, [GAIT_SURPRISE] = 100, [GAIT_EAT] = 150, [GAIT_MEAL] = 200, [GAIT_YUCK] = 120,
@@ -1057,6 +1156,24 @@ index c05d6c3..737618c 100644
 +    }
 +    if (lonk_brain && !lonk_phase_left) lonk_roll();
 +    if (lonk_phase_left) lonk_phase_left--;
++#if defined(TOTK_GAME_V143)
++    /* he keeps an eye out: an enemy seen in the last 3 s, and (with his brain on, once every 25 s) he picks a fight */
++    if (lonk_fight_cooldown) lonk_fight_cooldown--;
++    if (lonk_enemy_left) lonk_enemy_left--;
++    if (frame % 15 == 0 && ground_mode == GROUND_TERRAIN && isfinite(lonk_anchor[1])) {
++        char seen[64];
++        float e[3];
++        if (lonk_look_enemy(lonk_anchor, frame, e, seen)) {
++            if (!lonk_enemy_left) fprintf(stderr, "[survey] lonk: spotted %s, %.1f m away\n", seen, hypotf(e[0] - lonk_anchor[0], e[2] - lonk_anchor[2]));
++            memcpy(lonk_enemy, e, sizeof e); lonk_enemy_left = 180;
++        }
++    }
++    if (lonk_brain && lonk_enemy_left && !lonk_fight_cooldown && lonk_kind != LONK_FIGHT && lonk_kind != LONK_GIFT &&
++        lonk_kind != LONK_PARTY && lonk_kind != LONK_FLEE) {
++        fprintf(stderr, "[survey] lonk: picks a fight\n");
++        lonk_enter(LONK_FIGHT, 600);
++    }
++#endif
 +    float *a = lonk_anchor, target[3] = {p[0], p[1], p[2]}, speed = stalk_speed, stop = stalk_stop;
 +    int face_player = 1, buddy_face = 0, entering = !lonk_entered;
 +    lonk_entered = 1;
@@ -1098,12 +1215,25 @@ index c05d6c3..737618c 100644
 +        if (off < 0.6f) { face_player = 0; buddy_face = 1; }
 +        break;
 +    }
++    case LONK_FIGHT:   /* runs at the enemy, plants a bomb barrel between them, and legs it (lost sight of it: back to you) */
++        if (!lonk_enemy_left) { lonk_enter(LONK_STALK, 300); target[0] = a[0]; target[2] = a[2]; break; }
++        target[0] = lonk_enemy[0]; target[2] = lonk_enemy[2]; speed = LONK_SPRINT; stop = 3; face_player = 0;
++        if (hypotf(lonk_enemy[0] - a[0], lonk_enemy[2] - a[2]) < 3.4f && !spawn_left) {
++            float bomb[3] = {a[0] + (lonk_enemy[0] - a[0]) * 0.5f, a[1] + 1.0f, a[2] + (lonk_enemy[2] - a[2]) * 0.5f}, off[3] = {0};
++            spawn_body = 0; spawn_where = bomb;
++            spawn_request("fight", "BarrelBomb", off, frame, player);
++            spawn_where = NULL;
++            memcpy(lonk_flee_from, lonk_enemy, sizeof lonk_flee_from); lonk_flee_from_set = 1;
++            lonk_enter(LONK_FLEE, 240); lonk_emote_start(GAIT_SURPRISE);   /* "oh no", then he runs */
++            lonk_fight_cooldown = 1500;
++        }
++        break;
 +    case LONK_PARTY:   /* dances where he stands, facing you; a gift's party ends in a run */
 +        target[0] = a[0]; target[2] = a[2];
 +        if (lonk_gifted && lonk_phase_left == 1) lonk_enter(LONK_FLEE, 240);
 +        break;
 +    case LONK_FLEE:   /* away from you, one way (it turns when he gets stuck, below) */
-+        if (entering) lonk_pick_flee(a, p, 0);
++        if (entering) { lonk_pick_flee(a, lonk_flee_from_set ? lonk_flee_from : p, 0); lonk_flee_from_set = 0; }
 +        target[0] = a[0] + lonk_flee[0] * 5; target[2] = a[2] + lonk_flee[1] * 5; speed = LONK_SPRINT; stop = 0; face_player = 0; break;
 +    default: break;
 +    }
@@ -1354,7 +1484,7 @@ index c05d6c3..737618c 100644
          used && !line[used] && valid_xyz(xyz) && hold >= 1 && hold <= 600) kind = 2;
 -    if (!kind) { fprintf(stderr, "[survey] rejected: expected pos <tag> or move <tag> X Y Z <1..600 frames>\n"); return 1; }
 +    used = 0;
-+    float off[3] = {2.0f, 0.0f, 1.5f};   /* optional: survey spawn <tag> <Name> [forward [sideways [up]]] metres */
++    float off[3] = {2.0f, 0.0f, 1.5f};   /* optional: survey spawn <tag> <Name> [forward [sideways [up]]] metres; tag "prop" stays on its own */
 +#ifdef SURVEY_SPAWN
 +    if (sscanf(line, "survey spawn %63s %63s %n", tag, name, &used) == 2 && used && !line[used]) kind = 3;
 +    else if ((used = 0, sscanf(line, "survey spawn %63s %63s %f %n", tag, name, &off[0], &used) == 3 && used && !line[used]) ||
@@ -1538,7 +1668,7 @@ index c05d6c3..737618c 100644
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,6 +1739,10 @@ void runtime_survey_cancel_user(void) {
+@@ -307,6 +1869,10 @@ void runtime_survey_cancel_user(void) {
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
@@ -1549,13 +1679,15 @@ index c05d6c3..737618c 100644
      fprintf(stderr, "[survey] cancelled: user input\n");
      pthread_mutex_unlock(&survey_lock);
  }
-@@ -315,7 +1751,56 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -315,7 +1881,58 @@ void runtime_survey_tick(uint64_t frame) {
      in_tick = 1;
      pthread_mutex_lock(&survey_lock);
      uintptr_t actor = player_actor();
 +#ifdef SURVEY_SPAWN
 +    if (spawn_left) spawn_watch(frame);
-+    if (request.kind == 3 && actor) { spawn_body = 1; spawn_request(request.tag, request.name, request.off, frame, actor); request.kind = 0; }
++    if (request.kind == 3 && actor) {   /* tag "prop": a thing on its own, not a piece of him */
++        spawn_body = strcmp(request.tag, "prop") != 0; spawn_request(request.tag, request.name, request.off, frame, actor); request.kind = 0;
++    }
 +    if (stalk_left && actor) { lonk_step(frame, actor); if (!--stalk_left) fprintf(stderr, "[survey] lonk: done\n"); }
 +    /* never gone for long: once the player stands somewhere real again (not the loading screen's origin), he respawns */
 +    if (lonk_respawn_left && actor && !spawn_left && !request.kind) {
@@ -1606,7 +1738,7 @@ index c05d6c3..737618c 100644
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
      } else if (request.kind == 1) {
-@@ -340,8 +1825,149 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -340,8 +1957,149 @@ void runtime_survey_tick(uint64_t frame) {
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }
