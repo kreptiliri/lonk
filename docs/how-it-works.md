@@ -97,7 +97,7 @@ whistle, `HorseCall`, only plays in slot 1). When one of them changes he reacts:
 `FrontRoll` (copycat jump), `Damage*`, `Freeze`, `Eaten` (startle), `CutS1`..`CutS4`, `CutSF`, `CutDash`, `ChargeAttack*`
 within 3 m and facing him (he runs), `HorseCall` (he comes: buddy mode), `OpenTreasureBox*`, `Get`,
 `GetCookingGood/VeryGood` (party), `GetCookingBad` (yuck), `Climb*`, `Glide`, `ParasailGlide` (looks up),
-`UltraHandStart` (looks around). The names come from the Player's ASB command list (532 of them). Tested: jump, a
+`UltraHandStart`, `LookAround*`, `Talk`, `TalkHello` (looks around). The names come from the Player's ASB command list (532 of them). Tested: jump, a
 spawned Bokoblin hitting the player (`DamageL`, `DamageS`), the whistle, and a sword swing at him (`CutS1`).
 
 The copycat jump: on the player's `Jump`, Lonk starts the jump clip, and once it's actually playing his feet get 4.5 m/s upwards and the falling code does the rest

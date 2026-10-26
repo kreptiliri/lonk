@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..0552a51 100644
+index c05d6c3..e7eb10d 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -1334,7 +1334,7 @@ index c05d6c3..0552a51 100644
 +    /* he watches what you do (your body slot's command, when it changes): you jump (or flip, or roll), he jumps a beat
 +       later; you get hit (frozen, eaten), he startles; you swing at him, he runs; you whistle, he comes; you open a chest,
 +       get something or cook something great, he celebrates; you cook something bad, yuck; you climb or glide, he looks up
-+       at you; you start Ultrahand, he looks around */
++       at you; you start Ultrahand, look around or talk to someone, he looks around too */
 +    static char your_cmds[4][48];   /* body slots 0 to 3 (lower, upper, ...); 4 on is the face, skin, arm */
 +    char all[256], *cur = all;
 +    anim_cmds(player, all, sizeof all);
@@ -1357,7 +1357,7 @@ index c05d6c3..0552a51 100644
 +        } else if ((!strcmp(cmd, "HorseCall") || !strcmp(cmd, "CallComeon")) && lonk_kind != LONK_BUDDY) {   /* you whistled: he comes */
 +            fprintf(stderr, "[survey] lonk: you whistled, he comes\n");
 +            lonk_enter(LONK_BUDDY, 900);
-+        } else if (!strcmp(cmd, "UltraHandStart")) react = GAIT_LOOK;
++        } else if (!strcmp(cmd, "UltraHandStart") || !strncmp(cmd, "LookAround", 10) || !strcmp(cmd, "Talk") || !strcmp(cmd, "TalkHello")) react = GAIT_LOOK;
 +        else if (!strncmp(cmd, "OpenTreasureBox", 15) || !strcmp(cmd, "Get") || !strcmp(cmd, "GetCookingVeryGood") || !strcmp(cmd, "GetCookingGood")) react = GAIT_PARTY;
 +        else if (!strcmp(cmd, "GetCookingBad")) react = GAIT_YUCK;
 +        else if (!strncmp(cmd, "Climb", 5) || !strcmp(cmd, "Glide") || !strcmp(cmd, "ParasailGlide")) react = GAIT_LOOKUP;
