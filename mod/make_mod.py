@@ -34,9 +34,9 @@ CASES = {2: ('PauseMenu_Equip_Lsword', 'Nml_Move_Run'), 3: ('PauseMenu_Equip_Spe
          4: ('PauseMenu_Equip_SwordNoShield', 'Demo_Get_Cooking_VeryGood'), 5: ('PauseMenu_Equip_Shield', 'Demo_Surprise')}
 # Case 1 (the walk, which he doesn't use) leads to the UseItem command's tree instead: a selector on the blackboard
 # string "UseItem", which the menu's AI never writes, so the patch picks his emote with it. Three of its eating clips stay
-# (one-handed, a meal, a bad one) plus the drink, and four get renamed (UseItem value -> what it plays now).
+# (one-handed, a meal, a bad one), and five get renamed (the drink became his running jump) (UseItem value -> what it plays now).
 USE_ITEM = 202
-USES = {'EatCookingSkewer': 'DemoLookAround', 'EatTooHard': 'Nml_Wait_Jump',
+USES = {'EatCookingSkewer': 'DemoLookAround', 'EatTooHard': 'Nml_Wait_Jump', 'Drink': 'Nml_Move_Run_Jump_FootL',
         'UseFairy': 'Demo_Get_Cooking_Bad', 'UseEnergyMaterial': 'DemoLookUp'}
 
 
