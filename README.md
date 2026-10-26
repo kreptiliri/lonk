@@ -84,10 +84,16 @@ survey lonk start
 That spawns his body 4 m in front of you and runs his brain for an hour (`survey spawn lonk PouchPlayer 4 0 0` plus
 `survey lonk brain 216000`, if you want them separately).
 
-He starts his idle animation and gets dressed on his own. `survey equip <slot> <ArmorName> [dye]` puts one piece on him
-(9 head, 10 upper, 11 lower, `-` for the default), and `survey dress` redoes the whole outfit. The old mannequin body
+He starts his idle animation and gets dressed on his own, in his hair and underwear (his look). `survey lonk twin` makes
+you two match: he wears whatever you have on, and changes when you do. `survey lonk naked` puts him back in his underwear.
+`survey equip <slot> <ArmorName> [dye]` puts any one piece on him (9 head, 10 upper, 11 lower; `-` copies yours), and
+`survey dress` redoes the whole outfit. The old mannequin body
 still works (`survey spawn m1 Mannequin_001_Upper` and friends), and `survey drop <name start|all>` removes pieces from
 him again.
+
+He has emotes of his own: arriving somewhere on a wander he looks around, looks up at the sky, or has a snack (a bite of
+something, a whole meal, a drink), which is sometimes gross. When you jump, he jumps too, a moment later. Keep shoving
+him and he sulks. `survey lonk emote <look|lookup|eat|meal|drink|yuck|jump|sulk|surprise>` plays one now.
 
 You can also force one mood with `survey lonk <stalk|buddy|block|behind|wander|gift|flee|party> <frames>`, send him
 somewhere with `survey lonk goto <metres right> <metres forward> [m/s]` (from you), and stop him with
@@ -105,11 +111,8 @@ and then he starts fresh. `survey reload` forces a reload.
 
 - He may still hitch a little as he runs (the run carries him forward by itself, and the amount it's undone by is tuned
   by eye). Switching between run and sprint keeps his stride now, so that snip should be gone.
-- He doesn't look around anymore when he arrives somewhere on a wander: the menu's pose switch has only five slots.
-- He only has his underwear. Real armor (`survey equip 10 Armor_001_Upper`) doesn't draw, and hides the body under it,
-  so he turns into a floating head until he's back in the defaults.
 - His feet may still slide a little: the clips' own speeds are my estimates.
-- With the mod installed, the inventory Link walks, runs, dashes, celebrates or startles in the pause menu when you hold
+- With the mod installed, the inventory Link runs, sprints, celebrates, startles or eats in the pause menu when you hold
   a weapon (holding a sword, he walks three steps and snaps back, forever; with a bow he cooks).
 - He doesn't jump, climb or follow you down ledges. He walks around them instead, and if he gets stranded (5 m above or
   below you, 30 m away, stuck, or no floor) for 3 seconds, he pops back next to you.
