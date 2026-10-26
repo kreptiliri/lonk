@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..71c7e9c 100644
+index c05d6c3..fdb7456 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -230,7 +230,7 @@ index c05d6c3..71c7e9c 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,22 +432,1461 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,22 +432,1479 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -418,7 +418,8 @@ index c05d6c3..71c7e9c 100644
 +    float h;
 +    return !ray_height(at[0] + dx * 0.8f, at[2] + dz * 0.8f, at[1] + 0.7f, at[1] - 2.5f, &h);
 +}
-+static int way_blocked(const float at[3], float dx, float dz) { return ray_blocked(at, dx, dz, 1.0f) || ray_ledge(at, dx, dz); }
++static int lonk_drop_ok;   /* following you down: ledges don't stop him (he falls off them), walls still do */
++static int way_blocked(const float at[3], float dx, float dz) { return ray_blocked(at, dx, dz, 1.0f) || (!lonk_drop_ok && ray_ledge(at, dx, dz)); }
 +/* How far he can go from <at> along (dx, dz), up to <reach> m: until something knee high is in the way (a walkable slope
 +   doesn't count) or there's no floor within a step above to 2.5 m below, checked every metre. */
 +static float path_free(const float at[3], float dx, float dz, float reach) {
@@ -1052,7 +1053,7 @@ index c05d6c3..71c7e9c 100644
 +}
 +#endif
 +static unsigned lonk_stat_detour, lonk_stat_boxed, lonk_stat_stuck, lonk_stat_lost, lonk_blocked;
-+static int lonk_jump;   /* a copycat jump waiting for its clip to start; then his feet leave the ground */
++static float lonk_jump;   /* a jump waiting for its clip to start (its upward speed, m/s); then his feet leave the ground */
 +static float lonk_enemy[3], lonk_flee_from[3];   /* the enemy he last saw; what the next flee runs from (else you) */
 +static unsigned lonk_enemy_left, lonk_fight_cooldown;
 +static int lonk_flee_from_set;
@@ -1280,7 +1281,7 @@ index c05d6c3..71c7e9c 100644
 +    if (fabsf(pvy) < 0.5f) calm_frames++;
 +    else {
 +        if (pvy > 3.5f && calm_frames > 10 && !lonk_emote_left && hypotf(p[0] - a[0], p[2] - a[2]) < 20 && lonk_kind != LONK_PARTY) {
-+            lonk_emote_start(GAIT_JUMP); lonk_jump = 1;
++            lonk_emote_start(GAIT_JUMP); lonk_jump = 4.5f;   /* about a metre */
 +        }
 +        calm_frames = 0;
 +    }
@@ -1293,9 +1294,13 @@ index c05d6c3..71c7e9c 100644
 +    if (lonk_emote_left) {
 +        if (!--lonk_emote_left && lonk_emote == GAIT_EAT && arc4random_uniform(3) == 0) lonk_emote_start(GAIT_YUCK);   /* ew */
 +        if (lonk_emote != GAIT_JUMP) { target[0] = a[0]; target[2] = a[2]; }   /* he jumps on the go */
++        else if (p[1] > a[1] - 0.5f && stop > 0.6f) stop = 0.6f;   /* jumping up to you: lands next to you, not at the foot */
 +    }
 +    float before[2] = {a[0], a[2]};
 +    int wanted = 0;   /* he's trying to get somewhere this frame */
++    /* following you, you're below: he steps off ledges (and falls) instead of stopping at them */
++    int follows = lonk_kind == LONK_STALK || lonk_kind == LONK_BUDDY || lonk_kind == LONK_BLOCK || lonk_kind == LONK_BEHIND || lonk_kind == LONK_GIFT;
++    lonk_drop_ok = follows && isfinite(a[1]) && p[1] < a[1] - 1.5f && p[1] > a[1] - 12;
 +    float dx = target[0] - a[0], dz = target[2] - a[2], dist = hypotf(dx, dz);
 +    if (dist > 0.01f) {
 +        float step = fminf(speed / 60.0f, fmaxf(dist - stop, 0.0f)), ux = dx / dist, uz = dz / dist;
@@ -1327,6 +1332,19 @@ index c05d6c3..71c7e9c 100644
 +    int got_on = hypotf(a[0] - before[0], a[2] - before[1]) > 0.02f;
 +    if (wanted) { st_want++; if (got_on) st_moved++; }
 +    lonk_blocked = wanted && !got_on ? lonk_blocked + 1 : 0;   /* frames in a row he's tried and not moved */
++    /* you're up on a ledge (1 to 7 m above, close) and he's been stuck at its foot: he jumps up to you, just high enough */
++    float rise = p[1] - a[1], gap = hypotf(target[0] - a[0], target[2] - a[2]);
++    static float closest;   /* not getting any closer (sliding along the ledge's foot counts as stuck too) */
++    static unsigned no_gain, jump_rest;   /* and not hopping on the spot: 4 s between tries */
++    if (gap < closest - 0.3f || gap > closest + 3) { closest = gap; no_gain = 0; } else no_gain++;
++    if (jump_rest) jump_rest--;
++    if (follows && (lonk_blocked > 20 || no_gain > 40) && rise > 1.2f && rise < 7 && hypotf(p[0] - a[0], p[2] - a[2]) < 9 &&
++        !lonk_emote_left && lonk_jump == 0 && !jump_rest) {
++        no_gain = 0; jump_rest = 240;
++        lonk_jump = sqrtf(2 * 9.8f * (rise + 0.6f));
++        lonk_emote_start(GAIT_JUMP); lonk_emote_left = (unsigned)(60 * 2 * lonk_jump / 9.8f) + 10;
++        fprintf(stderr, "[survey] lonk: jumps up to you (%.1f m)\n", rise);
++    }
 +    if (++st_frames >= 600) {
 +        fprintf(stderr, "[survey] lonk stats: wanted %u moved %u (%.0f%%) detours %u boxed %u stuck %u lost %u\n", st_want, st_moved,
 +                st_want ? 100.0f * st_moved / st_want : 100.0f, lonk_stat_detour, lonk_stat_boxed, lonk_stat_stuck, lonk_stat_lost);
@@ -1396,7 +1414,7 @@ index c05d6c3..71c7e9c 100644
 +        float feet = snap ? p[1] : a[1], h, up;
 +        feet_mode = 1;
 +        if (snap) vy = 0;
-+        if (lonk_jump && lonk_gait == GAIT_JUMP) { vy = 4.5f; feet += 0.06f; lonk_jump = 0; }   /* up he goes: about a metre */
++        if (lonk_jump > 0 && lonk_gait == GAIT_JUMP) { vy = lonk_jump; feet += 0.06f; lonk_jump = 0; }   /* up he goes */
 +        if (ray_floor(a[0], a[2], feet + 0.7f, feet - 60, &h, &up)) {
 +            ground_src = "ray";
 +            if (h < feet - 0.05f) { vy -= 9.8f / 60; feet = fmaxf(feet + vy / 60, h); ground_src = "falling"; if (feet == h) vy = 0; }
@@ -1583,7 +1601,7 @@ index c05d6c3..71c7e9c 100644
 +        for (unsigned k = 0; k < sizeof names / sizeof *names; k++) if (!strcmp(emote, names[k].name)) g = names[k].gait;
 +        if (g < 0) { fprintf(stderr, "[survey] lonk emote: unknown %s\n", emote); return 1; }
 +        pthread_mutex_lock(&survey_lock);
-+        lonk_emote_start(g); if (g == GAIT_JUMP) lonk_jump = 1;
++        lonk_emote_start(g); if (g == GAIT_JUMP) lonk_jump = 4.5f;
 +        pthread_mutex_unlock(&survey_lock);
 +        return 1;
 +    }
@@ -1695,7 +1713,7 @@ index c05d6c3..71c7e9c 100644
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,6 +1896,10 @@ void runtime_survey_cancel_user(void) {
+@@ -307,6 +1914,10 @@ void runtime_survey_cancel_user(void) {
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
@@ -1706,7 +1724,7 @@ index c05d6c3..71c7e9c 100644
      fprintf(stderr, "[survey] cancelled: user input\n");
      pthread_mutex_unlock(&survey_lock);
  }
-@@ -315,7 +1908,58 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -315,7 +1926,58 @@ void runtime_survey_tick(uint64_t frame) {
      in_tick = 1;
      pthread_mutex_lock(&survey_lock);
      uintptr_t actor = player_actor();
@@ -1765,7 +1783,7 @@ index c05d6c3..71c7e9c 100644
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
      } else if (request.kind == 1) {
-@@ -340,8 +1984,149 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -340,8 +2002,149 @@ void runtime_survey_tick(uint64_t frame) {
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }

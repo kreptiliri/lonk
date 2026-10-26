@@ -228,6 +228,11 @@ makes it look like he dove there).
   too hot, a hydromelon (`Item_Fruit_F`, `ResistHot`). The flags are bits 39 and 40 of `[[main+0x395ea40]]+0x658`, the
   ones the menu turns into `Temperature`, and `+0x6ec` right next to them is the temperature where you stand (15 degrees
   in the Temple of Time).
+- Ledges, following you (stalk, buddy, block, behind, gift): when you're 1.5 to 12 m below him, ledges stop counting as
+  walls, so he walks off and the falling code takes him down. When you're 1.2 to 7 m above and within 9 m, and he's been
+  blocked for a third of a second or hasn't got any closer for two thirds, he jumps: upward speed sqrt(2 g (height +
+  0.6 m)), the jump clip, and he keeps heading for you in the air (aiming 0.6 m from you, so he lands beside you, not at
+  the foot). The knee-high wall check rises with his feet, so he moves on once he's above the edge. 4 s between tries.
 - Buddy mode, both standing still for 7 s: now and then he looks up, looks around, snacks or drinks.
 
 ## Coming back

@@ -95,6 +95,9 @@ He has emotes of his own: arriving somewhere on a wander he looks around, looks 
 something, a whole meal, a drink), which is sometimes gross. When you jump, he jumps too, a moment later. Keep shoving
 him and he sulks. `survey lonk emote <look|lookup|eat|meal|drink|yuck|jump|sulk|surprise>` plays one now.
 
+Following you, he hops off ledges to come down to you, and when you're up on one (1 to 7 m) and he can't find his way
+up, he jumps up to you, as high as it takes.
+
 Standing around with you in buddy mode, he gets bored and looks up at the sky, looks around or has a snack. His gifts
 pay attention: freezing, he brings you a spicy pepper; too hot, a hydromelon.
 
@@ -121,9 +124,9 @@ and then he starts fresh. `survey reload` forces a reload.
   by eye). Switching between run and sprint keeps his stride now, so that snip should be gone.
 - His feet may still slide a little: the clips' own speeds are my estimates.
 - With the mod installed, the inventory Link runs, sprints, celebrates, startles or eats in the pause menu when you hold
-  a weapon (holding a sword, he walks three steps and snaps back, forever; with a bow he cooks).
-- He doesn't jump, climb or follow you down ledges. He walks around them instead, and if he gets stranded (5 m above or
-  below you, 30 m away, stuck, or no floor) for 3 seconds, he pops back next to you.
+  a weapon.
+- He can't climb: ledges over 7 m and walls he walks around, and if he gets stranded (5 m above or below you or 30 m
+  away while getting nowhere, 60 m away, stuck, or no floor) for 3 seconds, he pops back next to you.
 - He steers around rocks and walls with a knee-high probe, but thin things (trees, fences) can still slip through, and
   anything knee high or lower he just walks over.
 
