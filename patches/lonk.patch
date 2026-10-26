@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..0f6c22f 100644
+index c05d6c3..c79ba48 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -40,7 +40,7 @@ index c05d6c3..0f6c22f 100644
  #include <limits.h>
  #include <mach/mach.h>
  #include "mach_vm_compat.h"
-@@ -181,24 +184,120 @@ void runtime_survey_init(Module *m) {
+@@ -181,24 +184,121 @@ void runtime_survey_init(Module *m) {
  int runtime_survey_command(const char *line) { (void)line; return 0; }
  #endif
  #else
@@ -112,6 +112,7 @@ index c05d6c3..0f6c22f 100644
 +static KEEP unsigned pouch_idle_left, pouch_idle_tries;   /* a fresh PouchPlayer starts Nml_Wait once its animation chain is up */
 +static KEEP int dress_slot = -1;   /* "survey equip <slot> <Name|->": one slot; otherwise "survey dress" does head, upper, lower and the arm */
 +static KEEP char dress_name[64];
++static KEEP int lonk_outfit;   /* "survey lonk outfit <set>": an armor set's number (Armor_<n>_Head/Upper/Lower), 0 = his own look */
 +static KEEP int lonk_twin;   /* "survey lonk twin": he wears what you wear (and changes when you do); "survey lonk naked" undoes it */
 +static int lonk_watch_cmds;   /* "survey peek watchcmds": log the player's slot commands whenever they change */
 +static KEEP int dress_dye;   /* "survey equip <slot> <Name> [dye]": the colour variation, 0 = undyed */
@@ -166,7 +167,7 @@ index c05d6c3..0f6c22f 100644
  
  static int read_mem(uintptr_t address, void *out, size_t size) {
      if (!address || address > UINTPTR_MAX - size) return 0;
-@@ -254,6 +353,45 @@ static uintptr_t player_actor(void) {
+@@ -254,6 +354,45 @@ static uintptr_t player_actor(void) {
      }
      return 0;
  }
@@ -212,7 +213,7 @@ index c05d6c3..0f6c22f 100644
  void runtime_survey_init(Module *m) {
      const char *enabled = getenv("TOTK_SURVEY");
      if (!enabled || strcmp(enabled, "1")) return;
-@@ -272,6 +410,21 @@ void runtime_survey_init(Module *m) {
+@@ -272,6 +411,21 @@ void runtime_survey_init(Module *m) {
          runtime_fail("survey requires verified game-version forceSetMatrix entry");
      survey_main = (uintptr_t)m->base;
      survey_force = (void (*)(void *, const float *, uint32_t))(m->base + FORCE_MATRIX);
@@ -234,7 +235,7 @@ index c05d6c3..0f6c22f 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,22 +435,1557 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,22 +436,1583 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -459,15 +460,18 @@ index c05d6c3..0f6c22f 100644
 +    }
 +    return best;
 +}
-+/* Somewhere to put him next to the player (p, facing fx, fz): behind, then either side, then in front, 1.5 m away, wherever
-+   there's flat floor about as high as the player's. Behind if none. */
++/* Somewhere to put him next to the player (p, facing fx, fz), wherever there's flat floor about as high as the player's. */
 +static void spot_near(const float p[3], float fx, float fz, float out[2]) {
-+    static const float dirs[4][2] = {{-1, 0}, {0, 1}, {0, -1}, {1, 0}};   /* (forward, right) */
-+    for (int i = 0; i < 4; i++) {
-+        float x = p[0] + (fx * dirs[i][0] - fz * dirs[i][1]) * 1.5f, z = p[2] + (fz * dirs[i][0] + fx * dirs[i][1]) * 1.5f, h, up;
-+        if (ray_floor(x, z, p[1] + 0.7f, p[1] - 1.0f, &h, &up) && up > 0.6f) { out[0] = x; out[1] = z; return; }
-+    }
-+    out[0] = p[0] - fx * 1.5f; out[1] = p[2] - fz * 1.5f;
++    /* behind first, then the sides, then in front, at 1.5 m, then 2.5 and 1 m; nowhere at all (a nook): your own spot,
++       and the keep-out nudges him off you (before, "behind anyway" could be over a hole, and he was lost again) */
++    static const float dirs[8][2] = {{-1, 0}, {0, 1}, {0, -1}, {-0.7f, 0.7f}, {-0.7f, -0.7f}, {0.7f, 0.7f}, {0.7f, -0.7f}, {1, 0}};   /* (forward, right) */
++    static const float reach[3] = {1.5f, 2.5f, 1.0f};
++    for (int r = 0; r < 3; r++)
++        for (int i = 0; i < 8; i++) {
++            float x = p[0] + (fx * dirs[i][0] - fz * dirs[i][1]) * reach[r], z = p[2] + (fz * dirs[i][0] + fx * dirs[i][1]) * reach[r], h, up;
++            if (ray_floor(x, z, p[1] + 0.7f, p[1] - 1.0f, &h, &up) && up > 0.6f) { out[0] = x; out[1] = z; return; }
++        }
++    out[0] = p[0]; out[1] = p[2];
 +}
 +/* PouchPlayer, spawned by us, stays invisible: the pause menu normally binds its model to the UI model scene and switches its
 +   view masks. getModel 0xba8854, model+0x60 = its model scene, bindScene 0x585d58(model, scene), 0x50138c(model, mask) sets
@@ -951,10 +955,17 @@ index c05d6c3..0f6c22f 100644
 +        if (dress_slot >= 0) {
 +            equip(eu, (uint32_t)dress_slot, held[0] ? &one : &empty, held[0] ? dress_dye : -1, 0, 0);
 +            fprintf(stderr, "[survey] dress: slot %d <- \"%s\"\n", dress_slot, held);
-+        } else {   /* his own look (hair and underwear) by name, or twinning: "" is "whatever the player has on" */
-+            equip(eu, 9, lonk_twin ? &empty : &hair, -1, 0, 0);
-+            equip(eu, 10, lonk_twin ? &empty : &upper, -1, 0, 0);
-+            equip(eu, 11, lonk_twin ? &empty : &lower, -1, 0, 0);
++        } else {   /* his own look (hair and underwear) by name, an outfit, or twinning: "" is "whatever the player has on" */
++            static char set[3][24];
++            static const char *set_ptr[3];
++            for (int k = 0; k < 3; k++) {
++                snprintf(set[k], sizeof set[k], "Armor_%03d_%s", lonk_outfit, k == 0 ? "Head" : k == 1 ? "Upper" : "Lower");
++                set_ptr[k] = set[k];
++            }
++            equip(eu, 9, lonk_twin ? &empty : lonk_outfit ? &set_ptr[0] : &hair, -1, 0, 0);
++            equip(eu, 10, lonk_twin ? &empty : lonk_outfit ? &set_ptr[1] : &upper, -1, 0, 0);
++            equip(eu, 11, lonk_twin ? &empty : lonk_outfit ? &set_ptr[2] : &lower, -1, 0, 0);
++            if (lonk_outfit && !lonk_twin) fprintf(stderr, "[survey] dress: %s, %s, %s\n", set[0], set[1], set[2]);
 +            equip(eu, 19, &hand, -1, 0, 0);
 +            if (lonk_twin) for (unsigned w = 0; w < 3; w++) equip(eu, (uint32_t[]){0, 7, 8}[w], &empty, -1, 0, 0);   /* and your sword, bow, shield */
 +            if (lonk_twin) fprintf(stderr, "[survey] dress: twins (your outfit and weapons), arm %s\n", hand);
@@ -1687,10 +1698,26 @@ index c05d6c3..0f6c22f 100644
 +        pthread_mutex_unlock(&survey_lock);
 +        return 1;
 +    }
++    char outfit[32];   /* "survey lonk outfit <set|random>": a whole armor set (the lowest-numbered one of each name) */
++    if (!kind && (used = 0, sscanf(line, "survey lonk outfit %31[a-z] %n", outfit, &used)) == 1 && used && !line[used]) {
++        static const struct { const char *name; int n; } sets[] = {{"hylian", 1}, {"wild", 5}, {"zora", 6}, {"desert", 8}, {"snowquill", 9},
++            {"flamebreaker", 11}, {"stealth", 12}, {"climbing", 14}, {"radiant", 17}, {"soldier", 20}, {"rubber", 46}, {"barbarian", 48},
++            {"royal", 179}, {"glide", 1006}, {"froggy", 1046}, {"miner", 1051}, {"ember", 1061}, {"charged", 1066}, {"frostbite", 1071},
++            {"mystic", 1086}, {"zonaite", 1091}, {"awakening", 1096}, {"depths", 1141}, {"yiga", 1300}};
++        int n = 0;
++        unsigned count = sizeof sets / sizeof *sets, pick = arc4random_uniform(count);
++        for (unsigned k = 0; k < count; k++) if (!strcmp(outfit, sets[k].name) || (!strcmp(outfit, "random") && k == pick)) { n = sets[k].n; snprintf(outfit, sizeof outfit, "%s", sets[k].name); }
++        if (!n) { fprintf(stderr, "[survey] lonk outfit: unknown set\n"); return 1; }
++        pthread_mutex_lock(&survey_lock);
++        lonk_outfit = n; lonk_twin = 0; dress_slot = -1; dress_left = 1;
++        fprintf(stderr, "[survey] lonk: puts on the %s set\n", outfit);
++        atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release); pthread_mutex_unlock(&survey_lock);
++        return 1;
++    }
 +    int twin = (used = 0, sscanf(line, "survey lonk twin %n", &used)) == 0 && used && !line[used];
 +    if (!kind && (twin || ((used = 0, sscanf(line, "survey lonk naked %n", &used)) == 0 && used && !line[used]))) {
 +        pthread_mutex_lock(&survey_lock);
-+        lonk_twin = twin; dress_slot = -1; dress_left = 1;
++        lonk_twin = twin; lonk_outfit = 0; dress_slot = -1; dress_left = 1;
 +        fprintf(stderr, "[survey] lonk: %s\n", twin ? "twins! he dresses like you" : "back in his underwear");
 +        atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release); pthread_mutex_unlock(&survey_lock);
 +        return 1;
@@ -1795,7 +1822,7 @@ index c05d6c3..0f6c22f 100644
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,15 +1995,77 @@ void runtime_survey_cancel_user(void) {
+@@ -307,15 +2022,77 @@ void runtime_survey_cancel_user(void) {
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
@@ -1873,7 +1900,7 @@ index c05d6c3..0f6c22f 100644
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
      } else if (request.kind == 1) {
-@@ -340,8 +2090,152 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -340,8 +2117,152 @@ void runtime_survey_tick(uint64_t frame) {
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }
