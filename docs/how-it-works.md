@@ -267,3 +267,9 @@ never two gifts in a row. Buddy walks 1.6 m to one side of Link at Link's own (s
 (`Item_Fruit_A`), a fish (`Item_FishGet_A`), a monster part (`Item_Enemy_01`) or a `BarrelBomb` next to Link through the
 same spawn call,
 then Lonk celebrates for two and a half seconds and flees for four.
+
+
+What you're doing changes his dice: moving (your speed averaged over a few seconds above 3 m/s) he mostly buddies up or
+follows you (wandering off or hiding would only leave him behind); standing still for 10 s he plays more (wander, hide
+and seek, gifts, creeping up behind you); freezing or too hot, gifts get a big bonus, since that's when he brings a
+pepper or a hydromelon.
