@@ -85,7 +85,7 @@ That spawns his body 4 m in front of you and runs his brain for an hour (`survey
 `survey lonk brain 216000`, if you want them separately).
 
 He starts his idle animation and gets dressed on his own, in his hair and underwear (his look). `survey lonk twin` makes
-you two match: he wears whatever you have on, carries your sword, bow and shield on his back, and changes when you do. `survey lonk naked` puts him back in his underwear.
+you two match: he wears whatever you have on, carries your sword, bow and shield on his back, and changes when you do. `survey lonk naked` puts him back in his underwear (and puts the weapons away).
 `survey equip <slot> <ArmorName> [dye]` puts any one piece on him (9 head, 10 upper, 11 lower; `-` copies yours), and
 `survey dress` redoes the whole outfit. The old mannequin body
 still works (`survey spawn m1 Mannequin_001_Upper` and friends), and `survey drop <name start|all>` removes pieces from

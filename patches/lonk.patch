@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..a8deddb 100644
+index c05d6c3..a7aae03 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -230,7 +230,7 @@ index c05d6c3..a8deddb 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,22 +432,1434 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,22 +432,1435 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -926,7 +926,8 @@ index c05d6c3..a8deddb 100644
 +        char text[64] = {0};
 +        read_mem(read_ptr(ref.actor + GAME_ACTOR_NAME), text, sizeof text - 1);
 +        uintptr_t model = get_model(ref.actor), scene = model ? read_ptr(model + 0x60) : 0;
-+        if (model && world && scene != world) {
++        if (model && !lonk_twin && (slot < 8 || (slot >= 11 && slot < 18))) set_mask(model, 0);   /* out of twins: weapons stay hidden */
++        else if (model && world && scene != world) {
 +            bind(model, world);
 +            set_mask(model, 0xffffffffu);
 +            moved++;
@@ -1668,7 +1669,7 @@ index c05d6c3..a8deddb 100644
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,6 +1869,10 @@ void runtime_survey_cancel_user(void) {
+@@ -307,6 +1870,10 @@ void runtime_survey_cancel_user(void) {
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
@@ -1679,7 +1680,7 @@ index c05d6c3..a8deddb 100644
      fprintf(stderr, "[survey] cancelled: user input\n");
      pthread_mutex_unlock(&survey_lock);
  }
-@@ -315,7 +1881,58 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -315,7 +1882,58 @@ void runtime_survey_tick(uint64_t frame) {
      in_tick = 1;
      pthread_mutex_lock(&survey_lock);
      uintptr_t actor = player_actor();
@@ -1738,7 +1739,7 @@ index c05d6c3..a8deddb 100644
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
      } else if (request.kind == 1) {
-@@ -340,8 +1957,149 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -340,8 +1958,149 @@ void runtime_survey_tick(uint64_t frame) {
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }
