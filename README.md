@@ -37,9 +37,10 @@ Runs on the [MacNativeGames](https://github.com/ly05010419/MacNativeGames) nativ
 | hide | runs off to a spot you can't see; find him and he bolts, give up and so does he |
 | fight | (when he sees an enemy) sprints at it, plants a bomb barrel next to it, panics and runs; lighting it is your job |
 
-And whatever the mood, he watches you: you jump, he jumps a beat later; you get hit, he startles; you open a chest or
-cook something great, he celebrates; you cook something bad, he's grossed out; you climb or glide, he looks up at you.
-Shove him enough and he sulks.
+And whatever the mood, he watches you: you jump (or flip, or roll), he jumps a beat later; you get hit, he startles;
+you swing your sword at him, he runs; you whistle, he comes running; you open a chest or cook something great, he
+celebrates; you cook something bad, he's grossed out; you climb or glide, he looks up at you. Shove him enough and he
+sulks.
 
 ## Where he's going
 
