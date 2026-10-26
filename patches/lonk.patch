@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..1d04f63 100644
+index c05d6c3..0f6c22f 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -234,7 +234,7 @@ index c05d6c3..1d04f63 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,22 +435,1543 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,22 +435,1557 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -1319,19 +1319,33 @@ index c05d6c3..1d04f63 100644
 +        idle_frames = 240;
 +    }
 +#if defined(TOTK_GAME_V143)
-+    /* he watches what you do (your body slot's command, when it changes): you jump, he jumps a beat later; you get hit,
-+       he startles; you open a chest, get something or cook something great, he celebrates; you cook something bad, yuck;
-+       you climb or glide, he looks up at you */
-+    static char your_cmd[48];
-+    char cmd[256];
-+    anim_cmds(player, cmd, sizeof cmd);
-+    char *bar = strchr(cmd, '|');
-+    if (bar) *bar = 0;
-+    if (strcmp(cmd, your_cmd)) {
-+        snprintf(your_cmd, sizeof your_cmd, "%s", cmd);
++    /* he watches what you do (your body slot's command, when it changes): you jump (or flip, or roll), he jumps a beat
++       later; you get hit (frozen, eaten), he startles; you swing at him, he runs; you whistle, he comes; you open a chest,
++       get something or cook something great, he celebrates; you cook something bad, yuck; you climb or glide, he looks up
++       at you; you start Ultrahand, he looks around */
++    static char your_cmds[4][48];   /* body slots 0 to 3 (lower, upper, ...); 4 on is the face, skin, arm */
++    char all[256], *cur = all;
++    anim_cmds(player, all, sizeof all);
++    for (int slot = 0; slot < 4 && cur; slot++) {
++        char *bar = strchr(cur, '|'), cmd[48];
++        snprintf(cmd, sizeof cmd, "%.*s", bar ? (int)(bar - cur) : (int)strlen(cur), cur);
++        cur = bar ? bar + 1 : NULL;
++        if (!strcmp(cmd, your_cmds[slot])) continue;
++        snprintf(your_cmds[slot], sizeof your_cmds[0], "%s", cmd);
++        if (!cmd[0]) continue;
 +        int react = -1, near = hypotf(p[0] - a[0], p[2] - a[2]) < 20 && lonk_kind != LONK_PARTY && lonk_kind != LONK_FIGHT;
-+        if (!strcmp(cmd, "Jump")) react = GAIT_JUMP;
-+        else if (!strncmp(cmd, "Damage", 6)) react = GAIT_SURPRISE;
++        float lx = a[0] - p[0], lz = a[2] - p[2], ll = hypotf(lx, lz);
++        int facing_him = ll > 0.1f && (fx * lx + fz * lz) / ll > 0.5f;
++        if (!strcmp(cmd, "Jump") || !strcmp(cmd, "BackFlip") || !strcmp(cmd, "SideStep") || !strcmp(cmd, "FrontRoll")) react = GAIT_JUMP;
++        else if (!strncmp(cmd, "Damage", 6) || !strcmp(cmd, "Freeze") || !strcmp(cmd, "Eaten")) react = GAIT_SURPRISE;
++        else if ((!strncmp(cmd, "CutS", 4) || !strcmp(cmd, "CutDash") || !strncmp(cmd, "ChargeAttack", 12) || !strcmp(cmd, "ChargeLSwordSpin")) &&
++                 ll < 3 && facing_him && lonk_kind != LONK_FLEE) {   /* swinging at him: he's out of there */
++            fprintf(stderr, "[survey] lonk: you swung at him (%s)\n", cmd);
++            lonk_flee_from_set = 0; lonk_enter(LONK_FLEE, 180); lonk_emote_start(GAIT_SURPRISE);
++        } else if ((!strcmp(cmd, "HorseCall") || !strcmp(cmd, "CallComeon")) && lonk_kind != LONK_BUDDY) {   /* you whistled: he comes */
++            fprintf(stderr, "[survey] lonk: you whistled, he comes\n");
++            lonk_enter(LONK_BUDDY, 900);
++        } else if (!strcmp(cmd, "UltraHandStart")) react = GAIT_LOOK;
 +        else if (!strncmp(cmd, "OpenTreasureBox", 15) || !strcmp(cmd, "Get") || !strcmp(cmd, "GetCookingVeryGood") || !strcmp(cmd, "GetCookingGood")) react = GAIT_PARTY;
 +        else if (!strcmp(cmd, "GetCookingBad")) react = GAIT_YUCK;
 +        else if (!strncmp(cmd, "Climb", 5) || !strcmp(cmd, "Glide") || !strcmp(cmd, "ParasailGlide")) react = GAIT_LOOKUP;
@@ -1781,7 +1795,7 @@ index c05d6c3..1d04f63 100644
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,15 +1981,77 @@ void runtime_survey_cancel_user(void) {
+@@ -307,15 +1995,77 @@ void runtime_survey_cancel_user(void) {
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
@@ -1859,7 +1873,7 @@ index c05d6c3..1d04f63 100644
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
      } else if (request.kind == 1) {
-@@ -340,8 +2076,152 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -340,8 +2090,152 @@ void runtime_survey_tick(uint64_t frame) {
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }

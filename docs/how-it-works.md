@@ -92,10 +92,13 @@ each emote plays a clip of its own length (eat 30 frames, look around 29, look u
 
 He watches the player's animation slots the same way his own are read (`[as+0x20]`, 0x48 apart, the command's name at
 `+0x10`): slot 0 is the body (`Wait`, `Move`, `Jump`, `Land`...), slot 4 the face, then skin colour and the Zonai arm.
-When the body command changes he reacts: `Jump` (copycat jump), `Damage*` (startle), `OpenTreasureBox*`, `Get`,
-`GetCookingGood/VeryGood` (party), `GetCookingBad` (yuck), `Climb*`, `Glide`, `ParasailGlide` (looks up). The names come
-from the Player's ASB command list (532 of them). Tested: jump, and a spawned Bokoblin hitting the player (`DamageL`,
-`DamageS`).
+Slots 0 to 3 are the body (the lower body, the upper body and two more; an action can play in one or several: the
+whistle, `HorseCall`, only plays in slot 1). When one of them changes he reacts: `Jump`, `BackFlip`, `SideStep`,
+`FrontRoll` (copycat jump), `Damage*`, `Freeze`, `Eaten` (startle), `CutS1`..`CutS4`, `CutSF`, `CutDash`, `ChargeAttack*`
+within 3 m and facing him (he runs), `HorseCall` (he comes: buddy mode), `OpenTreasureBox*`, `Get`,
+`GetCookingGood/VeryGood` (party), `GetCookingBad` (yuck), `Climb*`, `Glide`, `ParasailGlide` (looks up),
+`UltraHandStart` (looks around). The names come from the Player's ASB command list (532 of them). Tested: jump, a
+spawned Bokoblin hitting the player (`DamageL`, `DamageS`), the whistle, and a sword swing at him (`CutS1`).
 
 The copycat jump: on the player's `Jump`, Lonk starts the jump clip, and once it's actually playing his feet get 4.5 m/s upwards and the falling code does the rest
 (about a metre up, about a second in the air). Shoved for 1.5 seconds (you within 1.2 m, moving), he sulks.
