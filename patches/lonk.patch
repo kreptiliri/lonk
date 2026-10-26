@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..4f0520a 100644
+index c05d6c3..767c186 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -237,7 +237,7 @@ index c05d6c3..4f0520a 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,22 +438,1649 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,22 +438,1651 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -1395,6 +1395,8 @@ index c05d6c3..4f0520a 100644
 +        else if (!strncmp(cmd, "OpenTreasureBox", 15) || !strcmp(cmd, "Get") || !strcmp(cmd, "GetCookingVeryGood") || !strcmp(cmd, "GetCookingGood")) react = GAIT_PARTY;
 +        else if (!strcmp(cmd, "GetCookingBad")) react = GAIT_YUCK;
 +        else if (!strncmp(cmd, "Climb", 5) || !strcmp(cmd, "Glide") || !strcmp(cmd, "ParasailGlide")) react = GAIT_LOOKUP;
++        int jumping = lonk_emote_left && (lonk_emote == GAIT_JUMP || lonk_emote == GAIT_RUNJUMP);
++        if (react == GAIT_JUMP && (jumping || lonk_jump > 0)) react = -1;   /* one jump per jump of yours: the slots report it more than once */
 +        if (react >= 0 && near && (!lonk_emote_left || react == GAIT_SURPRISE)) {
 +            fprintf(stderr, "[survey] lonk: you %s\n", cmd);
 +            if (react == GAIT_JUMP && hypotf(target[0] - a[0], target[2] - a[2]) > stop + 0.5f) react = GAIT_RUNJUMP;   /* on the move: the running one */
@@ -1890,7 +1892,7 @@ index c05d6c3..4f0520a 100644
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,15 +2090,77 @@ void runtime_survey_cancel_user(void) {
+@@ -307,15 +2092,77 @@ void runtime_survey_cancel_user(void) {
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
@@ -1968,7 +1970,7 @@ index c05d6c3..4f0520a 100644
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
      } else if (request.kind == 1) {
-@@ -340,8 +2185,152 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -340,8 +2187,152 @@ void runtime_survey_tick(uint64_t frame) {
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }
