@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..b05b510 100644
+index c05d6c3..1d04f63 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -234,7 +234,7 @@ index c05d6c3..b05b510 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,22 +435,1542 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,22 +435,1543 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -478,8 +478,9 @@ index c05d6c3..b05b510 100644
 +   and floats. Read-only. */
 +/* "survey peek bones <base>": looks for his skeleton's world matrices. Follows pointers from <base> (pmodel) three deep,
 +   0x800 bytes each, and logs every buffer holding 20+ 3x4 matrices in a row (rotation rows about unit length) whose
-+   translations are within 3 m of his actor position. Found: [[model+0x458]+8], 97 column matrices that don't follow his
-+   clips (their average drifted once, then stayed put), and [[[model+0x3b8]+0x540]+0x80], 89 that don't move (bind pose). */
++   translations are within 3 m of his actor position. Found: [[model+0x458]+8], 97 column matrices, [[[model+0x3b8]+0x540]
++   +0x80], 89, and (four pointers deep) seven more arrays of 20 to 63; none of them changes while he runs, so his live pose
++   isn't kept as plain matrices anywhere this reaches. */
 +static unsigned bones_count(uintptr_t at, const float pos[3]) {
 +    /* row-major 3x4 (translation at 3, 7, 11) or 4x3 columns (9, 10, 11); in the world (near pos) or in the model (near 0) */
 +    static const int tx[2][3] = {{3, 7, 11}, {9, 10, 11}};
@@ -1780,7 +1781,7 @@ index c05d6c3..b05b510 100644
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,15 +1980,77 @@ void runtime_survey_cancel_user(void) {
+@@ -307,15 +1981,77 @@ void runtime_survey_cancel_user(void) {
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
@@ -1858,7 +1859,7 @@ index c05d6c3..b05b510 100644
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
      } else if (request.kind == 1) {
-@@ -340,8 +2075,152 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -340,8 +2076,152 @@ void runtime_survey_tick(uint64_t frame) {
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }
