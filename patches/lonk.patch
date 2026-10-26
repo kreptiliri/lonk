@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..2f9bcc7 100644
+index c05d6c3..3b23320 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -40,7 +40,7 @@ index c05d6c3..2f9bcc7 100644
  #include <limits.h>
  #include <mach/mach.h>
  #include "mach_vm_compat.h"
-@@ -181,24 +184,121 @@ void runtime_survey_init(Module *m) {
+@@ -181,24 +184,123 @@ void runtime_survey_init(Module *m) {
  int runtime_survey_command(const char *line) { (void)line; return 0; }
  #endif
  #else
@@ -125,6 +125,8 @@ index c05d6c3..2f9bcc7 100644
 +static KEEP float lonk_anchor[3], lonk_wander[3], lonk_flee[2];
 +#define LONK_RUN 5.7f      /* m/s, measured off Link: running (holding forward) */
 +#define LONK_SPRINT 9.0f   /* and sprinting */
++#define LONK_GRAVITY 24.6f   /* m/s/s: Link's standing jump, from a trace, is 0.77 m high and 0.5 s long (2.5 times real gravity) */
++#define LONK_JUMP 6.2f       /* and leaves the ground at 6.2 m/s */
 +static KEEP float lonk_goto[2], lonk_goto_speed = LONK_RUN;   /* "survey lonk goto <right> <forward> [m/s]": the next wander goes to this spot (metres from the player) */
 +static KEEP int lonk_goto_set;
 +static KEEP int lonk_emote, lonk_emoted;   /* a one-off emote (its gait: GAIT_LOOK, GAIT_EAT...) he's doing instead of moving, once per mood */
@@ -167,7 +169,7 @@ index c05d6c3..2f9bcc7 100644
  
  static int read_mem(uintptr_t address, void *out, size_t size) {
      if (!address || address > UINTPTR_MAX - size) return 0;
-@@ -254,6 +354,45 @@ static uintptr_t player_actor(void) {
+@@ -254,6 +356,45 @@ static uintptr_t player_actor(void) {
      }
      return 0;
  }
@@ -213,7 +215,7 @@ index c05d6c3..2f9bcc7 100644
  void runtime_survey_init(Module *m) {
      const char *enabled = getenv("TOTK_SURVEY");
      if (!enabled || strcmp(enabled, "1")) return;
-@@ -272,6 +411,21 @@ void runtime_survey_init(Module *m) {
+@@ -272,6 +413,21 @@ void runtime_survey_init(Module *m) {
          runtime_fail("survey requires verified game-version forceSetMatrix entry");
      survey_main = (uintptr_t)m->base;
      survey_force = (void (*)(void *, const float *, uint32_t))(m->base + FORCE_MATRIX);
@@ -235,7 +237,7 @@ index c05d6c3..2f9bcc7 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,22 +436,1609 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,22 +438,1612 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -423,6 +425,9 @@ index c05d6c3..2f9bcc7 100644
 +/* Something in the way, knee high, within <reach> m along (dx, dz)? A walkable slope (normal pointing up) doesn't count. */
 +static int ray_blocked(const float at[3], float dx, float dz, float reach) {
 +    float start[3] = {at[0], at[1] + 0.6f, at[2]}, end[3] = {at[0] + dx * reach, at[1] + 0.6f, at[2] + dz * reach}, hit[3], normal[3];
++    /* chest high too: a wall that leans out at the bottom reads as a walkable slope at the knee, and he walked into it */
++    float chest[3] = {at[0], at[1] + 1.3f, at[2]}, chest_end[3] = {at[0] + dx * reach, at[1] + 1.3f, at[2] + dz * reach};
++    if (ray_cast(chest, chest_end, hit, NULL)) return 1;
 +    if (!ray_cast(start, end, hit, normal)) return 0;
 +    float nl = sqrtf(normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]);
 +    return !(nl > 0.5f && nl < 1.5f && normal[1] / nl > 0.65f);
@@ -1093,7 +1098,7 @@ index c05d6c3..2f9bcc7 100644
 +/* how long each emote lasts (frames); the jump is as long as he's in the air, about */
 +static void lonk_emote_start(int gait) {
 +    static const unsigned frames[GAITS] = {[GAIT_LOOK] = 180, [GAIT_SURPRISE] = 100, [GAIT_EAT] = 150, [GAIT_MEAL] = 200, [GAIT_YUCK] = 120,
-+                                           [GAIT_JUMP] = 58, [GAIT_DRINK] = 150, [GAIT_SULK] = 160, [GAIT_LOOKUP] = 150};
++                                           [GAIT_JUMP] = 32, [GAIT_DRINK] = 150, [GAIT_SULK] = 160, [GAIT_LOOKUP] = 150};
 +    lonk_emote = gait; lonk_emote_left = frames[gait] ? frames[gait] : 120;
 +    fprintf(stderr, "[survey] lonk: emote %s\n", gait_names[gait]);
 +}
@@ -1370,7 +1375,7 @@ index c05d6c3..2f9bcc7 100644
 +        if (react >= 0 && near && (!lonk_emote_left || react == GAIT_SURPRISE)) {
 +            fprintf(stderr, "[survey] lonk: you %s\n", cmd);
 +            lonk_emote_start(react);
-+            if (react == GAIT_JUMP) lonk_jump = 4.5f;   /* about a metre */
++            if (react == GAIT_JUMP) lonk_jump = LONK_JUMP;
 +            if (react == GAIT_PARTY) lonk_emote_left = 150;
 +        }
 +    }
@@ -1436,8 +1441,8 @@ index c05d6c3..2f9bcc7 100644
 +    if (follows && (lonk_blocked > 20 || no_gain > 60) && rise > 1.8f && rise < 7 && hypotf(p[0] - a[0], p[2] - a[2]) < 9 &&
 +        !lonk_emote_left && lonk_jump == 0 && !jump_rest) {
 +        no_gain = 0; jump_rest = 240;
-+        lonk_jump = sqrtf(2 * 9.8f * (rise + 0.6f));
-+        lonk_emote_start(GAIT_JUMP); lonk_emote_left = (unsigned)(60 * 2 * lonk_jump / 9.8f) + 10;
++        lonk_jump = sqrtf(2 * LONK_GRAVITY * (rise + 0.6f));
++        lonk_emote_start(GAIT_JUMP); lonk_emote_left = (unsigned)(60 * 2 * lonk_jump / LONK_GRAVITY) + 10;
 +        fprintf(stderr, "[survey] lonk: jumps up to you (%.1f m)\n", rise);
 +    }
 +    if (++st_frames >= 600) {
@@ -1523,7 +1528,7 @@ index c05d6c3..2f9bcc7 100644
 +        if (lonk_jump > 0 && lonk_gait == GAIT_JUMP) { vy = lonk_jump; feet += 0.06f; lonk_jump = 0; }   /* up he goes */
 +        if (ray_floor(a[0], a[2], feet + 0.7f, feet - 60, &h, &up)) {
 +            ground_src = "ray";
-+            if (h < feet - 0.05f) { vy -= 9.8f / 60; feet = fmaxf(feet + vy / 60, h); ground_src = "falling"; if (feet == h) vy = 0; }
++            if (h < feet - 0.05f) { vy -= LONK_GRAVITY / 60; feet = fmaxf(feet + vy / 60, h); ground_src = "falling"; if (feet == h) vy = 0; }
 +            else if (up < 0.6f) { ground_src = "steep"; vy = 0; }   /* a wall's face isn't a step: he doesn't climb it */
 +            else { feet += (h - feet) * 0.3f; vy = 0; }
 +        } else if (ray_floor(a[0], a[2], feet + 3, feet - 0.5f, &h, &up) && up > 0.6f) { feet = h; vy = 0; ground_src = "step up"; }   /* feet just under a mound */
@@ -1711,7 +1716,7 @@ index c05d6c3..2f9bcc7 100644
 +        for (unsigned k = 0; k < sizeof names / sizeof *names; k++) if (!strcmp(emote, names[k].name)) g = names[k].gait;
 +        if (g < 0) { fprintf(stderr, "[survey] lonk emote: unknown %s\n", emote); return 1; }
 +        pthread_mutex_lock(&survey_lock);
-+        lonk_emote_start(g); if (g == GAIT_JUMP) lonk_jump = 4.5f;
++        lonk_emote_start(g); if (g == GAIT_JUMP) lonk_jump = LONK_JUMP;
 +        pthread_mutex_unlock(&survey_lock);
 +        return 1;
 +    }
@@ -1848,7 +1853,7 @@ index c05d6c3..2f9bcc7 100644
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,15 +2048,77 @@ void runtime_survey_cancel_user(void) {
+@@ -307,15 +2053,77 @@ void runtime_survey_cancel_user(void) {
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
@@ -1926,7 +1931,7 @@ index c05d6c3..2f9bcc7 100644
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
      } else if (request.kind == 1) {
-@@ -340,8 +2143,152 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -340,8 +2148,152 @@ void runtime_survey_tick(uint64_t frame) {
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }
