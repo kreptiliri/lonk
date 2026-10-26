@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..6a3fa8d 100644
+index c05d6c3..41e5898 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -40,7 +40,7 @@ index c05d6c3..6a3fa8d 100644
  #include <limits.h>
  #include <mach/mach.h>
  #include "mach_vm_compat.h"
-@@ -181,23 +184,117 @@ void runtime_survey_init(Module *m) {
+@@ -181,24 +184,120 @@ void runtime_survey_init(Module *m) {
  int runtime_survey_command(const char *line) { (void)line; return 0; }
  #endif
  #else
@@ -161,9 +161,12 @@ index c05d6c3..6a3fa8d 100644
 +static KEEP float hold_xyz[3];
 +static KEEP char hold_tag[64];
  static _Thread_local int in_tick;
++static uint64_t tick_ns_sum, tick_ns_max;   /* time spent in the survey's frame tick, since the last stats line */
++static unsigned tick_n;
  
  static int read_mem(uintptr_t address, void *out, size_t size) {
-@@ -254,6 +351,45 @@ static uintptr_t player_actor(void) {
+     if (!address || address > UINTPTR_MAX - size) return 0;
+@@ -254,6 +353,45 @@ static uintptr_t player_actor(void) {
      }
      return 0;
  }
@@ -209,7 +212,7 @@ index c05d6c3..6a3fa8d 100644
  void runtime_survey_init(Module *m) {
      const char *enabled = getenv("TOTK_SURVEY");
      if (!enabled || strcmp(enabled, "1")) return;
-@@ -272,6 +408,21 @@ void runtime_survey_init(Module *m) {
+@@ -272,6 +410,21 @@ void runtime_survey_init(Module *m) {
          runtime_fail("survey requires verified game-version forceSetMatrix entry");
      survey_main = (uintptr_t)m->base;
      survey_force = (void (*)(void *, const float *, uint32_t))(m->base + FORCE_MATRIX);
@@ -231,7 +234,7 @@ index c05d6c3..6a3fa8d 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,22 +433,1506 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,22 +435,1525 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -528,6 +531,23 @@ index c05d6c3..6a3fa8d 100644
 +    for (unsigned i = 0; i < stalker_count; i++) if (!strcmp(stalkers[i].name, "PouchPlayer")) pouch = stalkers[i].actor;
 +    if (n == 1 && !strcmp(tok[0], "euscan")) { eu_scan(pouch ? pouch_eu(pouch) : 0); return; }
 +    if (n == 1 && !strcmp(tok[0], "watchcmds")) { lonk_watch_cmds = !lonk_watch_cmds; fprintf(stderr, "[survey] watchcmds %d\n", lonk_watch_cmds); return; }
++    if (n == 1 && !strcmp(tok[0], "around")) {   /* what 24 chest-high rays from him hit within 15 m (characters too), by actor name */
++        float at[3];
++        uint64_t keep = ray_layers;
++        if (!pouch || !read_mem(pouch + ACTOR_POS, at, sizeof at)) return;
++        ray_layers = 0xfffcffff00000003ull;
++        for (int k = 0; k < 24; k++) {
++            float r = k * 6.2832f / 24, st[3] = {at[0] + cosf(r) * 0.5f, at[1] + 1.0f, at[2] + sinf(r) * 0.5f}, en[3] = {at[0] + cosf(r) * 15, at[1] + 1.0f, at[2] + sinf(r) * 15}, hit[3];
++            if (!ray_cast(st, en, hit, NULL)) continue;
++            uintptr_t who = ray_hit_actor();
++            char text[64] = "-";
++            float wp[3] = {NAN, NAN, NAN};
++            if (who) { read_mem(read_ptr(who + GAME_ACTOR_NAME), text, sizeof text - 1); read_mem(who + ACTOR_POS, wp, sizeof wp); }
++            fprintf(stderr, "[survey] around: %3d deg %.1f m %s at %.2f,%.2f,%.2f\n", k * 15, hypotf(hit[0] - at[0], hit[2] - at[2]), text, wp[0], wp[1], wp[2]);
++        }
++        ray_layers = keep;
++        return;
++    }
 +    if (n == 1 && !strcmp(tok[0], "scene")) {   /* the scene's components and their param paths */
 +        uintptr_t module = read_ptr(survey_main + SCENE_SLOT), scene = module ? read_ptr(module + 0x1e8) : 0;
 +        int count = 0; read_mem(scene + 0x50, &count, 4);
@@ -1365,8 +1385,10 @@ index c05d6c3..6a3fa8d 100644
 +        fprintf(stderr, "[survey] lonk: jumps up to you (%.1f m)\n", rise);
 +    }
 +    if (++st_frames >= 600) {
-+        fprintf(stderr, "[survey] lonk stats: wanted %u moved %u (%.0f%%) detours %u boxed %u stuck %u lost %u\n", st_want, st_moved,
-+                st_want ? 100.0f * st_moved / st_want : 100.0f, lonk_stat_detour, lonk_stat_boxed, lonk_stat_stuck, lonk_stat_lost);
++        fprintf(stderr, "[survey] lonk stats: wanted %u moved %u (%.0f%%) detours %u boxed %u stuck %u lost %u, %.3f ms a frame (max %.2f)\n",
++                st_want, st_moved, st_want ? 100.0f * st_moved / st_want : 100.0f, lonk_stat_detour, lonk_stat_boxed, lonk_stat_stuck, lonk_stat_lost,
++                tick_n ? tick_ns_sum / 1e6 / tick_n : 0.0, tick_ns_max / 1e6);
++        tick_ns_sum = tick_ns_max = 0; tick_n = 0;
 +        st_want = st_moved = st_frames = lonk_stat_detour = lonk_stat_boxed = lonk_stat_stuck = lonk_stat_lost = 0;
 +    }
 +    /* a second of trying to get somewhere without getting 0.4 m further: a wander picks somewhere else, a flee turns,
@@ -1741,7 +1763,7 @@ index c05d6c3..6a3fa8d 100644
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,6 +1942,10 @@ void runtime_survey_cancel_user(void) {
+@@ -307,15 +1963,77 @@ void runtime_survey_cancel_user(void) {
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
@@ -1752,8 +1774,10 @@ index c05d6c3..6a3fa8d 100644
      fprintf(stderr, "[survey] cancelled: user input\n");
      pthread_mutex_unlock(&survey_lock);
  }
-@@ -315,7 +1954,64 @@ void runtime_survey_tick(uint64_t frame) {
+ void runtime_survey_tick(uint64_t frame) {
+     if (in_tick || !atomic_load_explicit(&runtime_survey_pending, memory_order_acquire)) return;
      in_tick = 1;
++    uint64_t t0 = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
      pthread_mutex_lock(&survey_lock);
      uintptr_t actor = player_actor();
 +#ifdef SURVEY_SPAWN
@@ -1817,7 +1841,7 @@ index c05d6c3..6a3fa8d 100644
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
      } else if (request.kind == 1) {
-@@ -340,8 +2036,149 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -340,8 +2058,152 @@ void runtime_survey_tick(uint64_t frame) {
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }
@@ -1831,6 +1855,9 @@ index c05d6c3..6a3fa8d 100644
      atomic_store_explicit(&runtime_survey_pending, request.kind || hold_left, memory_order_release);
 +#endif
      pthread_mutex_unlock(&survey_lock);
++    uint64_t took = clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - t0;   /* his cost per frame, for the stats line */
++    tick_ns_sum += took; tick_n++;
++    if (took > tick_ns_max) tick_ns_max = took;
      in_tick = 0;
  }
 +#ifndef LONK_PLUGIN
