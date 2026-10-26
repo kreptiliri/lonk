@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..b52e211 100644
+index c05d6c3..4f0520a 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -237,7 +237,7 @@ index c05d6c3..b52e211 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,22 +438,1648 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,22 +438,1649 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -725,11 +725,12 @@ index c05d6c3..b52e211 100644
 +        }
 +        /* the mod's selector keeps the loop phase when he switches (run and sprint flow into each other), so an emote
 +           would start where his loop is: it waits (a moment) for the loop to come round */
-+        if (gait != lonk_gait && gait >= GAIT_PARTY && gait != GAIT_JUMP && gait != GAIT_RUNJUMP && !hop && lonk_body) {   /* a jump can't wait: it's a short pose anyway */
++        if (gait != lonk_gait && gait >= GAIT_PARTY && !hop && lonk_body) {   /* a jump too: started mid-loop, its 10 frames ended at once and it froze */
 +            float phase = 0;
 +            read_mem(lonk_body + 0x1e0, &phase, sizeof phase);
 +            static unsigned waited;   /* not forever: a one-shot clip (the jump) sits at 1.0 and never comes round */
-+            if (phase > 0.06f && phase < 0.995f && ++waited < 40) { waiting = 1; continue; }
++            unsigned most = gait == GAIT_JUMP || gait == GAIT_RUNJUMP ? 20 : 40;   /* a jump waits at most a third of a second */
++            if (phase > 0.06f && phase < 0.995f && ++waited < most) { waiting = 1; continue; }
 +            waited = 0;
 +        }
 +        if (use_item[gait] && !hop) ((void (*)(uintptr_t, const void *, const char *))set_string)(bb, &u_key, use_item[gait]);
@@ -1889,7 +1890,7 @@ index c05d6c3..b52e211 100644
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,15 +2089,77 @@ void runtime_survey_cancel_user(void) {
+@@ -307,15 +2090,77 @@ void runtime_survey_cancel_user(void) {
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
@@ -1967,7 +1968,7 @@ index c05d6c3..b52e211 100644
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
      } else if (request.kind == 1) {
-@@ -340,8 +2184,152 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -340,8 +2185,152 @@ void runtime_survey_tick(uint64_t frame) {
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }
