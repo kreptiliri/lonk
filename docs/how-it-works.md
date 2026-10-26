@@ -246,7 +246,7 @@ makes it look like he dove there).
   in the Temple of Time).
 - Ledges, following you (stalk, buddy, block, behind, gift): when you're 1.5 to 12 m below him, ledges stop counting as
   walls, so he walks off and the falling code takes him down. When you're 0.6 to 7 m above and within 20 m, and he's been
-  blocked for a quarter of a second or hasn't got any closer for three quarters, he jumps (Camille found it first: when
+  blocked for a quarter of a second or hasn't got any closer for three quarters, he jumps, but only right at the foot of the ledge, the wall within 1.2 m his way (Camille found it first: when
   he paced along a ledge, jumping made him copy the jump, and that got him over): upward speed sqrt(2 g (height +
   0.6 m)), the jump clip, and he keeps heading for you in the air (aiming 0.6 m from you, so he lands beside you, not at
   the foot). The knee-high wall check rises with his feet, so he moves on once he's above the edge. 4 s between tries.
