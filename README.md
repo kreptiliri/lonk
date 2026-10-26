@@ -95,7 +95,10 @@ He has emotes of his own: arriving somewhere on a wander he looks around, looks 
 something, a whole meal, a drink), which is sometimes gross. When you jump, he jumps too, a moment later. Keep shoving
 him and he sulks. `survey lonk emote <look|lookup|eat|meal|drink|yuck|jump|sulk|surprise>` plays one now.
 
-He keeps an eye out, too: when he sees an enemy (within 18 m), he picks a fight. He sprints at it, plants a bomb barrel
+Standing around with you in buddy mode, he gets bored and looks up at the sky, looks around or has a snack. His gifts
+pay attention: freezing, he brings you a spicy pepper; too hot, a hydromelon.
+
+He keeps an eye out, too: when he sees an enemy (within 18 m), he picks a fight (or, one time in three, hides behind you). He sprints at it, plants a bomb barrel
 right next to it, startles at what he's done, and runs. Lighting it is your job. (Once every 25 seconds, with his brain
 on. `survey spawn prop <ActorName> [forward [sideways [up]]]` spawns something on its own, an enemy for instance, to try
 it.)
