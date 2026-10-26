@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..c79ba48 100644
+index c05d6c3..0552a51 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -235,7 +235,7 @@ index c05d6c3..c79ba48 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,22 +436,1583 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,22 +436,1588 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -1060,6 +1060,7 @@ index c05d6c3..c79ba48 100644
 +#endif
 +static unsigned lonk_stat_detour, lonk_stat_boxed, lonk_stat_stuck, lonk_stat_lost, lonk_blocked;
 +static float lonk_jump;   /* a jump waiting for its clip to start (its upward speed, m/s); then his feet leave the ground */
++static float lonk_buddy_side = 1;   /* which side of you he walks on in buddy mode (1 right, -1 left) */
 +static float lonk_enemy[3], lonk_flee_from[3];   /* the enemy he last saw; what the next flee runs from (else you) */
 +static unsigned lonk_enemy_left, lonk_fight_cooldown;
 +static int lonk_flee_from_set;
@@ -1264,8 +1265,8 @@ index c05d6c3..c79ba48 100644
 +        }
 +        break;
 +    case LONK_BUDDY: {   /* walks beside you, a step to one side, at your pace, looking where you look */
-+        static float side = 1;
-+        if (entering) side = arc4random_uniform(2) ? 1 : -1;
++        float side = lonk_buddy_side;
++        if (entering) side = lonk_buddy_side = arc4random_uniform(2) ? 1 : -1;
 +        target[0] = p[0] - fz * 1.6f * side + fx * 0.3f; target[2] = p[2] + fx * 1.6f * side + fz * 0.3f;
 +        float off = hypotf(target[0] - a[0], target[2] - a[2]);
 +        speed = fminf(fmaxf(player_speed * 1.05f + off * 2, 1.0f), LONK_SPRINT + 1); stop = 0.15f;
@@ -1449,6 +1450,10 @@ index c05d6c3..c79ba48 100644
 +            fprintf(stderr, "[survey] lonk: stuck, fleeing another way\n");
 +        }
 +        if (stuck) lonk_stat_stuck++;
++        if (stuck && lonk_kind == LONK_BUDDY) {   /* that side of you is a wall: the other side, then */
++            lonk_buddy_side = -lonk_buddy_side;
++            stuck = 0;
++        }
 +        if (stuck && lonk_kind == LONK_BLOCK) {   /* can't get in front of you (a wall there): he just tags along instead */
 +            fprintf(stderr, "[survey] lonk: can't get in front of you, follows instead\n");
 +            lonk_enter(LONK_STALK, lonk_phase_left);
@@ -1822,7 +1827,7 @@ index c05d6c3..c79ba48 100644
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,15 +2022,77 @@ void runtime_survey_cancel_user(void) {
+@@ -307,15 +2027,77 @@ void runtime_survey_cancel_user(void) {
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
@@ -1900,7 +1905,7 @@ index c05d6c3..c79ba48 100644
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
      } else if (request.kind == 1) {
-@@ -340,8 +2117,152 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -340,8 +2122,152 @@ void runtime_survey_tick(uint64_t frame) {
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }
