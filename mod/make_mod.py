@@ -28,10 +28,10 @@ import zstandard
 ASB = 'AS/PouchPlayer.root.asb.zs'
 ROOT = 205   # PauseMenuWait's first node: the HoldAnimationType selector
 # HoldAnimationType -> (the weapon-equip clip whose node gets reused, what it plays now). Only reachable from the root's
-# cases 1 to 5, never from the plain idle. The looping moves get the nodes without a frame controller.
-CASES = {1: ('PauseMenu_Equip_Sword', 'Nml_Move_Walk'), 2: ('PauseMenu_Equip_SwordNoShield', 'Nml_Move_Run'),
-         3: ('PauseMenu_Equip_Shield', 'Nml_Move_Dash'), 4: ('PauseMenu_Equip_Lsword', 'Demo_Get_Cooking_VeryGood'),
-         5: ('PauseMenu_Equip_Spear', 'Demo_Surprise')}
+# cases 1 to 5, never from the plain idle.
+CASES = {1: ('PauseMenu_Equip_Sword', 'Nml_Move_Walk'), 2: ('PauseMenu_Equip_Lsword', 'Nml_Move_Run'),
+         3: ('PauseMenu_Equip_Spear', 'Nml_Move_Dash'), 4: ('PauseMenu_Equip_SwordNoShield', 'Demo_Get_Cooking_VeryGood'),
+         5: ('PauseMenu_Equip_Shield', 'Demo_Surprise')}
 
 
 def romfs_reader(folder):
@@ -89,6 +89,10 @@ def main():
             sys.exit(f'no {clip} clip: not the 1.4.3 ASB?')
         leaf['Body']['Animation'] = now
         entries[case]['Node Index'] = leaf['Node Index']
+    # The root keeps the loop phase when it switches (Is Sync): run and sprint flow into each other instead of restarting
+    # his stride, which made his body snap. (Only a command's first node can sync: those are the ones with Sync Controls.
+    # It reaches through everything below, so the patch starts an emote only when his loop is about to wrap.)
+    root['Body']['Is Sync'] = True
     AsbFile.from_dict(doc).to_binary(str(work) + '/')
     edited = (work / 'PouchPlayer.root.asb').read_bytes()
 

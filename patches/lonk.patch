@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..2f46efd 100644
+index c05d6c3..8ee9ec6 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -229,7 +229,7 @@ index c05d6c3..2f46efd 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,22 +431,1050 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,22 +431,1110 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -422,6 +422,43 @@ index c05d6c3..2f46efd 100644
 +/* "survey peek <base> <off>... <bytes>": base is pouch, pmodel (its model), player, plmodel, main or a hex address; every
 +   offset but the last is followed as a pointer (addr = [addr+off]), then <bytes> (<= 256) at addr+last are logged as words
 +   and floats. Read-only. */
++/* "survey peek bones <base>": looks for his skeleton's world matrices. Follows pointers from <base> (pmodel) three deep,
++   0x800 bytes each, and logs every buffer holding 20+ 3x4 matrices in a row (rotation rows about unit length) whose
++   translations are within 3 m of his actor position. Found: [[model+0x458]+8], 97 column matrices whose forward offset
++   adds up the distance he's walked (never resets), and [[[model+0x3b8]+0x540]+0x80], 89 that don't move (bind pose). */
++static unsigned bones_count(uintptr_t at, const float pos[3]) {
++    /* row-major 3x4 (translation at 3, 7, 11) or 4x3 columns (9, 10, 11); in the world (near pos) or in the model (near 0) */
++    static const int tx[2][3] = {{3, 7, 11}, {9, 10, 11}};
++    unsigned best = 0;
++    for (int layout = 0; layout < 2; layout++) for (int world = 0; world < 2; world++) {
++        float m[12];
++        unsigned k = 0;
++        for (; k < 256 && read_mem(at + k * 0x30, m, sizeof m); k++) {
++            float r0 = m[0] * m[0] + m[1] * m[1] + m[2] * m[2];
++            const int *t = tx[layout];
++            float ox = world ? pos[0] : 0, oy = world ? pos[1] : 0, oz = world ? pos[2] : 0;
++            if (!(fabsf(r0 - 1) < 0.1f && fabsf(m[t[0]] - ox) < 3 && fabsf(m[t[1]] - oy) < 3 && fabsf(m[t[2]] - oz) < 3)) break;
++            if (!world && fabsf(m[t[0]]) + fabsf(m[t[1]]) + fabsf(m[t[2]]) < 1e-4f && k > 2) break;   /* not all identities */
++        }
++        if (k > best) best = k | (unsigned)(layout << 16) | (unsigned)(world << 17);
++    }
++    return best;
++}
++static void bones_scan(uintptr_t base, const float pos[3], int depth, char *path, size_t len) {
++    uint64_t words[0x100];
++    if (!read_mem(base, words, sizeof words)) return;
++    for (unsigned i = 0; i < 0x100; i++) {
++        uintptr_t q = (uintptr_t)words[i];
++        if (q < 0x100000000ull || q > 0x7fffffffffffull || (q & 7)) continue;
++        size_t at = strlen(path);
++        snprintf(path + at, len - at, " %x", i * 8);
++        unsigned n = bones_count(q, pos);
++        if ((n & 0xffff) >= 20) fprintf(stderr, "[survey] bones:%s -> %#llx: %u matrices (%s, %s)\n", path, (unsigned long long)q, n & 0xffff,
++                                        n >> 16 & 1 ? "columns" : "rows", n >> 17 & 1 ? "world" : "model");
++        else if (depth > 1) bones_scan(q, pos, depth - 1, path, len);
++        path[at] = 0;
++    }
++}
 +static void peek_run(uintptr_t player) {
 +    static const uint32_t w_model[] = {0xf9411408, 0xb4000168, 0xf9400500, 0xb4000100, 0xf9400008};
 +    uintptr_t (*get_model)(uintptr_t) = (uintptr_t (*)(uintptr_t))game_fn(0xba8854, w_model, 5);
@@ -442,9 +479,18 @@ index c05d6c3..2f46efd 100644
 +        for (int i = 2; i < n; i++) tok[i - 2] = tok[i];
 +        n -= 2;
 +    }
-+    if (n < 3) { fprintf(stderr, "[survey] peek: expected <base> <off>... <bytes>\n"); return; }
 +    uintptr_t pouch = 0, addr = 0;
 +    for (unsigned i = 0; i < stalker_count; i++) if (!strcmp(stalkers[i].name, "PouchPlayer")) pouch = stalkers[i].actor;
++    if (n == 2 && !strcmp(tok[0], "bones")) {
++        uintptr_t who = !strcmp(tok[1], "player") ? player : pouch, model = who && get_model ? get_model(who) : 0;
++        float pos[3];
++        char path[128] = "";
++        if (!model || !read_mem(who + ACTOR_POS, pos, sizeof pos)) { fprintf(stderr, "[survey] bones: no model\n"); return; }
++        fprintf(stderr, "[survey] bones: model %#llx at %.2f,%.2f,%.2f\n", (unsigned long long)model, pos[0], pos[1], pos[2]);
++        bones_scan(model, pos, 3, path, sizeof path);
++        return;
++    }
++    if (n < 3) { fprintf(stderr, "[survey] peek: expected <base> <off>... <bytes>\n"); return; }
 +    if (!strcmp(tok[0], "pouch")) addr = pouch;
 +    else if (!strcmp(tok[0], "pmodel")) addr = pouch && get_model ? get_model(pouch) : 0;
 +    else if (!strcmp(tok[0], "player")) addr = player;
@@ -545,6 +591,7 @@ index c05d6c3..2f46efd 100644
 +    static const int hold[] = {0, 1, 2, 3, 4, 0, 5};
 +    static const char *const gait_names[] = {"idle", "walk", "run", "dash", "party", "look around", "surprise"};
 +    struct { const char *name; uint64_t zero; } h_key = {"HoldAnimationType", 0};
++    int waiting = 0;
 +    for (unsigned i = 0; i < stalker_count; i++) {
 +        if (strcmp(stalkers[i].name, "PouchPlayer")) continue;
 +        uintptr_t as = anim_state(stalkers[i].actor), bb = as ? read_ptr(as + 0x40) : 0, vt = bb ? read_ptr(bb) : 0;
@@ -555,6 +602,13 @@ index c05d6c3..2f46efd 100644
 +        if (!ok) {
 +            if (gait != lonk_gait) fprintf(stderr, "[survey] gait: no blackboard setter (as=%#llx)\n", (unsigned long long)as);
 +            continue;
++        }
++        /* the mod's selector keeps the loop phase when he switches (run and sprint flow into each other), so an emote
++           would start where his loop is: it waits (a moment) for the loop to come round */
++        if (gait != lonk_gait && (gait == GAIT_PARTY || gait == GAIT_SURPRISE) && lonk_body) {
++            float phase = 0;
++            read_mem(lonk_body + 0x1e0, &phase, sizeof phase);
++            if (phase > 0.06f) { waiting = 1; continue; }
 +        }
 +        ((void (*)(uintptr_t, const void *, int))set_int)(bb, &h_key, hold[gait]);
 +        if (gait != lonk_gait) fprintf(stderr, "[survey] gait: %s\n", gait_names[gait]);
@@ -583,7 +637,7 @@ index c05d6c3..2f46efd 100644
 +        last_loop = loop; last_rate = rate; last_gait = gait;
 +        lonk_body = body;
 +    }
-+    lonk_gait = gait;
++    if (!waiting) lonk_gait = gait;
 +}
 +/* Place PouchPlayer with the game's own set-transform, as the menu does: 0x2ba758(actor, &arg, 0); arg = position, row-major
 +   rotation, scale, 8 zero bytes at +0x40, flags 7 at +0x48. Facing the player, where it already stands. */
@@ -1080,19 +1134,25 @@ index c05d6c3..2f46efd 100644
 +        if (ground_mode == GROUND_PHYSICS) read_mem(stalkers[i].actor + ACTOR_POS + 4, &y, sizeof y);   /* keep its own height */
 +        float back = 0;
 +#if defined(TOTK_GAME_V143)
-+        if (lonk_body && lonk_gait >= GAIT_WALK && lonk_gait <= GAIT_DASH) {
-+            float loop = 0;
-+            read_mem(lonk_body + 0x1e0, &loop, sizeof loop);
-+            if (isfinite(loop) && loop >= 0 && loop <= 1) back = lonk_root[lonk_gait] * loop;
-+        }
-+        /* a new gait fades in over a few frames, and the old clip's body is still ahead by its own drift meanwhile: keep
-+           holding that back, fading out with it, or he pops forward on every switch */
++        /* The mod's selector keeps the loop phase when he switches gait, and the new clip fades in over 5 frames (its Fade
++           In Frame), so the drift per loop fades from the old gait's to the new one's with it. When the loop restarted
++           instead, the old clip's drift is held and fades out. */
 +        static int held_gait = -1;
-+        static float carry, last_back;
-+        static unsigned carry_left;
-+        if (lonk_gait != held_gait) { carry = last_back; carry_left = 10; held_gait = lonk_gait; }
-+        last_back = back;
-+        if (carry_left) back += carry * carry_left-- / 10.0f;
++        static float from_root, eff_root, carry, last_back, last_loop = -1;
++        static unsigned fade_left;
++        float loop = -1;
++        if (lonk_body) read_mem(lonk_body + 0x1e0, &loop, sizeof loop);
++        if (!isfinite(loop) || loop < 0 || loop > 1) loop = 0;
++        float root = lonk_gait >= GAIT_WALK && lonk_gait <= GAIT_DASH ? lonk_root[lonk_gait] : 0;
++        if (lonk_gait != held_gait) {
++            int synced = fabsf(loop - last_loop) < 0.15f;
++            from_root = synced ? eff_root : root; carry = synced ? 0 : last_back; fade_left = 5; held_gait = lonk_gait;
++        }
++        float old = fade_left / 6.0f;
++        if (fade_left) fade_left--;
++        eff_root = root + (from_root - root) * old;
++        back = eff_root * loop + carry * old;
++        last_back = back; last_loop = loop;
 +#endif
 +        float matrix[12] = {hz, 0, hx, a[0] - hx * back,
 +                            0,  1, 0,  y,
@@ -1283,7 +1343,7 @@ index c05d6c3..2f46efd 100644
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,6 +1484,10 @@ void runtime_survey_cancel_user(void) {
+@@ -307,6 +1544,10 @@ void runtime_survey_cancel_user(void) {
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
@@ -1294,7 +1354,7 @@ index c05d6c3..2f46efd 100644
      fprintf(stderr, "[survey] cancelled: user input\n");
      pthread_mutex_unlock(&survey_lock);
  }
-@@ -315,7 +1496,55 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -315,7 +1556,55 @@ void runtime_survey_tick(uint64_t frame) {
      in_tick = 1;
      pthread_mutex_lock(&survey_lock);
      uintptr_t actor = player_actor();
@@ -1350,7 +1410,7 @@ index c05d6c3..2f46efd 100644
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
      } else if (request.kind == 1) {
-@@ -340,8 +1569,104 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -340,8 +1629,104 @@ void runtime_survey_tick(uint64_t frame) {
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }

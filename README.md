@@ -103,8 +103,8 @@ and then he starts fresh. `survey reload` forces a reload.
 
 ## Known issues
 
-- He still hitches a little as he walks (the walk carries him forward by itself, and the amount it's undone by is tuned by
-  eye, so far roughly).
+- He may still hitch a little as he runs (the run carries him forward by itself, and the amount it's undone by is tuned
+  by eye). Switching between run and sprint keeps his stride now, so that snip should be gone.
 - He doesn't look around anymore when he arrives somewhere on a wander: the menu's pose switch has only five slots.
 - He only has his underwear. Real armor (`survey equip 10 Armor_001_Upper`) doesn't draw, and hides the body under it,
   so he turns into a floating head until he's back in the defaults.
