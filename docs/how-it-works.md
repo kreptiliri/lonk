@@ -163,13 +163,20 @@ how he walked up walls and onto cave roofs. Floor lower than his feet and he fal
 floor too steep (normal y under 0.6) and he doesn't step onto it.
 
 The same raycast steers him: before each step he probes 1 m ahead at knee height, and if something's there (and it isn't
-a walkable slope, judged by the hit normal at `+0x30`) he tries 45 and then 90 degrees to one side, then the other,
-starting with whichever side worked last so he doesn't dither. A ledge counts too: no floor within 2.5 m below his feet
-0.8 m ahead. Boxed in, he waits.
+a walkable slope, judged by the hit normal at `+0x30`) he tries 30, 45, 90 and then 120 degrees to one side, then the
+other, starting with whichever side worked last so he doesn't dither. A ledge counts too: no floor within 2.5 m below his
+feet 0.8 m ahead. Boxed in, he waits.
 
-Stranded for 3 seconds (5 m above or below Link, 30 m away, trying to move and not moving, or no floor), he pops back
-next to Link: behind him, else to a side, else in front, wherever a ray finds flat floor at Link's height. The "behind"
-mood's teleport uses the same spot.
+He also looks before he picks where to go. A wander tries 8 random directions and measures how far each one is really
+walkable (the knee-high ray for walls, then a floor ray every metre, following the floor up and down), and goes to the
+best one, stopping short of the wall or ledge. More than 15 m from Link, the directions are all roughly towards him. A
+flee takes the clearest way near "straight away from Link", and when he gets stuck the sides come first. Tested in the
+Temple of Time's hall (walls, pillars, stairs): wanders and flees back to back for 100 s, 99-100% of the frames he
+tried to move he got somewhere (`lonk stats` in the log every 10 s).
+
+Stranded for 3 seconds (5 m above or below Link or 30 m away while getting nowhere, 60 m away, stuck against something,
+or no floor), he pops back next to Link: behind him, else to a side, else in front, wherever a ray finds flat floor at
+Link's height. Up a staircase or off on a run of his own is fine. The "behind" mood's teleport uses the same spot.
 
 Walking through Link puts the mannequin's collision above Link's head, which the game reads as a low ceiling, and
 forces a crouch. Lonk keeps 1.1 m away and slides around instead, unless that would put him in a wall or off a ledge

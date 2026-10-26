@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..8ee9ec6 100644
+index c05d6c3..1bc3f95 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -229,7 +229,7 @@ index c05d6c3..8ee9ec6 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,22 +431,1110 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,22 +431,1173 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -405,6 +405,33 @@ index c05d6c3..8ee9ec6 100644
 +    return !ray_height(at[0] + dx * 0.8f, at[2] + dz * 0.8f, at[1] + 0.7f, at[1] - 2.5f, &h);
 +}
 +static int way_blocked(const float at[3], float dx, float dz) { return ray_blocked(at, dx, dz, 1.0f) || ray_ledge(at, dx, dz); }
++/* How far he can go from <at> along (dx, dz), up to <reach> m: until something knee high is in the way (a walkable slope
++   doesn't count) or there's no floor within a step above to 2.5 m below, checked every metre. */
++static float path_free(const float at[3], float dx, float dz, float reach) {
++    float start[3] = {at[0], at[1] + 0.6f, at[2]}, end[3] = {at[0] + dx * reach, at[1] + 0.6f, at[2] + dz * reach}, hit[3], normal[3];
++    float free = reach;
++    if (ray_cast(start, end, hit, normal)) {
++        float nl = sqrtf(normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]);
++        if (!(nl > 0.5f && nl < 1.5f && normal[1] / nl > 0.65f)) free = hypotf(hit[0] - at[0], hit[2] - at[2]);
++    }
++    float y = at[1], h;
++    for (float d = 1; d <= free; d += 1) {
++        if (!ray_height(at[0] + dx * d, at[2] + dz * d, y + 0.7f, y - 2.5f, &h)) return d - 1;
++        y = h;   /* follows the floor up and down a slope */
++    }
++    return free;
++}
++/* The clearest of <tries> directions: the first that's free for <want> m, else the one that goes furthest. Directions
++   are (base angle + offs[i]); returns the free length and the direction in out. */
++static float best_way(const float at[3], float base, const float *offs, int tries, float want, float out[2]) {
++    float best = -1;
++    for (int i = 0; i < tries; i++) {
++        float r = base + offs[i], dx = cosf(r), dz = sinf(r), f = path_free(at, dx, dz, want);
++        if (f > best) { best = f; out[0] = dx; out[1] = dz; }
++        if (f >= want) break;
++    }
++    return best;
++}
 +/* Somewhere to put him next to the player (p, facing fx, fz): behind, then either side, then in front, 1.5 m away, wherever
 +   there's flat floor about as high as the player's. Behind if none. */
 +static void spot_near(const float p[3], float fx, float fz, float out[2]) {
@@ -870,6 +897,35 @@ index c05d6c3..8ee9ec6 100644
 +    return g;
 +}
 +#endif
++static unsigned lonk_stat_detour, lonk_stat_boxed, lonk_stat_stuck, lonk_stat_lost, lonk_blocked;
++/* A wander goes somewhere he can actually get to: the best of 8 random directions (your way, if he's over 15 m off), 4
++   to 10 m, stopping short of walls and ledges. */
++static void lonk_pick_wander(const float a[3], const float p[3]) {
++    float d = frand(4, 10), way[2] = {1, 0}, offs[8], home = atan2f(p[2] - a[2], p[0] - a[0]);
++    int far = hypotf(p[0] - a[0], p[2] - a[2]) > 15;   /* far from you, he wanders back your way */
++    for (int i = 0; i < 8; i++) offs[i] = far ? home + frand(-1, 1) : frand(0, 6.2832f);
++#if defined(TOTK_GAME_V143)
++    if (ground_mode == GROUND_TERRAIN && isfinite(a[1])) {
++        float f = best_way(a, 0, offs, 8, d, way);
++        d = fminf(d, fmaxf(f - 0.6f, 0.5f));
++    } else
++#endif
++    { way[0] = cosf(offs[0]); way[1] = sinf(offs[0]); }
++    lonk_wander[0] = a[0] + way[0] * d; lonk_wander[2] = a[2] + way[1] * d;
++}
++/* Away from you, the clearest way near "straight away" (up to 120 degrees off); stuck, the way he was going counts
++   as blocked and the sides come first. */
++static void lonk_pick_flee(const float a[3], const float p[3], int stuck) {
++    float ax = a[0] - p[0], az = a[2] - p[2], l = hypotf(ax, az);
++    if (l < 0.01f) { ax = 1; az = 0; l = 1; }
++    float base = stuck ? atan2f(lonk_flee[1], lonk_flee[0]) : atan2f(az, ax), way[2] = {ax / l, az / l};
++    static const float near[] = {0, 0.52f, -0.52f, 1.05f, -1.05f, 1.57f, -1.57f, 2.09f, -2.09f};
++    static const float sides[] = {1.57f, -1.57f, 1.05f, -1.05f, 2.09f, -2.09f, 2.62f, -2.62f, 3.14f};
++#if defined(TOTK_GAME_V143)
++    if (ground_mode == GROUND_TERRAIN && isfinite(a[1])) best_way(a, base, stuck ? sides : near, 9, 8, way);
++#endif
++    lonk_flee[0] = way[0]; lonk_flee[1] = way[1];
++}
 +static void lonk_step(uint64_t frame, uintptr_t player) {
 +    float p[3], rot[9];
 +    if (!read_mem(player + ACTOR_POS, p, sizeof p) || !read_mem(player + ACTOR_ROT, rot, sizeof rot)) return;
@@ -932,7 +988,7 @@ index c05d6c3..8ee9ec6 100644
 +        if (entering && lonk_goto_set) {   /* right of the player is (-fz, fx) */
 +            lonk_wander[0] = p[0] - fz * lonk_goto[0] + fx * lonk_goto[1]; lonk_wander[2] = p[2] + fx * lonk_goto[0] + fz * lonk_goto[1];
 +            lonk_goto_set = 0;
-+        } else if (entering) { float r = frand(0, 6.2832f), d = frand(4, 10); lonk_wander[0] = a[0] + cosf(r) * d; lonk_wander[2] = a[2] + sinf(r) * d; lonk_goto_speed = LONK_RUN; }
++        } else if (entering) { lonk_pick_wander(a, p); lonk_goto_speed = LONK_RUN; }
 +        target[0] = lonk_wander[0]; target[2] = lonk_wander[2]; speed = lonk_goto_speed; stop = 0.3f; face_player = 0; break;
 +    case LONK_GIFT:
 +        speed = LONK_RUN; stop = 2;
@@ -960,11 +1016,7 @@ index c05d6c3..8ee9ec6 100644
 +        if (lonk_gifted && lonk_phase_left == 1) lonk_enter(LONK_FLEE, 240);
 +        break;
 +    case LONK_FLEE:   /* away from you, one way (it turns when he gets stuck, below) */
-+        if (entering) {
-+            float ax = a[0] - p[0], az = a[2] - p[2], l = hypotf(ax, az);
-+            if (l < 0.01f) { ax = -fx; az = -fz; l = 1; }
-+            lonk_flee[0] = ax / l; lonk_flee[1] = az / l;
-+        }
++        if (entering) lonk_pick_flee(a, p, 0);
 +        target[0] = a[0] + lonk_flee[0] * 5; target[2] = a[2] + lonk_flee[1] * 5; speed = LONK_SPRINT; stop = 0; face_player = 0; break;
 +    default: break;
 +    }
@@ -982,8 +1034,8 @@ index c05d6c3..8ee9ec6 100644
 +    if (dist > 0.01f) {
 +        float step = fminf(speed / 60.0f, fmaxf(dist - stop, 0.0f)), ux = dx / dist, uz = dz / dist;
 +#if defined(TOTK_GAME_V143)
-+        /* around rocks, walls and trees: if the way ahead is blocked, try 45 then 90 degrees off to one side (the side that
-+           worked last time first, so he doesn't dither), then the other; boxed in, he stands still */
++        /* around rocks, walls and trees: if the way ahead is blocked, try 30, 45, 90 then 120 degrees off to one side (the side
++           that worked last time first, so he doesn't dither), then the other; boxed in, he stands still */
 +        static int steer = 1;
 +        static float detour[2];
 +        static unsigned detour_left;   /* a way round, kept for a third of a second so he doesn't flip between sides */
@@ -991,18 +1043,28 @@ index c05d6c3..8ee9ec6 100644
 +        if (step > 0.001f && detour_left && isfinite(a[1]) && way_blocked(a, ux, uz) && !way_blocked(a, detour[0], detour[1])) {
 +            ux = detour[0]; uz = detour[1]; detour_left--;
 +        } else if (step > 0.001f && isfinite(a[1]) && way_blocked(a, ux, uz)) {
-+            static const float turns[] = {0.785f, 1.571f};
++            static const float turns[] = {0.524f, 0.785f, 1.571f, 2.094f};
 +            int found = 0;
 +            for (int side = 0; side < 2 && !found; side++, steer = -steer)
-+                for (int t = 0; t < 2 && !found; t++) {
++                for (int t = 0; t < 4 && !found; t++) {
 +                    float r = turns[t] * steer, cx = ux * cosf(r) - uz * sinf(r), cz = ux * sinf(r) + uz * cosf(r);
 +                    if (!way_blocked(a, cx, cz)) { ux = cx; uz = cz; found = 1; }
 +                }
-+            if (found) { steer = -steer; detour[0] = ux; detour[1] = uz; detour_left = 20; }   /* undo the flip the loop did after the side that worked */
-+            else { step = 0; detour_left = 0; }
++            if (found) { steer = -steer; detour[0] = ux; detour[1] = uz; detour_left = 20; lonk_stat_detour++; }   /* undo the flip the loop did after the side that worked */
++            else { step = 0; detour_left = 0; lonk_stat_boxed++; }
 +        } else detour_left = 0;
 +#endif
 +        a[0] += ux * step; a[2] += uz * step;
++    }
++    /* steering stats, every 10 s: frames he wanted to move, frames he got anywhere, detours, boxed in, stuck, lost */
++    static unsigned st_want, st_moved, st_frames;
++    int got_on = hypotf(a[0] - before[0], a[2] - before[1]) > 0.02f;
++    if (wanted) { st_want++; if (got_on) st_moved++; }
++    lonk_blocked = wanted && !got_on ? lonk_blocked + 1 : 0;   /* frames in a row he's tried and not moved */
++    if (++st_frames >= 600) {
++        fprintf(stderr, "[survey] lonk stats: wanted %u moved %u (%.0f%%) detours %u boxed %u stuck %u lost %u\n", st_want, st_moved,
++                st_want ? 100.0f * st_moved / st_want : 100.0f, lonk_stat_detour, lonk_stat_boxed, lonk_stat_stuck, lonk_stat_lost);
++        st_want = st_moved = st_frames = lonk_stat_detour = lonk_stat_boxed = lonk_stat_stuck = lonk_stat_lost = 0;
 +    }
 +    /* a second of trying to get somewhere without getting 0.4 m further: a wander picks somewhere else, a flee turns,
 +       anything else counts as stuck (three such seconds and he pops back next to you, below) */
@@ -1012,14 +1074,13 @@ index c05d6c3..8ee9ec6 100644
 +    if (++watch_frames >= 60) {
 +        int stuck = watch_wanted > 40 && hypotf(a[0] - watch_from[0], a[2] - watch_from[1]) < 0.4f;
 +        if (stuck && lonk_kind == LONK_WANDER) {
-+            float r = frand(0, 6.2832f), d = frand(4, 10);
-+            lonk_wander[0] = a[0] + cosf(r) * d; lonk_wander[2] = a[2] + sinf(r) * d;
++            lonk_pick_wander(a, p);
 +            fprintf(stderr, "[survey] lonk: stuck, wandering somewhere else\n");
 +        } else if (stuck && lonk_kind == LONK_FLEE) {
-+            float side = arc4random_uniform(2) ? 1 : -1, x = lonk_flee[0];
-+            lonk_flee[0] = -lonk_flee[1] * side; lonk_flee[1] = x * side;
++            lonk_pick_flee(a, p, 1);
 +            fprintf(stderr, "[survey] lonk: stuck, fleeing another way\n");
 +        }
++        if (stuck) lonk_stat_stuck++;
 +        stuck_seconds = stuck && lonk_kind != LONK_WANDER && lonk_kind != LONK_FLEE ? stuck_seconds + 1 : 0;
 +        watch_frames = watch_wanted = 0; watch_from[0] = a[0]; watch_from[1] = a[2];
 +    }
@@ -1077,14 +1138,16 @@ index c05d6c3..8ee9ec6 100644
 +        } else if (ray_floor(a[0], a[2], feet + 3, feet - 0.5f, &h, &up) && up > 0.6f) { feet = h; vy = 0; ground_src = "step up"; }   /* feet just under a mound */
 +        else { ground_src = "none"; vy = 0; }
 +        ground = feet;
-+        /* lost for 3 s (5 m above or below you, 30 m away, stuck against something, or nothing under him): he's back behind you */
++        /* lost for 3 s (5 m above or below you or 30 m away and not getting anywhere, 60 m away, stuck against something, or
++           nothing under him): he's back behind you. Up a staircase or off on a run of his own is fine. */
 +        static unsigned lost;
 +        float far = hypotf(p[0] - a[0], p[2] - a[2]);
-+        const char *why = fabsf(feet - p[1]) > 5 ? "height" : far > 30 ? "far" : !strcmp(ground_src, "none") ? "no floor" :
++        const char *why = fabsf(feet - p[1]) > 5 && lonk_blocked > 30 ? "height" : (far > 30 && lonk_blocked > 30) || far > 60 ? "far" : !strcmp(ground_src, "none") ? "no floor" :
 +                          stuck_seconds ? "stuck" : NULL;
 +        lost = why ? lost + 1 : 0;
 +        if (lost > 180) {
 +            fprintf(stderr, "[survey] lonk: lost (%s), back behind you\n", why);
++            lonk_stat_lost++;
 +            float at[2];
 +            spot_near(p, fx, fz, at);
 +            a[0] = at[0]; a[2] = at[1]; ground = p[1]; vy = 0; lost = 0;
@@ -1343,7 +1406,7 @@ index c05d6c3..8ee9ec6 100644
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,6 +1544,10 @@ void runtime_survey_cancel_user(void) {
+@@ -307,6 +1607,10 @@ void runtime_survey_cancel_user(void) {
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
@@ -1354,7 +1417,7 @@ index c05d6c3..8ee9ec6 100644
      fprintf(stderr, "[survey] cancelled: user input\n");
      pthread_mutex_unlock(&survey_lock);
  }
-@@ -315,7 +1556,55 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -315,7 +1619,55 @@ void runtime_survey_tick(uint64_t frame) {
      in_tick = 1;
      pthread_mutex_lock(&survey_lock);
      uintptr_t actor = player_actor();
@@ -1410,7 +1473,7 @@ index c05d6c3..8ee9ec6 100644
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
      } else if (request.kind == 1) {
-@@ -340,8 +1629,104 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -340,8 +1692,104 @@ void runtime_survey_tick(uint64_t frame) {
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }
