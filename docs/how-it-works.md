@@ -80,6 +80,20 @@ costs at most a fraction of a second. Writing 0 into the loop's frame first does
 The compensation follows the sync: over the 5 frames a new clip fades in, the metres per loop fade from the old gait's
 to the new one's, at the same loop position.
 
+More emotes than slots: the selector only has cases 1 to 5, and adding cases crashes. But the walk's case (he only runs
+and sprints now) can lead anywhere in the tree, so it goes to the UseItem command's first node: a selector on the
+blackboard *string* `UseItem` (eat food, eat a meal, eat a skewer, eat something gross, drink, use a fairy...), one clip
+each. The menu's AI never writes that string (it writes `Arrow`, through the setter at vtable `+0x28`), so the patch
+picks his emote with it: three eating clips stay as they are (a bite, a meal, a gross one), the drink too, and four get
+renamed: `DemoLookAround` (his look around is back), `DemoLookUp`, `Nml_Wait_Jump` and `Demo_Get_Cooking_Bad` (a sulk).
+That selector reads the string only when it starts, so between two of those emotes he spends one frame in the idle. His
+face follows on its own: the game switches his face slot to `FaceUseItem`, the eating expressions. Checked in the trace:
+each emote plays a clip of its own length (eat 30 frames, look around 29, look up 24, sulk 208).
+
+The copycat jump: when the player's height starts rising faster than 3.5 m/s after standing still on the ground, Lonk
+starts the jump clip, and once it's actually playing his feet get 4.5 m/s upwards and the falling code does the rest
+(about a metre up, about a second in the air). Shoved for 1.5 seconds (you within 1.2 m, moving), he sulks.
+
 Floor rays: the filter I copied from the game's cliff check (`0xfffcffff00000011`) also hits big invisible volumes
 (bit 4 of the low word). The Temple of Time's hall sits inside a 15 m tall one, so every floor ray "hit" right where it
 started and he climbed to its top. The low word is now `1`, and a hit right at a ray's start counts as no floor.
@@ -108,17 +122,18 @@ The patch dresses him the same way the menu does, 60 frames after he spawns:
 - A pouch user's pieces are made for the menu's model scene, so each one is bound to the world scene like the body.
   The game binds them back to the menu's scene every frame (all four pieces, every frame), so the patch rebinds them
   every frame for as long as he's around. Rebinding only for the first 10 seconds made his legs and arm flash and then
-  vanish. They don't follow his animation yet: he's stiff.
+  vanish.
 
-Real armor doesn't work yet. What's known:
+Real armor works too, since the pieces get put back in the world scene every frame. The night before, I'd only rebound
+them once, and every real piece was invisible (he turned into a floating face, since a piece also hides the body under it),
+while the defaults drew. I'd written it up as the big open problem: a real piece is its own model (with cloth, helper bones
+and an AS for the cold-skin colour), while `Armor_Default_*` is a plain model, so I suspected its skeleton only got posed
+in the menu. When I tried again tonight, the Hylian trousers, tunic and hood drew right away, and moved with his run.
+Whatever the menu scene was doing to them, it was the same fight as the flashing legs.
 
-- Every real piece tried (a hood, two tops, trousers) is invisible, and the body under it gets hidden as it should, so
-  he becomes a floating face. The default pieces, the hair and the arm all draw.
-- The same tunic spawned on its own draws fine, in its T-pose. Its draw instance's flags (`instance+0x14`, also at
-  `model+0x2b4`) end in `0x09`; equipped, they end in `0xf8`. Bit 0 looks like "draw in the world view": setting it
-  makes the equipped tunic appear, crumpled at his feet, so its bones aren't being posed at all.
-- Real armor has its own AS, Animation and ColorVariation components, which the defaults don't. My guess is that its
-  skeleton follows its own animation system, which only gets driven in the menu.
+So `survey lonk twin` gives you matching outfits: it equips slots 9 to 11 with an empty name, which the game reads as
+"whatever the player has on" (the reason his first outfit was a floating head). Once a second it reads the names of your
+own pieces (your EquipmentUser, same ActorLinks at `eu+0xe0`), and a slot that changed is copied onto him again.
 
 `survey drop` takes pieces off him. There's no delete call yet, so each one gets view mask 0 (`0x50138c`) and is
 moved 50 m underground.
