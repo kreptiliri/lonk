@@ -133,7 +133,13 @@ Whatever the menu scene was doing to them, it was the same fight as the flashing
 
 So `survey lonk twin` gives you matching outfits: it equips slots 9 to 11 with an empty name, which the game reads as
 "whatever the player has on" (the reason his first outfit was a floating head). Once a second it reads the names of your
-own pieces (your EquipmentUser, same ActorLinks at `eu+0xe0`), and a slot that changed is copied onto him again.
+own pieces (your EquipmentUser has the same layout), and a slot that changed is copied onto him again.
+
+Weapons work the same way: slots 0 (weapon), 7 (bow) and 8 (shield), and the empty name copies yours. The game adds the
+sheath and the quiver by itself. All of an equipment user's pieces sit in one array of ActorLinks from `eu+0x20`, 0x18
+apart, in their own order (weapon 0, bow 3, shield 4, head 8, upper 9, lower 10, sheath 11, quiver 14, the arm 18; found
+with `survey peek euscan`), and every one of them gets put back in the world scene each frame, like the clothes. Without
+that, the weapons were the ones that showed up near his legs the first night.
 
 `survey drop` takes pieces off him. There's no delete call yet, so each one gets view mask 0 (`0x50138c`) and is
 moved 50 m underground.
