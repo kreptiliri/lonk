@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..e552982 100644
+index c05d6c3..737618c 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -230,7 +230,7 @@ index c05d6c3..e552982 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,22 +432,1276 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,22 +432,1304 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -487,6 +487,8 @@ index c05d6c3..e552982 100644
 +        path[at] = 0;
 +    }
 +}
++static void eu_scan(uintptr_t eu);
++static uintptr_t pouch_eu(uintptr_t actor);
 +static void peek_run(uintptr_t player) {
 +    static const uint32_t w_model[] = {0xf9411408, 0xb4000168, 0xf9400500, 0xb4000100, 0xf9400008};
 +    uintptr_t (*get_model)(uintptr_t) = (uintptr_t (*)(uintptr_t))game_fn(0xba8854, w_model, 5);
@@ -509,6 +511,7 @@ index c05d6c3..e552982 100644
 +    }
 +    uintptr_t pouch = 0, addr = 0;
 +    for (unsigned i = 0; i < stalker_count; i++) if (!strcmp(stalkers[i].name, "PouchPlayer")) pouch = stalkers[i].actor;
++    if (n == 1 && !strcmp(tok[0], "euscan")) { eu_scan(pouch ? pouch_eu(pouch) : 0); return; }
 +    if (n == 2 && !strcmp(tok[0], "bones")) {
 +        uintptr_t who = !strcmp(tok[1], "player") ? player : pouch, model = who && get_model ? get_model(who) : 0;
 +        float pos[3];
@@ -822,7 +825,8 @@ index c05d6c3..e552982 100644
 +    }
 +    if (++frames == 600) { fprintf(stderr, "[survey] dress keep: %u pieces moved back to the world in 600 frames\n", moved); frames = moved = 0; }
 +}
-+/* The pieces the equipment user made for slots 9 (head) to 19 (extra) sit in ActorLinks at eu+0xe0+(slot-9)*0x18. get 0x1afbe4(link) returns
++/* The pieces the equipment user made sit in ActorLinks from eu+0x20, 0x18 apart: weapon 0, bow 3, shield 4, head 8, upper 9,
++   lower 10, sheath 11, quiver 14, the arm 18 (found with "survey peek euscan"); slot s of the armor is at eu+0xe0+(s-9)*0x18. get 0x1afbe4(link) returns
 +   {actor, holds a reference} through x8 (the reference is a count at actor+0x1b0, dropped the way 0x1b6cd78 drops it).
 +   A pouch user's pieces may be made for the menu's own scene, so each one is bound to the world scene and drawn everywhere,
 +   like the body (pouch_show). */
@@ -840,8 +844,8 @@ index c05d6c3..e552982 100644
 +    void (*set_mask)(uintptr_t, uint32_t) = (void (*)(uintptr_t, uint32_t))game_fn(0x50138c, w_mask, 5);
 +    if (!valid || !get || !get_model || !bind || !set_mask) { fprintf(stderr, "[survey] dress show: function mismatch\n"); return 0; }
 +    unsigned moved = 0;
-+    for (unsigned slot = 9; slot <= 19; slot++) {
-+        uintptr_t link = eu + 0xe0 + (slot - 9) * 0x18;
++    for (int slot = 0; slot < 20; slot++) {   /* every link: weapons, armor, sheath, quiver, the arm (eu+0x20, 0x18 apart, their own order) */
++        uintptr_t link = eu + 0x20 + (uintptr_t)slot * 0x18;
 +        if (!valid(link)) continue;
 +        link_ref ref = get(link);
 +        if (!ref.actor) continue;
@@ -852,7 +856,7 @@ index c05d6c3..e552982 100644
 +            bind(model, world);
 +            set_mask(model, 0xffffffffu);
 +            moved++;
-+            if (!quiet) fprintf(stderr, "[survey] dress show: slot %u %s (%#llx) model=%#llx scene %#llx -> %#llx\n", slot, text, (unsigned long long)ref.actor,
++            if (!quiet) fprintf(stderr, "[survey] dress show: link %d %s (%#llx) model=%#llx scene %#llx -> %#llx\n", slot, text, (unsigned long long)ref.actor,
 +                    (unsigned long long)model, (unsigned long long)scene, (unsigned long long)world);
 +        }
 +        if (ref.held) __atomic_fetch_sub((int32_t *)(ref.actor + 0x1b0), 1, __ATOMIC_SEQ_CST);
@@ -881,22 +885,23 @@ index c05d6c3..e552982 100644
 +            equip(eu, 10, lonk_twin ? &empty : &upper, -1, 0, 0);
 +            equip(eu, 11, lonk_twin ? &empty : &lower, -1, 0, 0);
 +            equip(eu, 19, &hand, -1, 0, 0);
-+            if (lonk_twin) fprintf(stderr, "[survey] dress: twins (your outfit), arm %s\n", hand);
++            if (lonk_twin) for (unsigned w = 0; w < 3; w++) equip(eu, (uint32_t[]){0, 7, 8}[w], &empty, -1, 0, 0);   /* and your sword, bow, shield */
++            if (lonk_twin) fprintf(stderr, "[survey] dress: twins (your outfit and weapons), arm %s\n", hand);
 +            else fprintf(stderr, "[survey] dress: %s, %s, %s, arm %s\n", hair, upper, lower, hand);
 +        }
 +        dress_watch = 600;
 +    }
 +    dress_log("called", 0);
 +}
-+/* The name of the piece in one slot of an equipment user ("" if none), through the same ActorLink calls as dress_show */
-+static void eu_slot_name(uintptr_t eu, unsigned slot, char out[64]) {
++/* The name of the piece in one link of an equipment user ("" if none; links as in dress_show), through the same calls */
++static void eu_link_name(uintptr_t eu, unsigned index, char out[64]) {
 +    static const uint32_t w_valid[] = {0xa9bd7bfd, 0xf9000bf5, 0xa9024ff4, 0x910003fd, 0xb9401008};
 +    static const uint32_t w_get[] = {0xd10183ff, 0xa9017bfd, 0xf90013f9, 0xa9035ff8, 0xa90457f6};
 +    typedef struct { uintptr_t actor; uint8_t held, pad[23]; } link_ref;
 +    bool (*valid)(uintptr_t) = (bool (*)(uintptr_t))game_fn(0x1b2f20, w_valid, 5);
 +    link_ref (*get)(uintptr_t) = (link_ref (*)(uintptr_t))game_fn(0x1afbe4, w_get, 5);
 +    out[0] = 0;
-+    uintptr_t link = eu + 0xe0 + (slot - 9) * 0x18;
++    uintptr_t link = eu + 0x20 + index * 0x18;
 +    if (!eu || !valid || !get || !valid(link)) return;
 +    link_ref ref = get(link);
 +    if (!ref.actor) return;
@@ -904,21 +909,44 @@ index c05d6c3..e552982 100644
 +    out[63] = 0;
 +    if (ref.held) __atomic_fetch_sub((int32_t *)(ref.actor + 0x1b0), 1, __ATOMIC_SEQ_CST);
 +}
-+/* Twins: once a second, what the player wears in head, upper and lower; a slot that changed is copied onto him again */
++/* "survey peek euscan": every ActorLink-looking spot in his equipment user (a heap pointer at +8) that resolves to an actor */
++static void eu_scan(uintptr_t eu) {
++    static const uint32_t w_valid[] = {0xa9bd7bfd, 0xf9000bf5, 0xa9024ff4, 0x910003fd, 0xb9401008};
++    static const uint32_t w_get[] = {0xd10183ff, 0xa9017bfd, 0xf90013f9, 0xa9035ff8, 0xa90457f6};
++    typedef struct { uintptr_t actor; uint8_t held, pad[23]; } link_ref;
++    bool (*valid)(uintptr_t) = (bool (*)(uintptr_t))game_fn(0x1b2f20, w_valid, 5);
++    link_ref (*get)(uintptr_t) = (link_ref (*)(uintptr_t))game_fn(0x1afbe4, w_get, 5);
++    if (!eu || !valid || !get) return;
++    for (uintptr_t off = 0; off < 0x4400; off += 8) {
++        uintptr_t q = read_ptr(eu + off + 8), id = read_ptr(eu + off + 0x10);
++        if (q < 0x100000000ull || q > 0x7fffffffffffull || (q & 7) || !id) continue;
++        uint64_t probe;
++        if (!read_mem(q, &probe, 8) || !valid(eu + off)) continue;
++        link_ref ref = get(eu + off);
++        if (!ref.actor) continue;
++        char text[64] = {0};
++        read_mem(read_ptr(ref.actor + GAME_ACTOR_NAME), text, sizeof text - 1);
++        fprintf(stderr, "[survey] euscan: eu+%#llx -> %s\n", (unsigned long long)off, text);
++        if (ref.held) __atomic_fetch_sub((int32_t *)(ref.actor + 0x1b0), 1, __ATOMIC_SEQ_CST);
++    }
++}
++/* Twins: once a second, what the player has on (weapon, bow, shield, head, upper, lower); what changed is copied onto him */
 +static void twin_watch(uintptr_t player) {
 +    static const uint32_t w_equip[] = {0xd10383ff, 0xa9087bfd, 0xa9096ffc, 0xa90a67fa, 0xa90b5ff8, 0xa90c57f6};
 +    void (*equip)(uintptr_t, uint32_t, const char **, int32_t, bool, bool) =
 +        (void (*)(uintptr_t, uint32_t, const char **, int32_t, bool, bool))game_fn(0x1b6cd78, w_equip, 6);
-+    static char seen[3][64];
++    static const unsigned links[6] = {0, 3, 4, 8, 9, 10}, slots[6] = {0, 7, 8, 9, 10, 11};
++    static char seen[6][64];
 +    static const char *empty = "";
 +    uintptr_t pe = pouch_eu(player);
 +    if (!equip || !pe) return;
-+    for (unsigned slot = 9; slot <= 11; slot++) {
++    for (unsigned k = 0; k < 6; k++) {
++        unsigned slot = slots[k];
 +        char now[64];
-+        eu_slot_name(pe, slot, now);
-+        if (!now[0] || !strcmp(now, seen[slot - 9])) continue;
-+        int first = !seen[slot - 9][0];
-+        snprintf(seen[slot - 9], sizeof seen[0], "%s", now);
++        eu_link_name(pe, links[k], now);
++        if (!now[0] || !strcmp(now, seen[k])) continue;
++        int first = !seen[k][0];
++        snprintf(seen[k], sizeof seen[0], "%s", now);
 +        if (first) continue;   /* just started watching: dress_run already copied it */
 +        for (unsigned i = 0; i < stalker_count; i++) {
 +            if (strcmp(stalkers[i].name, "PouchPlayer")) continue;
@@ -1510,7 +1538,7 @@ index c05d6c3..e552982 100644
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,6 +1711,10 @@ void runtime_survey_cancel_user(void) {
+@@ -307,6 +1739,10 @@ void runtime_survey_cancel_user(void) {
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
@@ -1521,7 +1549,7 @@ index c05d6c3..e552982 100644
      fprintf(stderr, "[survey] cancelled: user input\n");
      pthread_mutex_unlock(&survey_lock);
  }
-@@ -315,7 +1723,56 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -315,7 +1751,56 @@ void runtime_survey_tick(uint64_t frame) {
      in_tick = 1;
      pthread_mutex_lock(&survey_lock);
      uintptr_t actor = player_actor();
@@ -1578,7 +1606,7 @@ index c05d6c3..e552982 100644
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
      } else if (request.kind == 1) {
-@@ -340,8 +1797,149 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -340,8 +1825,149 @@ void runtime_survey_tick(uint64_t frame) {
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }
