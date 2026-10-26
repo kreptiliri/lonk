@@ -68,6 +68,23 @@ loop position, 0 to 1, at `slot+0x1e0` (`+0xf8` counts frames, `+0x1ec` total ti
 `survey lonk root <walk> <run> <dash>`. (With the mod installed you can watch the raw clip: hold a sword in the menu
 and the inventory Link walks three steps and snaps back, forever.)
 
+Switching between run and sprint still made a little snip: the new clip started its loop from 0, so his body jumped
+back by however far into the old loop he was. The Player's own run and dash leaves avoid that with "InitialFrame"
+nodes (start where the previous animation was in its loop). Two of PouchPlayer's leaves have one too, but it did
+nothing here (the loop still restarted, measured in the trace). What works is the command's first node's `Is Sync`:
+with it on, every switch keeps the loop phase (normalized), and the trace shows the loop running straight through run
+-> sprint -> run. Only a command's first node can do it (those are the only selectors with Sync Controls), and it
+reaches through everything below, so an emote would start wherever his loop was (the party started 31% through, or
+at its last frame). So the patch starts an emote only on a frame where his loop has just come round (under 6%), which
+costs at most a fraction of a second. Writing 0 into the loop's frame first doesn't work: the sync then lands on 1.0.
+The compensation follows the sync: over the 5 frames a new clip fades in, the metres per loop fade from the old gait's
+to the new one's, at the same loop position.
+
+Floor rays: the filter I copied from the game's cliff check (`0xfffcffff00000011`) also hits big invisible volumes
+(bit 4 of the low word). The Temple of Time's hall sits inside a 15 m tall one, so every floor ray "hit" right where it
+started and he climbed to its top. The low word is now `1`, and a hit right at a ray's start counts as no floor.
+`survey raylayers <hex>` tries others, and `survey height` logs the hit record.
+
 Adding new commands or nodes to the ASB crashes his spawn (a null arena at `0xb6def4` while his animation state is
 built), even a clone of an existing node, and so does pointing a face command at a body node (it starts, nothing moves).
 A plain decode and re-encode of the file loads fine, and so does renaming clips, which is all the mod does.
