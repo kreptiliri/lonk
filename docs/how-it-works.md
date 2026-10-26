@@ -90,8 +90,14 @@ That selector reads the string only when it starts, so between two of those emot
 face follows on its own: the game switches his face slot to `FaceUseItem`, the eating expressions. Checked in the trace:
 each emote plays a clip of its own length (eat 30 frames, look around 29, look up 24, sulk 208).
 
-The copycat jump: when the player's height starts rising faster than 3.5 m/s after standing still on the ground, Lonk
-starts the jump clip, and once it's actually playing his feet get 4.5 m/s upwards and the falling code does the rest
+He watches the player's animation slots the same way his own are read (`[as+0x20]`, 0x48 apart, the command's name at
+`+0x10`): slot 0 is the body (`Wait`, `Move`, `Jump`, `Land`...), slot 4 the face, then skin colour and the Zonai arm.
+When the body command changes he reacts: `Jump` (copycat jump), `Damage*` (startle), `OpenTreasureBox*`, `Get`,
+`GetCookingGood/VeryGood` (party), `GetCookingBad` (yuck), `Climb*`, `Glide`, `ParasailGlide` (looks up). The names come
+from the Player's ASB command list (532 of them). Tested: jump, and a spawned Bokoblin hitting the player (`DamageL`,
+`DamageS`).
+
+The copycat jump: on the player's `Jump`, Lonk starts the jump clip, and once it's actually playing his feet get 4.5 m/s upwards and the falling code does the rest
 (about a metre up, about a second in the air). Shoved for 1.5 seconds (you within 1.2 m, moving), he sulks.
 
 Floor rays: the filter I copied from the game's cliff check (`0xfffcffff00000011`) also hits big invisible volumes
