@@ -77,7 +77,7 @@ with it on, every switch keeps the loop phase (normalized), and the trace shows 
 reaches through everything below, so an emote would start wherever his loop was (the party started 31% through, or
 at its last frame). So the patch starts an emote only on a frame where his loop has just come round (under 6%), which
 costs at most a fraction of a second. Writing 0 into the loop's frame first doesn't work: the sync then lands on 1.0.
-The compensation follows the sync: over the 5 frames a new clip fades in, the metres per loop fade from the old gait's
+The compensation follows the sync: over the 10 frames a new clip fades in (its Fade In Frame is 5, at the game's 30 a second; the blend weight at slot `+0x184` eases in over 10 of ours), the metres per loop fade from the old gait's
 to the new one's, at the same loop position.
 
 More emotes than slots: the selector only has cases 1 to 5, and adding cases crashes. But the walk's case (he only runs
