@@ -31,12 +31,12 @@ ROOT = 205   # PauseMenuWait's first node: the HoldAnimationType selector
 # HoldAnimationType -> (the weapon-equip clip whose node gets reused, what it plays now). Only reachable from the root's
 # cases 1 to 5, never from the plain idle.
 CASES = {2: ('PauseMenu_Equip_Lsword', 'Nml_Move_Run'), 3: ('PauseMenu_Equip_Spear', 'Nml_Move_Dash'),
-         4: ('PauseMenu_Equip_SwordNoShield', 'Demo_Get_Cooking_VeryGood'), 5: ('PauseMenu_Equip_Shield', 'Demo_Surprise')}
+         4: ('PauseMenu_Equip_SwordNoShield', 'Demo_Get_Cooking_VeryGood'), 5: ('PauseMenu_Equip_Shield', 'Fall_Loop')}
 # Case 1 (the walk, which he doesn't use) leads to the UseItem command's tree instead: a selector on the blackboard
 # string "UseItem", which the menu's AI never writes, so the patch picks his emote with it. Three of its eating clips stay
-# (one-handed, a meal, a bad one), and five get renamed (the drink became his running jump) (UseItem value -> what it plays now).
+# (one-handed, a meal, a bad one), and five get renamed (the drink became his startle) (UseItem value -> what it plays now).
 USE_ITEM = 202
-USES = {'EatCookingSkewer': 'DemoLookAround', 'EatTooHard': 'Nml_Wait_Jump', 'Drink': 'Nml_Move_Run_Jump_FootL',
+USES = {'EatCookingSkewer': 'DemoLookAround', 'EatTooHard': 'Nml_Wait_Jump', 'Drink': 'Demo_Surprise',
         'UseFairy': 'Demo_Get_Cooking_Bad', 'UseEnergyMaterial': 'DemoLookUp'}
 
 
