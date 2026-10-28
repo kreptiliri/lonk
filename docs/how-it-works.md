@@ -296,5 +296,6 @@ holds its last pose on the way up, which reads as a jump, and the fall loop take
 
 In the air he follows Camille's rule: he copies the player's take-off once, then keeps the way and speed he took off
 with (stopping only at a wall), ignores the player and every other reaction, and only lands when his feet reach a
-floor. Jumping off the run used to switch to the running jump clip, which moves forward by itself; undoing that
-movement lagged a frame behind and he snapped back on landing, so every jump uses the standing take-off now.
+floor. Jumping off the run used to switch to the running jump clip, which moves forward by itself, and nothing undid
+that (jumps had no root compensation): most likely why he snapped back on landing. Every jump uses the standing
+take-off now.
