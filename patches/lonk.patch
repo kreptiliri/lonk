@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..46f5759 100644
+index c05d6c3..0d5637b 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -40,7 +40,7 @@ index c05d6c3..46f5759 100644
  #include <limits.h>
  #include <mach/mach.h>
  #include "mach_vm_compat.h"
-@@ -181,24 +184,144 @@ void runtime_survey_init(Module *m) {
+@@ -181,24 +184,148 @@ void runtime_survey_init(Module *m) {
  int runtime_survey_command(const char *line) { (void)line; return 0; }
  #endif
  #else
@@ -141,6 +141,10 @@ index c05d6c3..46f5759 100644
 +   two of our frames (23 to 25 ms where the wall clock said 17 to 37); a new clip starts it over: the wall clock then. */
 +static float lonk_dt = 1 / 60.0f, lonk_dt_wall = 1 / 60.0f;
 +static float ease(float per_60th) { return 1 - powf(1 - per_60th, lonk_dt * 60); }   /* a smoothing made for 60 a second, for this frame */
++/* His timers (moods, emotes, cooldowns, "lost for 3 s") count 60ths of a second, not frames: at 40 frames a second they
++   all lasted 1.5 times as long. This many 60ths went by this frame (0 to 4; the remainder carries over). */
++static unsigned lonk_ticks = 1;
++static unsigned tick_down(unsigned x) { return x > lonk_ticks ? x - lonk_ticks : 0; }
 +static KEEP float lonk_goto[2], lonk_goto_speed = LONK_RUN;   /* "survey lonk goto <right> <forward> [m/s]": the next wander goes to this spot (metres from the player) */
 +static KEEP int lonk_goto_set;
 +static KEEP int lonk_emote, lonk_emoted;   /* a one-off emote (its gait: GAIT_LOOK, GAIT_EAT...) he's doing instead of moving, once per mood */
@@ -190,7 +194,7 @@ index c05d6c3..46f5759 100644
  
  static int read_mem(uintptr_t address, void *out, size_t size) {
      if (!address || address > UINTPTR_MAX - size) return 0;
-@@ -254,6 +377,45 @@ static uintptr_t player_actor(void) {
+@@ -254,6 +381,45 @@ static uintptr_t player_actor(void) {
      }
      return 0;
  }
@@ -236,7 +240,7 @@ index c05d6c3..46f5759 100644
  void runtime_survey_init(Module *m) {
      const char *enabled = getenv("TOTK_SURVEY");
      if (!enabled || strcmp(enabled, "1")) return;
-@@ -272,6 +434,21 @@ void runtime_survey_init(Module *m) {
+@@ -272,6 +438,21 @@ void runtime_survey_init(Module *m) {
          runtime_fail("survey requires verified game-version forceSetMatrix entry");
      survey_main = (uintptr_t)m->base;
      survey_force = (void (*)(void *, const float *, uint32_t))(m->base + FORCE_MATRIX);
@@ -258,7 +262,7 @@ index c05d6c3..46f5759 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,22 +459,1788 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,22 +463,1803 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -1170,8 +1174,10 @@ index c05d6c3..46f5759 100644
 +#endif
 +/* how long each emote lasts (frames); a jump lasts till he lands (this is just in case he never does) */
 +static void lonk_emote_start(int gait) {
-+    static const unsigned frames[GAITS] = {[GAIT_LOOK] = 180, [GAIT_SURPRISE] = 100, [GAIT_EAT] = 150, [GAIT_MEAL] = 200, [GAIT_YUCK] = 120,
-+                                           [GAIT_JUMP] = 120, [GAIT_SULK] = 160, [GAIT_LOOKUP] = 150};
++    /* (in 60ths of a second; the clip's own end usually comes first now: these are in case it never does, except the
++       party, which holds its last pose till this runs out, and the jump, which ends when he lands) */
++    static const unsigned frames[GAITS] = {[GAIT_LOOK] = 480, [GAIT_SURPRISE] = 480, [GAIT_EAT] = 480, [GAIT_MEAL] = 480, [GAIT_YUCK] = 480,
++                                           [GAIT_JUMP] = 120, [GAIT_SULK] = 600, [GAIT_LOOKUP] = 480, [GAIT_PARTY] = 150};
 +    if (lonk_air && gait != GAIT_JUMP) return;   /* in the air he's busy (a mood change used to start one mid-jump) */
 +    lonk_emote = gait; lonk_emote_left = frames[gait] ? frames[gait] : 120; lonk_emote_late = 0;
 +    fprintf(stderr, "[survey] lonk: emote %s\n", gait_names[gait]);
@@ -1243,6 +1249,9 @@ index c05d6c3..46f5759 100644
 +        last_clock = clock; last_body = lonk_body;
 +        lonk_dt = fminf(fmaxf(dt, 1 / 120.0f), 1 / 15.0f);   /* (a hitch doesn't fling him) */
 +        lonk_dt_wall = wall;
++        static float carry;
++        carry += lonk_dt * 60;
++        lonk_ticks = (unsigned)carry; carry -= (float)lonk_ticks;
 +    }
 +    float p[3], rot[9];
 +    if (!read_mem(player + ACTOR_POS, p, sizeof p) || !read_mem(player + ACTOR_ROT, rot, sizeof rot)) return;
@@ -1258,7 +1267,7 @@ index c05d6c3..46f5759 100644
 +    static int player_sprinting;
 +    player_pace += (player_speed - player_pace) * ease(0.04f);
 +    lonk_pace += (player_speed - lonk_pace) * ease(0.01f);
-+    lonk_still = player_speed < 0.3f ? lonk_still + 1 : 0;
++    lonk_still = player_speed < 0.3f ? lonk_still + lonk_ticks : 0;
 +#if defined(TOTK_GAME_V143)
 +    if (frame % 60 == 0) {
 +        uintptr_t global = read_ptr(survey_main + 0x395ea40), state = global ? read_ptr(global) : 0;
@@ -1301,12 +1310,12 @@ index c05d6c3..46f5759 100644
 +    }
 +    if (lonk_brain && !lonk_phase_left) lonk_roll();
 +    else if (!lonk_brain && !lonk_phase_left && lonk_home >= 0 && lonk_kind != lonk_home && stalk_left > 1) lonk_enter(lonk_home, stalk_left - 1);
-+    if (lonk_phase_left) lonk_phase_left--;
++    lonk_phase_left = tick_down(lonk_phase_left);
 +#if defined(TOTK_GAME_V143)
 +    /* he keeps an eye out: an enemy seen in the last 3 s, and (with his brain on, once every 25 s) he picks a fight, or
 +       one time in three hides behind you */
-+    if (lonk_fight_cooldown) lonk_fight_cooldown--;
-+    if (lonk_enemy_left) lonk_enemy_left--;
++    lonk_fight_cooldown = tick_down(lonk_fight_cooldown);
++    lonk_enemy_left = tick_down(lonk_enemy_left);
 +    if (frame % 15 == 0 && ground_mode == GROUND_TERRAIN && isfinite(lonk_anchor[1])) {
 +        char seen[64];
 +        float e[3];
@@ -1347,12 +1356,22 @@ index c05d6c3..46f5759 100644
 +            a[0] = at[0]; a[2] = at[1];
 +        }
 +        speed = LONK_RUN; stop = 1.2f; break;
-+    case LONK_WANDER:
++    case LONK_WANDER: {
++        /* after a wander and its emote, a couple of seconds' rest and he's off somewhere else (with the brain off, a
++           wander used to be one trip, then standing there for the rest of the hour); a "goto" stays put */
++        static int to_goto;
++        static unsigned rest;
 +        if (entering && lonk_goto_set) {   /* right of the player is (-fz, fx) */
 +            lonk_wander[0] = p[0] - fz * lonk_goto[0] + fx * lonk_goto[1]; lonk_wander[2] = p[2] + fx * lonk_goto[0] + fz * lonk_goto[1];
-+            lonk_goto_set = 0;
-+        } else if (entering) { lonk_pick_wander(a, p); lonk_goto_speed = LONK_RUN; }
++            lonk_goto_set = 0; to_goto = 1;
++        } else if (entering) { lonk_pick_wander(a, p); lonk_goto_speed = LONK_RUN; to_goto = 0; }
++        if (entering) rest = 0;
++        int there = hypotf(lonk_wander[0] - a[0], lonk_wander[2] - a[2]) <= 0.35f;
++        if (!to_goto && there && lonk_emoted && !lonk_emote_left && (rest += lonk_ticks) > 120 + arc4random_uniform(120)) {
++            lonk_pick_wander(a, p); lonk_emoted = 0; rest = 0;
++        }
 +        target[0] = lonk_wander[0]; target[2] = lonk_wander[2]; speed = lonk_goto_speed; stop = 0.3f; face_player = 0; break;
++    }
 +    case LONK_GIFT:
 +        speed = LONK_RUN; stop = 2;
 +        if (!lonk_gifted && hypotf(p[0] - a[0], p[2] - a[2]) < 2.4f && !spawn_left) {
@@ -1413,12 +1432,12 @@ index c05d6c3..46f5759 100644
 +            found = 1;
 +            fprintf(stderr, "[survey] lonk: found!\n");
 +            lonk_enter(LONK_FLEE, 200); lonk_emote_start(GAIT_SURPRISE);
-+        } else if (lonk_phase_left == 1) { fprintf(stderr, "[survey] lonk: you didn't find him\n"); lonk_enter(LONK_STALK, 300); }
++        } else if (lonk_phase_left <= 1) { fprintf(stderr, "[survey] lonk: you didn't find him\n"); lonk_enter(LONK_STALK, 300); }
 +        break;
 +    }
 +    case LONK_PARTY:   /* dances where he stands, facing you; a gift's party ends in a run */
 +        target[0] = a[0]; target[2] = a[2];
-+        if (lonk_gifted && lonk_phase_left == 1) lonk_enter(LONK_FLEE, 240);
++        if (lonk_gifted && lonk_phase_left <= 1) lonk_enter(LONK_FLEE, 240);
 +        break;
 +    case LONK_FLEE:   /* away from you, one way (it turns when he gets stuck, below) */
 +        if (entering) { lonk_pick_flee(a, lonk_flee_from_set ? lonk_flee_from : p, 0); lonk_flee_from_set = 0; }
@@ -1437,9 +1456,9 @@ index c05d6c3..46f5759 100644
 +    }
 +    /* standing about with you for a while (buddy, both still), now and then he looks up or around, or has a snack */
 +    static unsigned idle_frames;
-+    if (lonk_kind == LONK_BUDDY && player_speed < 0.3f && hypotf(target[0] - a[0], target[2] - a[2]) < 0.3f) idle_frames++;
++    if (lonk_kind == LONK_BUDDY && player_speed < 0.3f && hypotf(target[0] - a[0], target[2] - a[2]) < 0.3f) idle_frames += lonk_ticks;
 +    else idle_frames = 0;
-+    if (idle_frames > 420 && !lonk_emote_left && arc4random_uniform(800) == 0) {
++    if (idle_frames > 420 && !lonk_emote_left && arc4random_uniform(800) < lonk_ticks) {
 +        static const int pick[] = {GAIT_LOOKUP, GAIT_LOOKUP, GAIT_LOOK, GAIT_LOOK, GAIT_EAT, GAIT_MEAL};
 +        lonk_emote_start(pick[arc4random_uniform(sizeof pick / sizeof *pick)]);
 +        idle_frames = 240;
@@ -1488,8 +1507,8 @@ index c05d6c3..46f5759 100644
 +#endif
 +    /* you keep shoving him (in his 1.1 m, moving): he sulks */
 +    static unsigned shoved;
-+    if (hypotf(p[0] - a[0], p[2] - a[2]) < 1.2f && player_speed > 1) shoved++;
-+    else if (shoved) shoved--;
++    if (hypotf(p[0] - a[0], p[2] - a[2]) < 1.2f && player_speed > 1) shoved += lonk_ticks;
++    else shoved = tick_down(shoved);
 +    if (shoved > 90 && !lonk_emote_left) { lonk_emote_start(GAIT_SULK); shoved = 0; }
 +    /* the way he faces (eased; set further down) */
 +    static float face[2] = {0, 1};
@@ -1497,14 +1516,14 @@ index c05d6c3..46f5759 100644
 +        /* an emote's time counts once it plays (waiting for his loop to come round ate up to 40 of its frames), or after
 +           a second of waiting anyway; a jump's always counts (it's only there in case he never lands) */
 +        int playing = lonk_gait == lonk_emote || lonk_emote == GAIT_JUMP || lonk_emote_late >= 60;
-+        if (!playing) lonk_emote_late++;
++        if (!playing) lonk_emote_late += lonk_ticks;
 +        /* its clip is done when the game has faded him back to PauseMenuWait (not the take-off: that one ends when he
 +           lands); before, he held the clip's last pose until the timer ran out (look around: a second of clip, three of
 +           standing there) */
 +        static unsigned back_frames;
 +        back_frames = lonk_gait == lonk_emote && lonk_emote != GAIT_JUMP && lonk_emote != GAIT_PARTY && !lonk_body_emote ? back_frames + 1 : 0;
 +        if (back_frames >= 2 && lonk_emote_left > 1) lonk_emote_left = 1;
-+        if (playing && !--lonk_emote_left) {
++        if (playing && lonk_ticks && !(lonk_emote_left = tick_down(lonk_emote_left))) {
 +            lonk_jump = 0;   /* a jump that never took off doesn't go off later */
 +            if (lonk_jump_aimed) {   /* a ledge jump: made it, or one more failed try (two, and he pops over to you) */
 +                lonk_jump_aimed = 0;
@@ -1562,7 +1581,7 @@ index c05d6c3..46f5759 100644
 +        static unsigned detour_left;   /* a way round, kept for a third of a second so he doesn't flip between sides */
 +        wanted = step > 0.001f;
 +        if (step > 0.001f && detour_left && isfinite(a[1]) && way_blocked(a, ux, uz) && !way_blocked(a, detour[0], detour[1])) {
-+            ux = detour[0]; uz = detour[1]; detour_left--;
++            ux = detour[0]; uz = detour[1]; detour_left = tick_down(detour_left);
 +        } else if (step > 0.001f && isfinite(a[1]) && way_blocked(a, ux, uz)) {
 +            static const float turns[] = {0.524f, 0.785f, 1.571f, 2.094f};
 +            int found = 0;
@@ -1582,7 +1601,7 @@ index c05d6c3..46f5759 100644
 +    static unsigned st_want, st_moved, st_frames;
 +    int got_on = hypotf(a[0] - before[0], a[2] - before[1]) > 0.02f;
 +    if (wanted) { st_want++; if (got_on) st_moved++; }
-+    lonk_blocked = wanted && !got_on ? lonk_blocked + 1 : 0;   /* frames in a row he's tried and not moved */
++    lonk_blocked = wanted && !got_on ? lonk_blocked + lonk_ticks : 0;   /* frames in a row he's tried and not moved */
 +    /* you're up on a ledge (more than a step, 0.6 to 7 m above, within 20 m) and he's been stuck at its foot or sliding
 +       along it: he jumps, just high enough, and carries on towards you in the air (Camille's trick: jumping made him copy
 +       the jump and that got him over) */
@@ -1590,9 +1609,9 @@ index c05d6c3..46f5759 100644
 +    static float closest;   /* not getting any closer (sliding along the ledge's foot counts as stuck too) */
 +    static unsigned jump_rest;   /* and not hopping on the spot: 2 s between tries */
 +    unsigned no_gain = lonk_no_gain;
-+    if (gap < closest - 0.3f || gap > closest + 3 || gap < stop + 0.5f) { closest = gap; no_gain = 0; } else no_gain++;
++    if (gap < closest - 0.3f || gap > closest + 3 || gap < stop + 0.5f) { closest = gap; no_gain = 0; } else no_gain += lonk_ticks;
 +    lonk_no_gain = follows ? no_gain : 0;
-+    if (jump_rest) jump_rest--;
++    jump_rest = tick_down(jump_rest);
 +    if (follows && (lonk_blocked > 8 || no_gain > 10) && rise > 0.6f && rise < 7 && hypotf(p[0] - a[0], p[2] - a[2]) < 20 &&
 +        !lonk_emote_left && lonk_jump == 0 && !jump_rest && lonk_at_edge(a, p)) {
 +        lonk_no_gain = 0; jump_rest = 90; lonk_jump_aimed = 1;
@@ -1611,8 +1630,8 @@ index c05d6c3..46f5759 100644
 +       anything else counts as stuck (three such seconds and he pops back next to you, below) */
 +    static float watch_from[2];
 +    static unsigned watch_frames, watch_wanted, stuck_seconds;
-+    if (wanted) watch_wanted++;
-+    if (++watch_frames >= 60) {
++    if (wanted) watch_wanted += lonk_ticks;
++    if ((watch_frames += lonk_ticks) >= 60) {
 +        int stuck = watch_wanted > 40 && hypotf(a[0] - watch_from[0], a[2] - watch_from[1]) < 0.4f;
 +        if (stuck && lonk_kind == LONK_WANDER) {
 +            lonk_pick_wander(a, p);
@@ -1637,7 +1656,7 @@ index c05d6c3..46f5759 100644
 +    /* Never through the player: overlapping Link reads as a low ceiling and forces a crouch, so keep 1.1 m and slide round */
 +    float ox = a[0] - p[0], oz = a[2] - p[2], od = hypotf(ox, oz);
 +    static unsigned pushed_left;   /* you've been shoving him along: his gait follows how fast he really goes */
-+    if (pushed_left) pushed_left--;
++    pushed_left = tick_down(pushed_left);
 +    if (od < 1.1f && !lonk_jump_aimed && !lonk_air) {   /* (not while jumping up a ledge: it pushed him back off) */
 +        if (od < 0.01f) { ox = -fx; oz = -fz; od = 1; }
 +        int pushable = 1;
@@ -1703,7 +1722,7 @@ index c05d6c3..46f5759 100644
 +            else { feet += (h - feet) * ease(0.3f); vy = 0; }
 +        } else if (ray_floor(a[0], a[2], feet + 3, feet - 0.5f, &h, &up) && up > 0.6f) { feet = h; vy = 0; ground_src = "step up"; }   /* feet just under a mound */
 +        else { ground_src = "none"; vy = 0; }
-+        lonk_falling = !strcmp(ground_src, "falling") && vy < 0 ? lonk_falling + 1 : 0;
++        lonk_falling = !strcmp(ground_src, "falling") && vy < 0 ? lonk_falling + (lonk_ticks ? lonk_ticks : 1) : 0;   /* (counts at least 1: in the air, > 0 means past the top) */
 +        /* landed: the jump's over, back to you. On the frame his feet touch (that frame used to count as still falling, so
 +           the next one went back to his take-off clip for a frame: "fall, jump, run" in the log after every jump) */
 +        if (lonk_air && vy == 0 && strcmp(ground_src, "falling")) {
@@ -1717,7 +1736,7 @@ index c05d6c3..46f5759 100644
 +        float far = hypotf(p[0] - a[0], p[2] - a[2]);
 +        const char *why = fabsf(feet - p[1]) > 5 && lonk_blocked > 30 ? "height" : (far > 30 && lonk_blocked > 30) || far > 60 ? "far" : lonk_no_gain > 240 ? "no way to you" : !strcmp(ground_src, "none") ? "no floor" :
 +                          stuck_seconds ? "stuck" : NULL;
-+        lost = why ? lost + 1 : 0;
++        lost = why ? lost + lonk_ticks : 0;
 +        if (lost > 180) {
 +            fprintf(stderr, "[survey] lonk: lost (%s), back behind you\n", why);
 +            lonk_stat_lost++;
@@ -2050,7 +2069,7 @@ index c05d6c3..46f5759 100644
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,15 +2250,77 @@ void runtime_survey_cancel_user(void) {
+@@ -307,15 +2269,77 @@ void runtime_survey_cancel_user(void) {
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
@@ -2128,7 +2147,7 @@ index c05d6c3..46f5759 100644
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
      } else if (request.kind == 1) {
-@@ -340,8 +2345,152 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -340,8 +2364,152 @@ void runtime_survey_tick(uint64_t frame) {
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }
