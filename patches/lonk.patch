@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..0d5637b 100644
+index c05d6c3..6e3ef0e 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -262,7 +262,7 @@ index c05d6c3..0d5637b 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,22 +463,1803 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,22 +463,1815 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -1246,7 +1246,19 @@ index c05d6c3..0d5637b 100644
 +            float anim = (clock - last_clock) / 30;
 +            if (anim > lonk_dt * 0.5f && anim < lonk_dt * 2) dt = anim;
 +        }
-+        last_clock = clock; last_body = lonk_body;
++        /* The game is paused (the menu: his clip froze mid-stride while he ran on 6 m, and his arrival emote started in
++           there) when neither his clip clock nor yours moved: he waits too. (Both: his alone stops on a pose a clip holds
++           at its end, yours never does.) */
++        uintptr_t you_as = anim_state(player), you_table = you_as ? read_ptr(you_as + 0x20) : 0, you_slot = you_table ? read_ptr(you_table) : 0;
++        static float last_you = -1;
++        float you = -1;
++        if (you_slot) read_mem(you_slot + 0x1ec, &you, sizeof you);
++        int paused = lonk_body && lonk_body == last_body && clock >= 0 && clock == last_clock && you >= 0 && you == last_you;
++        last_clock = clock; last_body = lonk_body; last_you = you;
++        static int was_paused;
++        if (paused != was_paused) fprintf(stderr, "[survey] lonk: %s\n", paused ? "the game's paused, so is he" : "the game goes on, so does he");
++        was_paused = paused;
++        if (paused) return;
 +        lonk_dt = fminf(fmaxf(dt, 1 / 120.0f), 1 / 15.0f);   /* (a hitch doesn't fling him) */
 +        lonk_dt_wall = wall;
 +        static float carry;
@@ -2069,7 +2081,7 @@ index c05d6c3..0d5637b 100644
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,15 +2269,77 @@ void runtime_survey_cancel_user(void) {
+@@ -307,15 +2281,77 @@ void runtime_survey_cancel_user(void) {
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
@@ -2110,7 +2122,7 @@ index c05d6c3..0d5637b 100644
 +    if (pouch_anim_name[0] && actor) { pouch_anim(pouch_anim_name, pouch_anim_slot); pouch_anim_name[0] = 0; }
 +    if (pouch_place_request && actor) { pouch_place_request = 0; pouch_place(actor); }
 +    if (drop_request[0] && actor) { drop_run(); drop_request[0] = 0; }
-+    if (pouch_idle_left && actor && !--pouch_idle_left && !pouch_anim("PauseMenuWait", 0) && --pouch_idle_tries) pouch_idle_left = 30;
++    if (pouch_idle_left && actor && !--pouch_idle_left && !pouch_anim("PauseMenuWait", 1) && --pouch_idle_tries) pouch_idle_left = 30;   /* slot 1, his body: slot 0 (it was) is his face, and it took his face's place */
 +    if (lonk_watch_cmds && actor) {
 +        static char last[256];
 +        char now[256];
@@ -2147,7 +2159,7 @@ index c05d6c3..0d5637b 100644
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
      } else if (request.kind == 1) {
-@@ -340,8 +2364,152 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -340,8 +2376,152 @@ void runtime_survey_tick(uint64_t frame) {
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }
