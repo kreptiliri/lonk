@@ -41,21 +41,29 @@ like an idle. His skeleton was fine all along.
 1 to 5 go to the weapon poses, anything else to the plain idle, which picks cold, normal, hot or tired from the
 blackboard's `Temperature` and `Stamina`. The menu's AI node `ExecutePouchPlayerSetASBBParameter` (`0x241cc08`) writes
 those two (and `Burning`, `ShieldEquip`, `Arrow`, `Carrying`, `Size`...) every frame from your state: `Temperature` is -1
-when you're cold, 1 when hot, from flags at `[[main+0x395ea40]]+0x658` (the GOT slot is `0x395ea40`; Ghidra calls it `DAT_03a5ea40`). It never writes `HoldAnimationType` for him. So:
+when you're cold, 1 when hot, from flags at `[[main+0x395ea40]]+0x658` (the GOT slot is `0x395ea40`; Ghidra calls it
+`DAT_03a5ea40`). The game writes `HoldAnimationType` too, from the weapon in your hands as far as I can tell (twins gave
+him your sword): I only found out because skipping our write for a few frames made him play his last emote again. So:
 
 - the RomFS mod (`mod/make_mod.py`, built with [dt-12345/asb](https://github.com/dt-12345/asb)) points the selector's
-  cases 1 to 5 straight at five of the menu's weapon-equip clips (only reachable from those cases), renamed to
-  `Nml_Move_Walk`, `Nml_Move_Run`, `Nml_Move_Dash`, `Demo_Get_Cooking_VeryGood` (his party after a gift) and
-  `Demo_Surprise` (you turn round on him). PouchPlayer already loads all of Link's animations.
-- the patch plays `PauseMenuWait` once and then sets `HoldAnimationType` every frame, through the blackboard's vtable
-  `+0x30` (int by name; float `+0x38`, bool `+0x40`): `set(bb, &{"HoldAnimationType", 0}, value)`, the blackboard
-  being `[as+0x40]` (`as` = his animation state, the chain `0xba8ed0` walks). Idle below 0.4 m/s, walk up to 3.2, run
-  up to 5.5, dash above; the bands overlap by 0.3 m/s and a new gait has to hold for 12 frames, because every switch
-  restarts the clip. Standing, he's the plain idle, so he shivers in the snow and sweats in the heat by himself.
+  cases 2 to 5 straight at four of the menu's weapon-equip clips (only reachable from those cases), renamed to
+  `Nml_Move_Run`, `Nml_Move_Dash`, `Demo_Get_Cooking_VeryGood` (his party after a gift) and `Fall_Loop`.
+  PouchPlayer already loads all of Link's animations.
+- the patch plays `PauseMenuWait` once (in his body's slot, 1: slot 0 is his face, and starting it there took his
+  face's place) and then sets `HoldAnimationType` every frame, after the game, through the blackboard's vtable `+0x30`
+  (int by name; string `+0x28`, float `+0x38`, bool `+0x40`): `set(bb, &{"HoldAnimationType", 0}, value)`, the
+  blackboard being `[as+0x40]` (`as` = his animation state, the chain `0xba8ed0` walks). Standing, he's the plain idle,
+  so he shivers in the snow and sweats in the heat by himself.
 - no walk (Camille's call: Link mostly runs or sprints, and the slow walk looked off): idle, run below 7.3 m/s, sprint
   above, at Link's own speeds measured from a trace (5.7 running, 9 sprinting). The clip's rate (`slot+0xd0`) is the one
   Link's own tree uses (its frame controllers: run 1.5, sprint 1.75), scaled by his speed against Link's. Matching his
-  steps to the ground by measurement instead came out at 1.1 to 1.2, and Camille saw it: a bit slow. The game routes each command to its own slot: 0 is the face, 1 the body, 2 the skin colour.
+  steps to the ground by measurement instead came out at 1.1 to 1.2, and Camille saw it: a bit slow.
+- he speeds up and brakes like Link: from Camille's own runs in the traces, standing to 7.5 m/s takes about 6 frames
+  and a 9.9 m/s sprint stops in about 13, so 60 m/s² up and 45 down, braking in time to stop at his stop distance
+  (v² = 2 x braking x the room left). The gait comes from the speed he means to go, not his measured one: that lagged
+  20 frames, held another 12, and he ran on the spot for half a second after every stop. Braking to a stop, he goes to
+  the idle at once (Link's brake starts as soon as you let go), and its fade ends about when he stops. Between run and
+  sprint a new gait still holds for 12 frames; to start or stop, 2.
 
 The first version drove `Temperature` instead (cold idle = walk). Fighting the menu's node over it every frame flipped
 him between the idle and the walk, and each flip restarted the walk: a few steps, snap back, again. He also blushed
@@ -63,10 +71,12 @@ and puffed cold breath in warm caves, since that comes with the cold idle node.
 
 The moves carry him forward inside the clip (root motion): over one loop his body walks ahead of where he's put, then
 snaps back when the clip loops. The real Player's movement absorbs that; nothing does for him. The body slot has the
-loop position, 0 to 1, at `slot+0x1e0` (`+0xf8` counts frames, `+0x1ec` total time), so he's placed behind his spot by
-(metres the clip travels per loop) x (loop position), and the two cancel out. The metres are tuned by eye:
-`survey lonk root <walk> <run> <dash>`. (With the mod installed you can watch the raw clip: hold a sword in the menu
-and the inventory Link walks three steps and snaps back, forever.)
+loop position, 0 to 1, at `slot+0x1e0` (`+0xf8` counts frames), so he's placed behind his spot by (metres the clip
+travels per loop) x (loop position), and the two cancel out. The metres were tuned by eye; now they're measured: the
+run clip is 24 frames at rate 1.5 for 5.7 m/s, so 5.7 x 24/30 / 1.5 = 3.04 m a loop, the sprint 18 frames at 1.75 for
+9 m/s, 3.09 m (by eye it was 3.7: each sprint loop put him 0.6 m too far back). `survey lonk root <walk> <run> <dash>`
+still changes them. (With the mod installed you can watch the raw clip: hold a sword in the menu and the inventory
+Link runs three steps and snaps back, forever.)
 
 Switching between run and sprint still made a little snip: the new clip started its loop from 0, so his body jumped
 back by however far into the old loop he was. The Player's own run and dash leaves avoid that with "InitialFrame"
@@ -74,22 +84,44 @@ nodes (start where the previous animation was in its loop). Two of PouchPlayer's
 nothing here (the loop still restarted, measured in the trace). What works is the command's first node's `Is Sync`:
 with it on, every switch keeps the loop phase (normalized), and the trace shows the loop running straight through run
 -> sprint -> run. Only a command's first node can do it (those are the only selectors with Sync Controls), and it
-reaches through everything below, so an emote would start wherever his loop was (the party started 31% through, or
-at its last frame). So the patch starts an emote only on a frame where his loop has just come round (under 6%), which
-costs at most a fraction of a second. Writing 0 into the loop's frame first doesn't work: the sync then lands on 1.0.
-The compensation follows the sync: over the 10 frames a new clip fades in (its Fade In Frame is 5, at the game's 30 a second; the blend weight at slot `+0x184` eases in over 10 of ours), the metres per loop fade from the old gait's
-to the new one's, at the same loop position.
+reaches through everything below, so anything else under it starts wherever his loop was. (That's why the emotes are
+a command of their own now, below. The party is still under it and waits for his loop to come round.)
 
-More emotes than slots: the selector only has cases 1 to 5, and adding cases crashes. But the walk's case (he only runs
-and sprints now) can lead anywhere in the tree, so it goes to the UseItem command's first node: a selector on the
-blackboard *string* `UseItem` (eat food, eat a meal, eat a skewer, eat something gross, drink, use a fairy...), one clip
-each. The menu's AI never writes that string (it writes `Arrow`, through the setter at vtable `+0x28`), so the patch
-picks his emote with it: three eating clips stay as they are (a bite, a meal, a gross one), and five get renamed:
-`DemoLookAround` (his look around is back), `DemoLookUp`, `Nml_Wait_Jump` (his take-off), `Demo_Get_Cooking_Bad` (a
-sulk) and `Demo_Surprise` (his startle, which moved here from case 5 to free it for his fall).
-That selector reads the string only when it starts, so between two of those emotes he spends one frame in the idle. His
-face follows on its own: the game switches his face slot to `FaceUseItem`, the eating expressions. Checked in the trace:
-each emote plays a clip of its own length (eat 30 frames, look around 29, look up 24, sulk 208).
+The compensation follows the game's own blend. His slot counts its node switches (the high half of `+0xbc`; idle to run
+doesn't count one, but the new clip's weight starts over) and has the new clip's eased blend weight at `+0x184` (5
+frames of the game's 30 a second, 10 of ours at 60). The metres per loop fade from the old clip's to the new one's with
+that weight, the old clip's loop running on underneath at its own pace. Before, I guessed the fade: it started a frame
+early (the game only switches on its next update), and a switch on the frame his loop wrapped round counted as a
+restart, holding the old clip's whole stride (up to 3 m) and fading it out: stopping out of a sprint, now and then he
+snapped a stride back.
+
+More emotes than slots: the selector only has cases 1 to 5, and adding cases crashes. But PouchPlayer has a second
+full-body command, `UseItem`: a selector on the blackboard *string* `UseItem` (eat food, eat a meal, eat a skewer, eat
+something gross, drink, use a fairy...), one clip each. The menu's AI never writes that string (it writes `Arrow`,
+through the setter at vtable `+0x28`), so the patch picks his emote with it: three eating clips stay as they are (a
+bite, a meal, a gross one), and five get renamed: `DemoLookAround` (his look around), `DemoLookUp`, `Nml_Wait_Jump` (his
+take-off), `Demo_Get_Cooking_Bad` (a sulk) and `Demo_Surprise` (his startle). For an emote the patch starts the
+`UseItem` command in his body's slot (the request names the slot: `0x4dc628` writes the rate to
+`[as+0x20] + slot x 0x48 + 0xd0` and starts the command there). A command of its own starts at its first frame at once
+(traced: frame 0.7 of 29); when the clip's done, the game fades him back to `PauseMenuWait` by itself (the ASB's
+`UseItem` -> `PauseMenuWait` transition, 10 frames), and that's when the emote ends. Before, the emotes went through
+`PauseMenuWait`'s case 1, under the root's sync: each one waited up to 40 frames for his loop to come round (running on
+the spot), an emote that started at the very end of a loop played only its last frame, and a look around was a second of
+clip and three of standing in its last pose. His face follows on its own: the game switches his face slot to
+`FaceUseItem`, the eating expressions.
+
+## Time
+
+The game animates by real time, and it doesn't always run at 60 frames a second: on the sky island it ran at about 40.
+Lonk used to count 1/60 of a second a frame, so there he moved at two thirds of his speed under legs going at full
+speed, and fell at less than half his gravity. Now his speed, braking, jumps, falls, turning and smoothing use the
+frame's real length, read off his own clip clock: `+0x1ec` counts the frame's real time in 30ths of a second, whatever
+rate we set (checked by tripling the rate). It's steadier than the wall clock between two of our frames (23 to 25 ms
+where the wall clock said 17 to 37). His timers (moods, emotes, cooldowns, "lost for 3 seconds") count real 60ths of a
+second too. A standing jump at 40 frames a second: 0.46 s in the air, 0.63 m up (Link's: 0.4 s, 0.64 m).
+
+When the game's paused (the menu), his clip clock stops, and so does yours: he waits. Before, his clip froze
+mid-stride while he ran on (6 m in a 3-second menu) and even started his arrival emote in there.
 
 He watches the player's animation slots the same way his own are read (`[as+0x20]`, 0x48 apart, the command's name at
 `+0x10`): slot 0 is the body (`Wait`, `Move`, `Jump`, `Land`...), slot 4 the face, then skin colour and the Zonai arm.
@@ -156,6 +188,13 @@ sheath and the quiver by itself. All of an equipment user's pieces sit in one ar
 apart, in their own order (weapon 0, bow 3, shield 4, head 8, upper 9, lower 10, sheath 11, quiver 14, the arm 18; found
 with `survey peek euscan`), and every one of them gets put back in the world scene each frame, like the clothes. Without
 that, the weapons were the ones that showed up near his legs the first night.
+
+His weapons come out drawn: the sword stays in his hand. The menu puts a pouch user's weapons away with its AI node
+`OneShotChangeDrawnSwordStateForPouchPlayer` (name at `0x2508168`, found by the code that loads its name string, run
+method `0x2507a80` in its vtable): with nothing held it calls `0x4f5194(eu, link, 0)` on the weapon (0), the shield (4)
+and the bow (3), which sets that link's state byte (`eu+0x4620+link`) to 4 and clears its "drawn" flag; `0x4f5700(eu,
+link)` is the other way round. `survey lonk sheathe` does the same: the states change, and the sword stays in his hand
+(even every frame, or before a re-equip). Still open.
 
 `survey drop` takes pieces off him. There's no delete call yet, so each one gets view mask 0 (`0x50138c`) and is
 moved 50 m underground.
@@ -253,8 +292,11 @@ makes it look like he dove there).
   the foot). The knee-high wall check rises with his feet, so he moves on once he's above the edge. 4 s between tries.
 - Hide and seek (a mood of its own, weight 10): 24 directions, 6 to 14 m, each walkable in a straight line
   (`path_free`, at least 6 m), with floor at the end, and hidden: a ray from your eyes (1.6 m up) to his chest there
-  hits something at least 0.8 m before it. He runs there and faces you; within 3 m you've found him (startle, flee);
+  hits something at least 0.8 m before it. He runs there and faces you; within 3 m once he's there, you've found him
+  (startle, flee; counted from the start, he was found on the spot every time, since he starts right beside you);
   after 25 s he gives up and follows you again.
+- A wander, after its emote and a couple of seconds' rest, goes on somewhere else (with the brain off it used to be one
+  trip, then standing there for the rest of the hour).
 - Block can't always get in front of you (a wall in the way): stuck for a second there, he follows you instead. Before,
   he got "lost", popped behind you, and tried again, every 3 seconds.
 - Buddy mode, both standing still for 7 s: now and then he looks up, looks around or snacks.
@@ -268,9 +310,11 @@ MacBook Air. A frame at 60 fps has 16.7 ms.
 ## Coming back
 
 Every frame each body piece's name is read back from the actor (`actor+0x218`); a piece that no longer reads back is
-forgotten. If that was PouchPlayer and the brain is running, Lonk respawns two seconds after the player stands somewhere
-real again: the player actor that exists on the loading screen sits at the origin, so that doesn't count. Tested by
-dropping Link from 150 m: game over, Continue, and he's back, dressed, picking his next mood.
+forgotten. If that was PouchPlayer, Lonk respawns two seconds after the player stands somewhere real again (the player
+actor that exists on the loading screen sits at the origin, so that doesn't count), whether his brain runs or a single
+mood does (with the brain off he used to stay gone: Camille fast-travelled and lost him). Nothing of the old body
+carries over: its animation slot (freed with it), a jump or an emote in progress. Tested by dropping Link from 150 m:
+game over, Continue, and he's back, dressed, picking his next mood.
 
 ## The brain
 
@@ -289,13 +333,15 @@ pepper or a hydromelon.
 ## Jumping
 
 Link's own jump is three commands in a row (`Jump`, `Fall`, `Land`), and the Player's AI switches between them. Lonk
-has one command, so the patch does the switching: the take-off clip (`Nml_Wait_Jump`, in the UseItem tree) when he
-leaves the ground, and `Fall_Loop` (case 5 of the root selector) once he's past the top, or after a fifth of a second
-off a ledge. The root's sync starts the take-off clip at the run's loop position, so it's over in a frame or two: he
-holds its last pose on the way up, which reads as a jump, and the fall loop takes over on the way down.
+has two commands, so the patch does the switching: the take-off clip (`Nml_Wait_Jump`, the `UseItem` command, at rate 1
+like in the Player's tree, where it has no frame controller) when he leaves the ground, and `Fall_Loop` (case 5 of
+`PauseMenuWait`'s selector) once he's past the top, or after a fifth of a second off a ledge. As its own command the
+take-off plays from its first frame (it used to start at the run's loop position under the root's sync, so it was over
+in a frame or two and he held its last pose the whole way up). His feet touching the floor is the landing (that frame
+used to count as still falling, and the next one went back to the take-off clip for a frame, after every jump).
 
 In the air he follows Camille's rule: he copies the player's take-off once, then keeps the way and speed he took off
-with (stopping only at a wall), ignores the player and every other reaction, and only lands when his feet reach a
+with (stopping only at a wall: it used to be the ledge check too, so over any drop he stopped dead mid-air), ignores the player and every other reaction, and only lands when his feet reach a
 floor. Jumping off the run used to switch to the running jump clip, which moves forward by itself, and nothing undid
 that (jumps had no root compensation): most likely why he snapped back on landing. Every jump uses the standing
 take-off now.

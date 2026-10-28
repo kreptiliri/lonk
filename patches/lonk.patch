@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..6e3ef0e 100644
+index c05d6c3..73bc8b6 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -262,7 +262,7 @@ index c05d6c3..6e3ef0e 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,22 +463,1815 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,22 +463,1842 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -1067,6 +1067,29 @@ index c05d6c3..6e3ef0e 100644
 +        read_mem(read_ptr(ref.actor + GAME_ACTOR_NAME), text, sizeof text - 1);
 +        fprintf(stderr, "[survey] euscan: eu+%#llx -> %s\n", (unsigned long long)off, text);
 +        if (ref.held) __atomic_fetch_sub((int32_t *)(ref.actor + 0x1b0), 1, __ATOMIC_SEQ_CST);
++    }
++}
++/* His weapons on his back. A pouch user's weapons come out drawn (in his hands: his sword and shield sat there through
++   every run); the menu's AI node OneShotChangeDrawnSwordStateForPouchPlayer (getName 0x2508168, run 0x2507a80, found
++   through its name string and its vtable) puts them away, when you hold nothing in the menu, with 0x4f5194(eu, link, 0)
++   on the weapon (0), the shield (4) and the bow (3): it sets the link's state byte (eu+0x4620+link) to 4 and clears
++   its "drawn" flag; 0x4f5700(eu, link) is the other way round (state 2, drawn). Not solved: "survey lonk sheathe" does
++   that (the states go 0 -> 4, and back to 0 a frame or so later) and his sword stays in his hand, even called every frame
++   or before a re-equip. Next to look at: the bone the weapon piece is attached to, the IsAlwaysASTrgDrawn parameter. */
++static KEEP int sheathe_request;
++static void lonk_sheathe(void) {
++    static const uint32_t w_sheathe[] = {0xd10183ff, 0xa9017bfd, 0xf90013f9, 0xa9035ff8, 0xa90457f6, 0xa9054ff4};
++    void (*sheathe)(uintptr_t, uint32_t, uint32_t) = (void (*)(uintptr_t, uint32_t, uint32_t))game_fn(0x4f5194, w_sheathe, 6);
++    if (!sheathe) { fprintf(stderr, "[survey] sheathe: function mismatch\n"); return; }
++    for (unsigned i = 0; i < stalker_count; i++) {
++        if (strcmp(stalkers[i].name, "PouchPlayer")) continue;
++        uintptr_t eu = pouch_eu(stalkers[i].actor);
++        if (!eu) continue;
++        uint8_t before[8] = {0}, after[8] = {0};
++        read_mem(eu + 0x4620, before, sizeof before);
++        for (unsigned k = 0; k < 3; k++) sheathe(eu, (uint32_t[]){0, 4, 3}[k], 0);
++        read_mem(eu + 0x4620, after, sizeof after);
++        fprintf(stderr, "[survey] sheathe: states weapon/bow/shield %u/%u/%u -> %u/%u/%u\n", before[0], before[3], before[4], after[0], after[3], after[4]);
 +    }
 +}
 +/* Twins: once a second, what the player has on (weapon, bow, shield, head, upper, lower); what changed is copied onto him */
@@ -2026,6 +2049,10 @@ index c05d6c3..6e3ef0e 100644
 +        fprintf(stderr, "[survey] lonk: root motion per loop walk %.2f run %.2f dash %.2f\n", lonk_root[1], lonk_root[2], lonk_root[3]);
 +        return 1;
 +    }
++    if (!kind && (used = 0, sscanf(line, "survey lonk sheathe %n", &used)) == 0 && used && !line[used]) {
++        pthread_mutex_lock(&survey_lock); sheathe_request = 1; atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release); pthread_mutex_unlock(&survey_lock);
++        return 1;
++    }
 +    if (!kind && (used = 0, sscanf(line, "survey lonk trace %n", &used)) == 0 && used && !line[used]) {
 +        lonk_trace = !lonk_trace;
 +        fprintf(stderr, "[survey] lonk: trace %s\n", lonk_trace ? "on" : "off");
@@ -2081,7 +2108,7 @@ index c05d6c3..6e3ef0e 100644
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,15 +2281,77 @@ void runtime_survey_cancel_user(void) {
+@@ -307,15 +2308,78 @@ void runtime_survey_cancel_user(void) {
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
@@ -2130,6 +2157,7 @@ index c05d6c3..6e3ef0e 100644
 +        if (strcmp(now, last)) { fprintf(stderr, "[survey] player cmds f=%llu %s\n", (unsigned long long)frame, now); snprintf(last, sizeof last, "%s", now); }
 +    }
 +    if (dress_left && actor && !--dress_left) dress_run();
++    if (sheathe_request && actor) { sheathe_request = 0; lonk_sheathe(); }
 +    if (lonk_twin && stalker_count && actor && frame % 60 == 0) twin_watch(actor);
 +    if (dress_watch && actor && (--dress_watch % 30) == 0) dress_log(dress_watch ? "waiting" : "done watching", actor);
 +    else if (stalker_count && actor) dress_keep(actor);
@@ -2159,7 +2187,7 @@ index c05d6c3..6e3ef0e 100644
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
      } else if (request.kind == 1) {
-@@ -340,8 +2376,152 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -340,8 +2404,152 @@ void runtime_survey_tick(uint64_t frame) {
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }
