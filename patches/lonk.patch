@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..9b0a46e 100644
+index c05d6c3..6d08c26 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -238,7 +238,7 @@ index c05d6c3..9b0a46e 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,22 +439,1681 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,22 +439,1684 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -1666,9 +1666,11 @@ index c05d6c3..9b0a46e 100644
 +        if (ground_mode == GROUND_PHYSICS) read_mem(stalkers[i].actor + ACTOR_POS + 4, &y, sizeof y);   /* keep its own height */
 +        float back = 0;
 +#if defined(TOTK_GAME_V143)
-+        /* The mod's selector keeps the loop phase when he switches gait, and the new clip fades in over 5 frames (its Fade
-+           In Frame), so the drift per loop fades from the old gait's to the new one's with it. When the loop restarted
-+           instead, the old clip's drift is held and fades out. */
++        /* The mod's selector keeps the loop phase when he switches gait, and the new clip fades in (its Fade In Frame, 5 at
++           the game's 30 a second: 10 of ours, on an eased curve, read off his slot's blend weight at +0x184 in a trace), so
++           the drift per loop fades from the old gait's to the new one's with it. Faded over 5 frames, the old drift was
++           gone before the old clip: stopping, he slid up to a stride forward (Camille: he snaps into me). When the loop
++           restarted instead, the old clip's drift is held and fades out. */
 +        static int held_gait = -1;
 +        static float from_root, eff_root, carry, last_back, last_loop = -1;
 +        static unsigned fade_left;
@@ -1678,9 +1680,10 @@ index c05d6c3..9b0a46e 100644
 +        float root = lonk_gait >= GAIT_WALK && lonk_gait <= GAIT_DASH ? lonk_root[lonk_gait] : 0;
 +        if (lonk_gait != held_gait) {
 +            int synced = fabsf(loop - last_loop) < 0.15f;
-+            from_root = synced ? eff_root : root; carry = synced ? 0 : last_back; fade_left = 5; held_gait = lonk_gait;
++            from_root = synced ? eff_root : root; carry = synced ? 0 : last_back; fade_left = 10; held_gait = lonk_gait;
 +        }
-+        float old = fade_left / 6.0f;
++        float old = 0.5f + 0.5f * cosf(3.14159f * (10 - fade_left) / 10);   /* 1 -> 0, eased like the game's blend */
++        if (!fade_left) old = 0;
 +        if (fade_left) fade_left--;
 +        eff_root = root + (from_root - root) * old;
 +        back = eff_root * loop + carry * old;
@@ -1923,7 +1926,7 @@ index c05d6c3..9b0a46e 100644
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,15 +2123,77 @@ void runtime_survey_cancel_user(void) {
+@@ -307,15 +2126,77 @@ void runtime_survey_cancel_user(void) {
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
@@ -2001,7 +2004,7 @@ index c05d6c3..9b0a46e 100644
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
      } else if (request.kind == 1) {
-@@ -340,8 +2218,152 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -340,8 +2221,152 @@ void runtime_survey_tick(uint64_t frame) {
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }
