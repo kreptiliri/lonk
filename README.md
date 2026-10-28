@@ -92,7 +92,7 @@ That spawns him 4 m in front of you and runs his brain for an hour.
 | `survey lonk twin` / `survey lonk naked` | dress him like you (and follow your changes) / back to his underwear |
 | `survey lonk outfit <set\|random>` | a whole armor set: `hylian`, `wild`, `zora`, `desert`, `snowquill`, `flamebreaker`, `stealth`, `climbing`, `radiant`, `soldier`, `rubber`, `barbarian`, `royal`, `glide`, `froggy`, `miner`, `ember`, `charged`, `frostbite`, `mystic`, `zonaite`, `awakening`, `depths`, `yiga` |
 | `survey lonk <mood> <frames>` | force a mood: `stalk`, `buddy`, `block`, `behind`, `wander`, `gift`, `flee`, `party`, `fight`, `hide` |
-| `survey lonk emote <name>` | `look`, `lookup`, `eat`, `meal`, `drink`, `yuck`, `jump`, `sulk`, `surprise` |
+| `survey lonk emote <name>` | `look`, `lookup`, `eat`, `meal`, `yuck`, `jump`, `sulk`, `surprise` |
 | `survey lonk goto <right> <forward> [m/s]` | send him somewhere (metres from you) |
 | `survey lonk nobuddy` / `survey lonk buddyok` | he stops / starts picking buddy mode himself (your whistle still calls him) |
 | `survey lonk stop` | stop his brain |
