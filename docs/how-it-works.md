@@ -84,8 +84,9 @@ More emotes than slots: the selector only has cases 1 to 5, and adding cases cra
 and sprints now) can lead anywhere in the tree, so it goes to the UseItem command's first node: a selector on the
 blackboard *string* `UseItem` (eat food, eat a meal, eat a skewer, eat something gross, drink, use a fairy...), one clip
 each. The menu's AI never writes that string (it writes `Arrow`, through the setter at vtable `+0x28`), so the patch
-picks his emote with it: three eating clips stay as they are (a bite, a meal, a gross one), the drink too, and four get
-renamed: `DemoLookAround` (his look around is back), `DemoLookUp`, `Nml_Wait_Jump` and `Demo_Get_Cooking_Bad` (a sulk).
+picks his emote with it: three eating clips stay as they are (a bite, a meal, a gross one), and five get renamed:
+`DemoLookAround` (his look around is back), `DemoLookUp`, `Nml_Wait_Jump` (his take-off), `Demo_Get_Cooking_Bad` (a
+sulk) and `Demo_Surprise` (his startle, which moved here from case 5 to free it for his fall).
 That selector reads the string only when it starts, so between two of those emotes he spends one frame in the idle. His
 face follows on its own: the game switches his face slot to `FaceUseItem`, the eating expressions. Checked in the trace:
 each emote plays a clip of its own length (eat 30 frames, look around 29, look up 24, sulk 208).
@@ -256,7 +257,7 @@ makes it look like he dove there).
   after 25 s he gives up and follows you again.
 - Block can't always get in front of you (a wall in the way): stuck for a second there, he follows you instead. Before,
   he got "lost", popped behind you, and tried again, every 3 seconds.
-- Buddy mode, both standing still for 7 s: now and then he looks up, looks around, snacks or drinks.
+- Buddy mode, both standing still for 7 s: now and then he looks up, looks around or snacks.
 
 ## What he costs
 
@@ -284,3 +285,16 @@ What you're doing changes his dice: moving (your speed averaged over a few secon
 follows you (wandering off or hiding would only leave him behind); standing still for 10 s he plays more (wander, hide
 and seek, gifts, creeping up behind you); freezing or too hot, gifts get a big bonus, since that's when he brings a
 pepper or a hydromelon.
+
+## Jumping
+
+Link's own jump is three commands in a row (`Jump`, `Fall`, `Land`), and the Player's AI switches between them. Lonk
+has one command, so the patch does the switching: the take-off clip (`Nml_Wait_Jump`, in the UseItem tree) when he
+leaves the ground, and `Fall_Loop` (case 5 of the root selector) once he's past the top, or after a fifth of a second
+off a ledge. The root's sync starts the take-off clip at the run's loop position, so it's over in a frame or two: he
+holds its last pose on the way up, which reads as a jump, and the fall loop takes over on the way down.
+
+In the air he follows Camille's rule: he copies the player's take-off once, then keeps the way and speed he took off
+with (stopping only at a wall), ignores the player and every other reaction, and only lands when his feet reach a
+floor. Jumping off the run used to switch to the running jump clip, which moves forward by itself; undoing that
+movement lagged a frame behind and he snapped back on landing, so every jump uses the standing take-off now.
