@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..effe235 100644
+index c05d6c3..5dca70d 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -259,7 +259,7 @@ index c05d6c3..effe235 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,22 +460,1838 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,22 +460,1839 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -735,7 +735,8 @@ index c05d6c3..effe235 100644
 +       HoldAnimationType too (from the weapon in your hands, it seems), so ours goes in every frame, after the game's.
 +       Each move clip plays at Link's own rate for it, scaled by his speed. Blackboard setters by name: string +0x28,
 +       int +0x30, float +0x38, bool +0x40. */
-+    static const int hold[GAITS] = {0, 1, 2, 3, 4, 0, 0, 0, 0, 0, 5, 5, 0, 0};   /* (an emote: what's under it, the idle; the take-off: the fall after it) */
++    /* (the mod's cases sit at 11 to 15: at 1 to 5 the menu's AI took them for a weapon in his hands and drew his sword) */
++    static const int hold[GAITS] = {0, 11, 12, 13, 14, 0, 0, 0, 0, 0, 15, 15, 0, 0};   /* (an emote: what's under it, the idle; the take-off: the fall after it) */
 +    /* The emotes and his take-off are the UseItem command, played in his body slot, its string picking the clip (the mod
 +       renamed some: look around, the take-off, a startle, a sulk, look up). They used to go through PauseMenuWait's case
 +       1, where the root's sync (which makes run and sprint flow into each other) started them wherever his loop was: an
@@ -2101,7 +2102,7 @@ index c05d6c3..effe235 100644
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,15 +2301,78 @@ void runtime_survey_cancel_user(void) {
+@@ -307,15 +2302,78 @@ void runtime_survey_cancel_user(void) {
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
@@ -2180,7 +2181,7 @@ index c05d6c3..effe235 100644
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
      } else if (request.kind == 1) {
-@@ -340,8 +2397,152 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -340,8 +2398,152 @@ void runtime_survey_tick(uint64_t frame) {
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }

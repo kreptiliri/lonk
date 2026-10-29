@@ -46,7 +46,7 @@ when you're cold, 1 when hot, from flags at `[[main+0x395ea40]]+0x658` (the GOT 
 him your sword): I only found out because skipping our write for a few frames made him play his last emote again. So:
 
 - the RomFS mod (`mod/make_mod.py`, built with [dt-12345/asb](https://github.com/dt-12345/asb)) points the selector's
-  cases 1 to 5 straight at five of the menu's weapon-equip clips (only reachable from those cases), renamed to
+  cases 1 to 5 (renumbered 11 to 15, below) straight at five of the menu's weapon-equip clips (only reachable from those cases), renamed to
   `Nml_Move_Walk`, `Nml_Move_Run`, `Nml_Move_Dash`, `Demo_Get_Cooking_VeryGood` (his party after a gift) and
   `Fall_Loop`.
   PouchPlayer already loads all of Link's animations.
@@ -201,12 +201,12 @@ apart, in their own order (weapon 0, bow 3, shield 4, head 8, upper 9, lower 10,
 with `survey peek euscan`), and every one of them gets put back in the world scene each frame, like the clothes. Without
 that, the weapons were the ones that showed up near his legs the first night.
 
-His weapons come out drawn: the sword stays in his hand. The menu puts a pouch user's weapons away with its AI node
-`OneShotChangeDrawnSwordStateForPouchPlayer` (name at `0x2508168`, found by the code that loads its name string, run
-method `0x2507a80` in its vtable): with nothing held it calls `0x4f5194(eu, link, 0)` on the weapon (0), the shield (4)
-and the bow (3), which sets that link's state byte (`eu+0x4620+link`) to 4 and clears its "drawn" flag; `0x4f5700(eu,
-link)` is the other way round. `survey lonk sheathe` does the same: the states change, and the sword stays in his hand
-(even every frame, or before a re-equip). Still open.
+His weapons came out drawn whenever he moved: the menu's AI reads `HoldAnimationType` as the type of weapon he holds,
+and his walk, run, sprint, party and fall were cases 1 to 5, so moving, the menu drew his sword and shield for him
+(standing, at 0, they went back on his back). The mod moves his clips to cases 11 to 15, which the menu doesn't know,
+and the patch adds the 10: they stay on his back. (The menu's own sheathe is `OneShotChangeDrawnSwordStateForPouchPlayer`,
+run method `0x2507a80`: with nothing held it calls `0x4f5194(eu, link, 0)` on the weapon (0), the shield (4) and the bow
+(3); `survey lonk sheathe` does the same, but the AI drew them again the next frame.)
 
 `survey drop` takes pieces off him. There's no delete call yet, so each one gets view mask 0 (`0x50138c`) and is
 moved 50 m underground.
