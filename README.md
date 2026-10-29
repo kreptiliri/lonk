@@ -38,7 +38,8 @@ Runs on the [MacNativeGames](https://github.com/ly05010419/MacNativeGames) nativ
 | fight | (when he sees an enemy) sprints at it, plants a bomb barrel next to it, panics and runs; lighting it is your job |
 
 And whatever the mood, he watches you: you jump (or flip, or roll), he jumps a beat later; you get hit, he startles;
-you swing your sword at him, he runs; you whistle, he comes running; you open a chest or cook something great, he
+you swing your sword at him, he walks off a couple of metres, turns round and gets back at you (drops something gross
+at your feet, sometimes a bomb barrel; has a snack; or makes a face or does a victory dance), then comes back; you whistle, he comes running; you open a chest or cook something great, he
 celebrates; you cook something bad, he's grossed out; you climb or glide, he looks up at you. Shove him enough and he
 sulks.
 
@@ -92,6 +93,7 @@ That spawns him 4 m in front of you and runs his brain for an hour.
 | `survey lonk twin` / `survey lonk naked` | dress him like you (and follow your changes) / back to his underwear |
 | `survey lonk outfit <set\|random>` | a whole armor set: `hylian`, `wild`, `zora`, `desert`, `snowquill`, `flamebreaker`, `stealth`, `climbing`, `radiant`, `soldier`, `rubber`, `barbarian`, `royal`, `glide`, `froggy`, `miner`, `ember`, `charged`, `frostbite`, `mystic`, `zonaite`, `awakening`, `depths`, `yiga` |
 | `survey lonk <mood> <frames>` | force a mood: `stalk`, `buddy`, `block`, `behind`, `wander`, `gift`, `flee`, `party`, `fight`, `hide` |
+| `survey lonk hit [gift\|eat\|silly]` | as if you'd swung at him (any reaction, or that one) |
 | `survey lonk emote <name>` | `look`, `lookup`, `eat`, `meal`, `yuck`, `jump`, `sulk`, `surprise` |
 | `survey lonk goto <right> <forward> [m/s]` | send him somewhere (metres from you) |
 | `survey lonk nobuddy` / `survey lonk buddyok` | he stops / starts picking buddy mode himself (your whistle still calls him) |
