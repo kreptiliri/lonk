@@ -146,7 +146,7 @@ He watches the player's animation slots the same way his own are read (`[as+0x20
 Slots 0 to 3 are the body (the lower body, the upper body and two more; an action can play in one or several: the
 whistle, `HorseCall`, only plays in slot 1). When one of them changes he reacts: `Jump`, `BackFlip`, `SideStep`,
 `FrontRoll` (copycat jump), `Damage*`, `Freeze`, `Eaten` (startle), `CutS1`..`CutS4`, `CutSF`, `CutDash`, `ChargeAttack*`
-within 3 m and facing him (he runs), `HorseCall` (he comes: buddy mode), `OpenTreasureBox*`, `Get`,
+within 3 m and facing him (he's mad, below), `HorseCall` (he comes: buddy mode), `OpenTreasureBox*`, `Get`,
 `GetCookingGood/VeryGood` (party), `GetCookingBad` (yuck), `Climb*`, `Glide`, `ParasailGlide` (looks up),
 `UltraHandStart`, `LookAround*`, `Talk`, `TalkHello` (looks around). The names come from the Player's ASB command list (532 of them). Tested: jump, a
 spawned Bokoblin hitting the player (`DamageL`, `DamageS`), the whistle, and a sword swing at him (`CutS1`).
@@ -387,3 +387,17 @@ flags 0 the game takes that as a teleport and resets his cloth: as far as it kne
 moves with him (Camille: it works). A real jump of over a metre in a frame (popping back behind you, a respawn) still
 goes as a teleport, so his hair doesn't whip across the map with him. (The pause menu's own set-transform, `0x2ba758`,
 didn't put him where asked: he stood on a boulder metres away.)
+
+## When you hit him
+
+He used to sprint straight away from you for 3 s. On TotK's terrain that ran him off cliffs and into water, so now
+(`LONK_MAD`) he only steps back: after his startle he walks 2.5 m away from you at a brisk 2.8 m/s (the clearest of five
+directions near "away", checked for walls and floor; with less than 0.8 m of room he stays put), turns round, and then,
+one time in three each: drops something at your feet (a monster part, or one time in five a bomb barrel), eats (and
+sometimes pulls the yuck face after), or pulls the yuck face or does the victory dance. Then back to his mood.
+`survey lonk hit [gift|eat|silly]` sets one off without a sword.
+
+What didn't make it: dubious and rock-hard food (`Item_Cook_O_01`/`02`) never spawned (the request goes through, no
+actor comes out; cooked food isn't an actor of its own in the RomFS); squaring up (as twins his weapons are already out
+whenever you swing, so drawing them didn't show; a dash and two hops looked goofy, a slow walk-in and stare-down was too
+much); looking up, which is a 0.8 s glance and read as nothing.

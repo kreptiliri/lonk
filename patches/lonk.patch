@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..a19f1ab 100644
+index c05d6c3..95e10d4 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -100,8 +100,8 @@ index c05d6c3..a19f1ab 100644
 +   through forceSetMatrix, yaw only. "survey stalk <frames> [m/s [stop m]]" walks it to the player; "survey lonk ..." runs
 +   the behaviours or the dice brain. Survives user input (the user is playing). */
 +enum { STALK_MAX = 16, TRAIL_MAX = 512 };
-+enum { LONK_STALK, LONK_BLOCK, LONK_BEHIND, LONK_WANDER, LONK_GIFT, LONK_FLEE, LONK_PARTY, LONK_BUDDY, LONK_FIGHT, LONK_HIDE, LONK_KINDS };
-+static const char *const lonk_names[LONK_KINDS] = {"stalk", "block", "behind", "wander", "gift", "flee", "party", "buddy", "fight", "hide"};
++enum { LONK_STALK, LONK_BLOCK, LONK_BEHIND, LONK_WANDER, LONK_GIFT, LONK_FLEE, LONK_PARTY, LONK_BUDDY, LONK_FIGHT, LONK_HIDE, LONK_MAD, LONK_KINDS };
++static const char *const lonk_names[LONK_KINDS] = {"stalk", "block", "behind", "wander", "gift", "flee", "party", "buddy", "fight", "hide", "mad"};
 +enum { GROUND_PLAYER, GROUND_PHYSICS, GROUND_TRAIL, GROUND_TERRAIN, GROUND_MODES };
 +static const char *const ground_names[GROUND_MODES] = {"player", "physics", "trail", "terrain"};
 +static KEEP int pouch_request, height_request;
@@ -260,7 +260,7 @@ index c05d6c3..a19f1ab 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,22 +461,1890 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,22 +461,1954 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -730,6 +730,10 @@ index c05d6c3..a19f1ab 100644
 +static int lonk_body_emote;   /* his body slot is playing the UseItem command (an emote, his take-off) */
 +static int lonk_armed;   /* his weapons are out (twin_draw), and what kind: the mod's walk and run carry them (arms) */
 +static char lonk_arm_kind[8] = "Sword";
++/* You hit him (LONK_MAD): what he does about it once he's stepped back. "survey lonk hit [gift|eat|silly]" picks one. */
++enum { MAD_GIFT, MAD_EAT, MAD_SILLY, MAD_KINDS };   /* one in three each (Camille) */
++static const char *const mad_names[MAD_KINDS] = {"gift", "eat", "silly"};
++static int lonk_mad_force = -1;
 +static void pouch_gait(int gait, float speed) {
 +    /* PauseMenuWait starts with a selector on the int HoldAnimationType; the mod points its cases 2 to 5 at the run, sprint,
 +       the cooking "great meal" celebration (his party) and his fall; 0 is the plain idle, which shivers, sweats or pants by
@@ -1512,6 +1516,53 @@ index c05d6c3..a19f1ab 100644
 +        target[0] = a[0]; target[2] = a[2];
 +        if (lonk_gifted && lonk_phase_left <= 1) lonk_enter(LONK_FLEE, 240);
 +        break;
++    case LONK_MAD: {   /* you hit him: after his startle he walks 2.5 m off (less if there's no room: a wall, a ledge), turns
++                          round and gets his own back: drops something nasty at your feet, has a snack, or something silly; then back
++                          to his mood. (Squaring up to you, a dash and hops then a stare-down, was cut: goofy, then too much) */
++        static float spot[2];
++        static int step, how;
++        static unsigned left;
++        if (entering) {
++            float way[2] = {0, 0}, free = 0;
++#if defined(TOTK_GAME_V143)
++            static const float near[] = {0, 0.52f, -0.52f, 1.05f, -1.05f};
++            if (ground_mode == GROUND_TERRAIN && isfinite(a[1])) free = fminf(best_way(a, atan2f(a[2] - p[2], a[0] - p[0]), near, 5, 2.5f, way), 2.5f);
++#endif
++            if (free < 0.8f) free = 0;   /* boxed in: he stays where he is */
++            spot[0] = a[0] + way[0] * free; spot[1] = a[2] + way[1] * free;
++            how = lonk_mad_force >= 0 ? lonk_mad_force : (int)arc4random_uniform(MAD_KINDS);
++            lonk_mad_force = -1; step = 0; left = 240;
++            fprintf(stderr, "[survey] lonk: mad, steps back %.1f m, then %s\n", free, mad_names[how]);
++        }
++        target[0] = a[0]; target[2] = a[2];
++        if (step == 0) {   /* stepping back (his back to you), a 4 s limit (the startle doesn't count) */
++            target[0] = spot[0]; target[2] = spot[1]; speed = 2.8f; stop = 0.1f; face_player = 0;   /* a brisk walk (Camille: a little faster than 2) */
++            if (!lonk_emote_left) left = tick_down(left);
++            if (hypotf(spot[0] - a[0], spot[1] - a[2]) < 0.3f || !left) { step = 1; left = 30; }
++        } else if (step == 1) {   /* turns round to you, a beat */
++            if (!(left = tick_down(left)) && !spawn_left) {
++                step = 2; left = 90;
++                if (how == MAD_GIFT) {   /* monster bits, or (one time in five) a bomb barrel (cooked food isn't an actor of its
++                                            own: Item_Cook_O_01/02, dubious and rock-hard food, never spawned) */
++                    static const char *const bad[] = {"Item_Enemy_01", "Item_Enemy_02", "Item_Enemy_02", "Item_Enemy_04", "BarrelBomb"};
++                    float lx = a[0] - p[0], lz = a[2] - p[2], ll = fmaxf(hypotf(lx, lz), 0.01f);
++                    float at[3] = {p[0] + lx / ll * 0.9f, p[1] + 0.8f, p[2] + lz / ll * 0.9f}, off[3] = {0};
++                    spawn_body = 0; spawn_where = at;
++                    spawn_request("mad", bad[arc4random_uniform(sizeof bad / sizeof *bad)], off, frame, player);
++                    spawn_where = NULL;
++                } else {
++                    /* a snack; or ew, or a victory dance (looking up, "wasn't me", was cut: a 0.8 s glance up, it read
++                       as nothing at all: he backed off, looked at you and came back) */
++                    lonk_emote_start(how == MAD_EAT ? GAIT_EAT : arc4random_uniform(2) ? GAIT_YUCK : GAIT_PARTY);
++                    left = 1;
++                }
++            }
++        } else if (step == 2) {   /* his reaction plays; done, back to his mood */
++            int done = !(left = tick_down(left)) && !lonk_emote_left;
++            if (done) { step = 3; lonk_phase_left = 1; fprintf(stderr, "[survey] lonk: not mad any more\n"); }
++        }
++        break;
++    }
 +    case LONK_FLEE:   /* away from you, one way (it turns when he gets stuck, below) */
 +        if (entering) { lonk_pick_flee(a, lonk_flee_from_set ? lonk_flee_from : p, 0); lonk_flee_from_set = 0; }
 +        target[0] = a[0] + lonk_flee[0] * 5; target[2] = a[2] + lonk_flee[1] * 5; speed = LONK_SPRINT; stop = 0; face_player = 0; break;
@@ -1538,7 +1589,7 @@ index c05d6c3..a19f1ab 100644
 +    }
 +#if defined(TOTK_GAME_V143)
 +    /* he watches what you do (your body slot's command, when it changes): you jump (or flip, or roll), he jumps a beat
-+       later; you get hit (frozen, eaten), he startles; you swing at him, he runs; you whistle, he comes; you open a chest,
++       later; you get hit (frozen, eaten), he startles; you swing at him, he's mad (LONK_MAD); you whistle, he comes; you open a chest,
 +       get something or cook something great, he celebrates; you cook something bad, yuck; you climb or glide, he looks up
 +       at you; you start Ultrahand, look around or talk to someone, he looks around too */
 +    static char your_cmds[4][48];   /* body slots 0 to 3 (lower, upper, ...); 4 on is the face, skin, arm */
@@ -1557,9 +1608,10 @@ index c05d6c3..a19f1ab 100644
 +        if (!strcmp(cmd, "Jump") || !strcmp(cmd, "BackFlip") || !strcmp(cmd, "SideStep") || !strcmp(cmd, "FrontRoll")) react = GAIT_JUMP;
 +        else if (!strncmp(cmd, "Damage", 6) || !strcmp(cmd, "Freeze") || !strcmp(cmd, "Eaten")) react = GAIT_SURPRISE;
 +        else if ((!strncmp(cmd, "CutS", 4) || !strcmp(cmd, "CutDash") || !strncmp(cmd, "ChargeAttack", 12) || !strcmp(cmd, "ChargeLSwordSpin")) &&
-+                 ll < 3 && facing_him && lonk_kind != LONK_FLEE) {   /* swinging at him: he's out of there */
++                 ll < 3 && facing_him && lonk_kind != LONK_MAD) {   /* swinging at him: he's mad (running off for good got lost on
++                                                                    cliffs and in water; now he only steps back) */
 +            fprintf(stderr, "[survey] lonk: you swung at him (%s)\n", cmd);
-+            lonk_flee_from_set = 0; lonk_enter(LONK_FLEE, 180); lonk_emote_start(GAIT_SURPRISE);
++            lonk_enter(LONK_MAD, 600); lonk_emote_start(GAIT_SURPRISE);
 +        } else if ((!strcmp(cmd, "HorseCall") || !strcmp(cmd, "CallComeon")) && lonk_kind != LONK_BUDDY) {   /* you whistled: he comes */
 +            fprintf(stderr, "[survey] lonk: you whistled, he comes\n");
 +            lonk_enter(LONK_BUDDY, 900);
@@ -1648,7 +1700,7 @@ index c05d6c3..a19f1ab 100644
 +        /* he only has a run, and slower than Link's own run it plays as slow motion (at 4 m/s it played at 0.8), so he
 +           moves at a run or not at all, except beside you, where he keeps your pace; but he gets up to speed and brakes
 +           the way Link does, braking in time to stop at the stop distance (v*v = 2 * brake * the room left) */
-+        if (lonk_kind != LONK_BUDDY) speed = fmaxf(speed, LONK_RUN);
++        if (lonk_kind != LONK_BUDDY && lonk_kind != LONK_MAD) speed = fmaxf(speed, LONK_RUN);   /* (stepping back from you, he walks) */
 +        room = fmaxf(dist - stop, 0.0f);
 +        want_v = fminf(speed, sqrtf(2 * LONK_BRAKE * room));
 +        lonk_v = want_v > lonk_v ? fminf(want_v, lonk_v + LONK_ACCEL * lonk_dt) : fmaxf(want_v, lonk_v - LONK_BRAKE * lonk_dt);
@@ -2014,6 +2066,18 @@ index c05d6c3..a19f1ab 100644
 +        pthread_mutex_unlock(&survey_lock);
 +        return 1;
 +    }
++    /* "survey lonk hit [gift|fight|silly]": as if you'd swung at him (any of the three, or that one) */
++    char mad[16] = "";
++    int hit = (used = 0, sscanf(line, "survey lonk hit %n", &used)) == 0 && used && !line[used];
++    if (!kind && (hit || ((used = 0, sscanf(line, "survey lonk hit %15[a-z] %n", mad, &used)) == 1 && used && !line[used]))) {
++        int m = -1;
++        for (int k = 0; k < MAD_KINDS; k++) if (!strcmp(mad, mad_names[k])) m = k;
++        if (!hit && m < 0) { fprintf(stderr, "[survey] lonk hit: unknown %s\n", mad); return 1; }
++        pthread_mutex_lock(&survey_lock);
++        lonk_mad_force = m; lonk_enter(LONK_MAD, 600); lonk_emote_start(GAIT_SURPRISE);
++        pthread_mutex_unlock(&survey_lock);
++        return 1;
++    }
 +    char outfit[32];   /* "survey lonk outfit <set|random>": a whole armor set (the lowest-numbered one of each name) */
 +    if (!kind && (used = 0, sscanf(line, "survey lonk outfit %31[a-z] %n", outfit, &used)) == 1 && used && !line[used]) {
 +        static const struct { const char *name; int n; } sets[] = {{"hylian", 1}, {"wild", 5}, {"zora", 6}, {"desert", 8}, {"snowquill", 9},
@@ -2154,7 +2218,7 @@ index c05d6c3..a19f1ab 100644
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,15 +2354,79 @@ void runtime_survey_cancel_user(void) {
+@@ -307,15 +2418,79 @@ void runtime_survey_cancel_user(void) {
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
@@ -2234,7 +2298,7 @@ index c05d6c3..a19f1ab 100644
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
      } else if (request.kind == 1) {
-@@ -340,8 +2451,152 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -340,8 +2515,152 @@ void runtime_survey_tick(uint64_t frame) {
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }
