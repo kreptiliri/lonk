@@ -36,6 +36,9 @@ CASES = {1: ('PauseMenu_Equip_Sword', 'Nml_Move_Walk'), 2: ('PauseMenu_Equip_Lsw
 # picks his emote with it. Three of its eating clips stay (one-handed, a meal, a bad one), and five get renamed (the drink
 # became his startle) (UseItem value -> what it plays now).
 USE_ITEM = 202
+# The menu's AI reads HoldAnimationType as the weapon type he holds and draws his sword for 1 to 5: his walk and run had
+# his sword and shield in his hands. So his clips sit at 11 to 15, which the menu doesn't know (the patch adds the 10).
+CASE_SHIFT = 10
 # The run and sprint clips carry him forward by themselves (their top bone, Skl_Root, travels about 3 m a stride), while
 # the patch places him by code: undoing that drift at every stop and switch never quite matched the game's own blend, and
 # he snapped. So his whole PauseMenuWait goes through a bone blender that takes Skl_Root from a standing clip and the rest
@@ -106,6 +109,7 @@ def main():
             sys.exit(f'no {clip} clip: not the 1.4.3 ASB?')
         leaf['Body']['Animation'] = now
         entries[case]['Node Index'] = leaf['Node Index']
+        entries[case]['Condition'] = case + CASE_SHIFT
     # The root keeps the loop phase when it switches (Is Sync): run and sprint flow into each other instead of restarting
     # his stride, which made his body snap. (Only a command's first node can sync: those are the ones with Sync Controls.
     # It reaches through everything below, so the patch starts an emote only when his loop is about to wrap.)

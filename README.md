@@ -110,7 +110,6 @@ reload.
 
 ## Known issues
 
-- His sword and shield come out in his hands (drawn) instead of on his back.
 - He can't climb or swim: walls and ledges over 7 m he walks around, and if he gets stranded (far above or below you,
   far away and getting nowhere, stuck) for 3 seconds, he pops back next to you.
 - He steers with a knee-high probe: thin things (trees, fences) can still slip through, and anything knee high or lower
