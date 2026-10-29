@@ -206,7 +206,7 @@ and his walk, run, sprint, party and fall were cases 1 to 5, so moving, the menu
 (standing, at 0, they went back on his back). The mod moves his clips to cases 11 to 15, which the menu doesn't know,
 and the patch adds the 10: they stay on his back. (The menu's own sheathe is `OneShotChangeDrawnSwordStateForPouchPlayer`,
 run method `0x2507a80`: with nothing held it calls `0x4f5194(eu, link, 0)` on the weapon (0), the shield (4) and the bow
-(3); `survey lonk sheathe` does the same, but the AI drew them again the next frame.)
+(3); `survey lonk sheathe` does the same: it changed their states, not where his sword was.)
 
 `survey drop` takes pieces off him. There's no delete call yet, so each one gets view mask 0 (`0x50138c`) and is
 moved 50 m underground.
