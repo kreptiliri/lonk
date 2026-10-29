@@ -87,6 +87,12 @@ weighted on those two bones alone. Two things to get right: a bone group's own d
 bones it doesn't list, and Lift's was 1 (his arms took the standing pose: he ran like Naruto, hands straight behind
 him); and `Skl_Root` alone left the drift in, it's in `Root`. No more cancelling in the patch, no more snaps.
 
+A second blender does the same over the `UseItem` command (his emotes and his take-off): the take-off clip lifts `Root`
+like a real jump, and that came on top of the patch's own jump physics, so he went up twice as high. It's node 229, a
+blender only reachable from an idle branch's weapon cases 2 and 3, which the idle never sees (2 and 3 are his run and
+sprint, straight from the root), with 340's settings copied over. Traced: his jump is 0.65 m and 0.38 s, yours 0.63 m
+and 0.40 s.
+
 `Root` also carries the run's bounce, so without it he ran level, "pressed". The patch puts the bounce back: twice a
 stride on his loop, 4 cm (Camille, by eye), less on the walk; the sprint keeps its own in other bones. `survey lonk bob
 <metres> <phase>` changes it while playing.
@@ -351,3 +357,13 @@ with (stopping only at a wall: it used to be the ledge check too, so over any dr
 floor. Jumping off the run used to switch to the running jump clip, which moves forward by itself, and nothing undid
 that (jumps had no root compensation): most likely why he snapped back on landing. Every jump uses the standing
 take-off now.
+
+## His hair
+
+The ponytail is cloth on the hair piece (`Armor_999_Head`, the same as yours), and the game doesn't simulate its
+inertia: each cloth part has `ClothReaction` settings keyed on how fast its owner moves (`ReactionSpeed` 5, 15, 20, each
+with its own drag and wind). His hung still. He's placed every frame with `forceSetMatrix` (main `0x69a18c`), and with
+flags 0 the game takes that as a teleport and resets his cloth: as far as it knew, he never moved. With flags 1 his hair
+moves with him (Camille: it works). A real jump of over a metre in a frame (popping back behind you, a respawn) still
+goes as a teleport, so his hair doesn't whip across the map with him. (The pause menu's own set-transform, `0x2ba758`,
+didn't put him where asked: he stood on a boulder metres away.)

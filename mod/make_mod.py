@@ -43,6 +43,10 @@ USE_ITEM = 202
 # pose, [arms' clip, body's clip]); its group becomes Lift (only for carrying things), weighted on Skl_Root and Root
 # alone (Skl_Root alone left the drift in).
 STILL = 340
+# The same over his emotes and his take-off (the UseItem command): the take-off clip lifts Root like a real jump, on top
+# of the patch's own jump physics, so he went up twice as high. Node 229 is a blender only reachable from an idle
+# branch's weapon cases 2 and 3, which the idle never sees (2 and 3 are his run and sprint, straight from the root).
+STILL_EMOTES = 229
 USES = {'EatCookingSkewer': 'DemoLookAround', 'EatTooHard': 'Nml_Wait_Jump', 'Drink': 'Demo_Surprise',
         'UseFairy': 'Demo_Get_Cooking_Bad', 'UseEnergyMaterial': 'DemoLookUp'}
 
@@ -126,6 +130,13 @@ def main():
     still['Body']['Bone Group Name'] = 'Lift'
     still['Body']['Child Nodes'] = [standing['Node Index'], ROOT]
     next(c for c in doc['Commands'] if c['Name'] == 'PauseMenuWait')['Node Index'] = STILL
+    still_emotes = nodes.get(STILL_EMOTES, {})
+    if still_emotes.get('Node Type') != 'BoneBlender':
+        sys.exit('no second bone blender for the emotes: not the 1.4.3 ASB?')
+    for key in ('Bone Group Name', 'Unknown 1', 'Blend Rate', 'Unknown 3', 'Unknown 4'):
+        still_emotes['Body'][key] = still['Body'][key]
+    still_emotes['Body']['Child Nodes'] = [standing['Node Index'], USE_ITEM]
+    next(c for c in doc['Commands'] if c['Name'] == 'UseItem')['Node Index'] = STILL_EMOTES
     AsbFile.from_dict(doc).to_binary(str(work) + '/')
     edited = (work / 'PouchPlayer.root.asb').read_bytes()
 

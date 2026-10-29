@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..283e2c7 100644
+index c05d6c3..effe235 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -259,7 +259,7 @@ index c05d6c3..283e2c7 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,22 +460,1831 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,22 +460,1838 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -1854,7 +1854,14 @@ index c05d6c3..283e2c7 100644
 +        float matrix[12] = {hz, 0, hx, a[0],
 +                            0,  1, 0,  y,
 +                            -hx, 0, hz, a[2]};
-+        survey_force((void *)stalkers[i].actor, matrix, 0);
++        /* forceSetMatrix's flags: with 0 the game takes every frame as a teleport and resets his cloth, so his ponytail hung
++           still (Camille: "mine bounces"); with 1 it moves with him. A real jump (over a metre in a frame: popping back
++           behind you, a respawn) still goes as a teleport, or his hair would whip across with him. (The menu's own
++           set-transform, 0x2ba758, didn't put him where asked: he stood on a boulder metres away.) */
++        static float placed[2];
++        int jumped = hypotf(a[0] - placed[0], a[2] - placed[1]) > 1.0f;
++        placed[0] = a[0]; placed[1] = a[2];
++        survey_force((void *)stalkers[i].actor, matrix, jumped ? 0 : 1);
 +    }
 +    a[1] = ground;
 +    if (frame % 60 == 0) {
@@ -2094,7 +2101,7 @@ index c05d6c3..283e2c7 100644
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,15 +2294,78 @@ void runtime_survey_cancel_user(void) {
+@@ -307,15 +2301,78 @@ void runtime_survey_cancel_user(void) {
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
@@ -2173,7 +2180,7 @@ index c05d6c3..283e2c7 100644
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
      } else if (request.kind == 1) {
-@@ -340,8 +2390,152 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -340,8 +2397,152 @@ void runtime_survey_tick(uint64_t frame) {
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }
