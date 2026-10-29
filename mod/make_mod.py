@@ -50,6 +50,14 @@ STILL = 340
 # of the patch's own jump physics, so he went up twice as high. Node 229 is a blender only reachable from an idle
 # branch's weapon cases 2 and 3, which the idle never sees (2 and 3 are his run and sprint, straight from the root).
 STILL_EMOTES = 229
+# Weapons out, his walk and run carry them: the weapon's "_Upper" run clip, which Link's tree lays over his run's arms.
+# Lonk plays it as his whole body: laid over his run with a bone blender (on the arm group), the blender sat under 340 and
+# his run's drift came back in (even with the run on both sides of it); the clip's own legs are a bit plainer than the
+# run's. Each moving case goes through a bool selector on IsAttachedWeapon (the patch sets it: his weapons out), then
+# string selectors on "Arrow" (the patch sets the weapon's kind): "Lsword", or else "Spear", or else the sword. All nodes
+# of the menu's weapon poses he never reaches. (case: (bool selector, [kind selector, kind selector]))
+UPPER = {'Sword': (363, 'Sword_Move_Run_Upper'), 'Lsword': (364, 'Lsword_Move_Run_Upper'), 'Spear': (366, 'Spear_Move_Run_Upper')}
+ARMED = {11: (223, [220, 259]), 12: (226, [230, 290])}
 USES = {'EatCookingSkewer': 'DemoLookAround', 'EatTooHard': 'Nml_Wait_Jump', 'Drink': 'Demo_Surprise',
         'UseFairy': 'Demo_Get_Cooking_Bad', 'UseEnergyMaterial': 'DemoLookUp'}
 
@@ -141,6 +149,25 @@ def main():
         still_emotes['Body'][key] = still['Body'][key]
     still_emotes['Body']['Child Nodes'] = [standing['Node Index'], USE_ITEM]
     next(c for c in doc['Commands'] if c['Name'] == 'UseItem')['Node Index'] = STILL_EMOTES
+    bools = [b['Name'] for b in doc['Blackboard']['bool']]
+    strings = [b['Name'] for b in doc['Blackboard']['string']]
+    for kind, (leaf, clip) in UPPER.items():
+        if nodes[leaf]['Node Type'] != 'SkeletalAnimation':
+            sys.exit(f'node {leaf} is not a clip: not the 1.4.3 ASB?')
+        nodes[leaf]['Body']['Animation'] = clip
+    for case, (armed, (first, second)) in ARMED.items():
+        base = entries[case - CASE_SHIFT]['Node Index']
+        if nodes[armed]['Node Type'] != 'BoolSelector' or any(nodes[k]['Node Type'] != 'StringSelector' for k in (first, second)):
+            sys.exit('the weapon poses are not the expected nodes: not the 1.4.3 ASB?')
+        for node, param in ((armed, bools.index('IsAttachedWeapon')), (first, strings.index('Arrow')), (second, strings.index('Arrow'))):
+            nodes[node]['Body']['Parameter']['Blackboard Index'] = param
+            nodes[node]['Body']['Parameter']['Select Flag'] = 'SelectOnUpdate'   # (drawn mid-run: switch now, not next time)
+        nodes[armed]['Body']['Child Nodes'] = [{'Condition True': first}, {'Condition False': base}]
+        nodes[first]['Body']['Child Nodes'] = [{'Condition': 'Lsword', 'Node Index': UPPER['Lsword'][0]},
+                                               {'Default': nodes[first]['Body']['Child Nodes'][1]['Default'], 'Node Index': second}]
+        nodes[second]['Body']['Child Nodes'] = [{'Condition': 'Spear', 'Node Index': UPPER['Spear'][0]},
+                                                {'Default': nodes[second]['Body']['Child Nodes'][1]['Default'], 'Node Index': UPPER['Sword'][0]}]
+        entries[case - CASE_SHIFT]['Node Index'] = armed
     AsbFile.from_dict(doc).to_binary(str(work) + '/')
     edited = (work / 'PouchPlayer.root.asb').read_bytes()
 

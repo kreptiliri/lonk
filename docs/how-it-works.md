@@ -211,7 +211,16 @@ run method `0x2507a80`: with nothing held it calls `0x4f5194(eu, link, 0)` on th
 As your twin he draws when you draw and puts them away when you do: each frame, his weapon (0) and shield (4) follow
 yours, through the game's own draw `0x4f5700(eu, link)` and put-away `0x4f5194(eu, link, 0)`, checked with
 `0x3e322c(eu, link)` (is it drawn). Not yet: the reach for his back (Link plays a draw and a sheathe animation; his just
-move), the lower arm swing of Link's walk and run with weapons out, and fused weapons (he carries the plain one).
+move), and fused weapons (he carries the plain one).
+
+Weapons out, he walks and runs like you do with them out: Link's tree lays the weapon's `_Upper` run clip
+(`Sword_Move_Run_Upper`, `Lsword_...`, `Spear_...`) over his run's arms. Lonk's walk and run cases go through a bool
+selector on `IsAttachedWeapon`, which the patch sets when his weapons are out, then string selectors on `Arrow` (the
+menu's only for the bow), which the patch sets to the weapon's kind from its name. All of it is nodes of the menu's
+weapon poses he never reaches. He plays that clip as his whole body: laid over his run with a bone blender, the
+blender sat under the stand-still blender and the run's drift came back in (tested with the run on both sides of the
+blender: still drifting, so it's the nesting, not the clip). The clip's own legs are a little plainer than the run's,
+and its own bounce is smaller, so the patch's bounce is a quarter bigger with weapons out.
 
 `survey drop` takes pieces off him. There's no delete call yet, so each one gets view mask 0 (`0x50138c`) and is
 moved 50 m underground.
