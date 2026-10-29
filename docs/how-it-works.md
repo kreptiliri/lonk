@@ -46,18 +46,21 @@ when you're cold, 1 when hot, from flags at `[[main+0x395ea40]]+0x658` (the GOT 
 him your sword): I only found out because skipping our write for a few frames made him play his last emote again. So:
 
 - the RomFS mod (`mod/make_mod.py`, built with [dt-12345/asb](https://github.com/dt-12345/asb)) points the selector's
-  cases 2 to 5 straight at four of the menu's weapon-equip clips (only reachable from those cases), renamed to
-  `Nml_Move_Run`, `Nml_Move_Dash`, `Demo_Get_Cooking_VeryGood` (his party after a gift) and `Fall_Loop`.
+  cases 1 to 5 straight at five of the menu's weapon-equip clips (only reachable from those cases), renamed to
+  `Nml_Move_Walk`, `Nml_Move_Run`, `Nml_Move_Dash`, `Demo_Get_Cooking_VeryGood` (his party after a gift) and
+  `Fall_Loop`.
   PouchPlayer already loads all of Link's animations.
 - the patch plays `PauseMenuWait` once (in his body's slot, 1: slot 0 is his face, and starting it there took his
   face's place) and then sets `HoldAnimationType` every frame, after the game, through the blackboard's vtable `+0x30`
   (int by name; string `+0x28`, float `+0x38`, bool `+0x40`): `set(bb, &{"HoldAnimationType", 0}, value)`, the
   blackboard being `[as+0x40]` (`as` = his animation state, the chain `0xba8ed0` walks). Standing, he's the plain idle,
   so he shivers in the snow and sweats in the heat by himself.
-- no walk (Camille's call: Link mostly runs or sprints, and the slow walk looked off): idle, run below 7.3 m/s, sprint
-  above, at Link's own speeds measured from a trace (5.7 running, 9 sprinting). The clip's rate (`slot+0xd0`) is the one
-  Link's own tree uses (its frame controllers: run 1.5, sprint 1.75), scaled by his speed against Link's. Matching his
-  steps to the ground by measurement instead came out at 1.1 to 1.2, and Camille saw it: a bit slow.
+- idle, walk below 4 m/s, run below 7.3, sprint above, at Link's own speeds measured from a trace (5.7 running, 9
+  sprinting). Link's tree fades the walk into the run between 2.9 and 5.6 m/s; Lonk switches at 4. (He had no walk
+  for a while: keeping your walking pace on the run clip looked like running while holding back.) The clip's rate
+  (`slot+0xd0`) is the one Link's own tree uses (its frame controllers: walk 0.9, run 1.5, sprint 1.75), scaled by
+  his speed against Link's. Matching his steps to the ground by measurement instead came out at 1.1 to 1.2, and
+  Camille saw it: a bit slow.
 - he speeds up and brakes like Link: from Camille's own runs in the traces, standing to 7.5 m/s takes about 6 frames
   and a 9.9 m/s sprint stops in about 13, so 60 m/s² up and 45 down, braking in time to stop at his stop distance
   (v² = 2 x braking x the room left). The gait comes from the speed he means to go, not his measured one: that lagged
@@ -69,14 +72,24 @@ The first version drove `Temperature` instead (cold idle = walk). Fighting the m
 him between the idle and the walk, and each flip restarted the walk: a few steps, snap back, again. He also blushed
 and puffed cold breath in warm caves, since that comes with the cold idle node.
 
-The moves carry him forward inside the clip (root motion): over one loop his body walks ahead of where he's put, then
-snaps back when the clip loops. The real Player's movement absorbs that; nothing does for him. The body slot has the
-loop position, 0 to 1, at `slot+0x1e0` (`+0xf8` counts frames), so he's placed behind his spot by (metres the clip
-travels per loop) x (loop position), and the two cancel out. The metres were tuned by eye; now they're measured: the
-run clip is 24 frames at rate 1.5 for 5.7 m/s, so 5.7 x 24/30 / 1.5 = 3.04 m a loop, the sprint 18 frames at 1.75 for
-9 m/s, 3.09 m (by eye it was 3.7: each sprint loop put him 0.6 m too far back). `survey lonk root <walk> <run> <dash>`
-still changes them. (With the mod installed you can watch the raw clip: hold a sword in the menu and the inventory
-Link runs three steps and snaps back, forever.)
+The moves carry him forward inside the clip (root motion, in the `Root` bone): over one loop his body runs about 3 m
+ahead of where he's put, then snaps back when the clip loops. The real Player's movement absorbs that; nothing does for
+him. For days the patch undid it: placed him behind his spot by (metres per loop) x (loop position at `slot+0x1e0`),
+first with metres by eye, then measured (3.04 run, 3.09 sprint), then fading with the game's own blend weight
+(`slot+0x184`, 10 frames eased) at every switch. Every version still snapped now and then on a stop, because the game's
+blend of two moving clips can't be seen from outside, only guessed.
+
+So the mod removes the drift instead. PouchPlayer's tree has bone blenders (two children: the first drives the bones in
+its bone group, the second everything else), and Link's own tree has a bone group for just his top bone, `Skl_Root`. The
+mod puts the one free blender (node 340, an unused bow pose) over all of `PauseMenuWait`: `Skl_Root` and `Root` come
+from a standing clip (`Nml_Wait`), the rest from his tree. Its bone group is the Lift group (only for carrying things),
+weighted on those two bones alone. Two things to get right: a bone group's own default weight (`Unknown`) covers the
+bones it doesn't list, and Lift's was 1 (his arms took the standing pose: he ran like Naruto, hands straight behind
+him); and `Skl_Root` alone left the drift in, it's in `Root`. No more cancelling in the patch, no more snaps.
+
+`Root` also carries the run's bounce, so without it he ran level, "pressed". The patch puts the bounce back: twice a
+stride on his loop, 4 cm (Camille, by eye), less on the walk; the sprint keeps its own in other bones. `survey lonk bob
+<metres> <phase>` changes it while playing.
 
 Switching between run and sprint still made a little snip: the new clip started its loop from 0, so his body jumped
 back by however far into the old loop he was. The Player's own run and dash leaves avoid that with "InitialFrame"
@@ -84,16 +97,9 @@ nodes (start where the previous animation was in its loop). Two of PouchPlayer's
 nothing here (the loop still restarted, measured in the trace). What works is the command's first node's `Is Sync`:
 with it on, every switch keeps the loop phase (normalized), and the trace shows the loop running straight through run
 -> sprint -> run. Only a command's first node can do it (those are the only selectors with Sync Controls), and it
-reaches through everything below, so anything else under it starts wherever his loop was. (That's why the emotes are
+reaches through everything below, so anything else under it starts wherever his loop was. (It still works with the
+bone blender over it: in the trace a sprint -> run switch carries on from the sprint's loop position.) (That's why the emotes are
 a command of their own now, below. The party is still under it and waits for his loop to come round.)
-
-The compensation follows the game's own blend. His slot counts its node switches (the high half of `+0xbc`; idle to run
-doesn't count one, but the new clip's weight starts over) and has the new clip's eased blend weight at `+0x184` (5
-frames of the game's 30 a second, 10 of ours at 60). The metres per loop fade from the old clip's to the new one's with
-that weight, the old clip's loop running on underneath at its own pace. Before, I guessed the fade: it started a frame
-early (the game only switches on its next update), and a switch on the frame his loop wrapped round counted as a
-restart, holding the old clip's whole stride (up to 3 m) and fading it out: stopping out of a sprint, now and then he
-snapped a stride back.
 
 More emotes than slots: the selector only has cases 1 to 5, and adding cases crashes. But PouchPlayer has a second
 full-body command, `UseItem`: a selector on the blackboard *string* `UseItem` (eat food, eat a meal, eat a skewer, eat

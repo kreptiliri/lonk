@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..73bc8b6 100644
+index c05d6c3..283e2c7 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -40,7 +40,7 @@ index c05d6c3..73bc8b6 100644
  #include <limits.h>
  #include <mach/mach.h>
  #include "mach_vm_compat.h"
-@@ -181,24 +184,148 @@ void runtime_survey_init(Module *m) {
+@@ -181,24 +184,145 @@ void runtime_survey_init(Module *m) {
  int runtime_survey_command(const char *line) { (void)line; return 0; }
  #endif
  #else
@@ -126,6 +126,7 @@ index c05d6c3..73bc8b6 100644
 +static KEEP float lonk_anchor[3], lonk_wander[3], lonk_flee[2];
 +#define LONK_RUN 5.7f      /* m/s, measured off Link: running (holding forward) */
 +#define LONK_SPRINT 9.0f   /* and sprinting */
++#define LONK_WALK 2.0f     /* the speed Link's walk clip plays at rate 0.9 (his tree's frame controller) */
 +#define LONK_GRAVITY 32.0f   /* m/s/s: Link's standing jump, traced frame by frame, is 0.64 m high and 0.4 s long (3 times real gravity) */
 +#define LONK_JUMP 6.4f       /* and leaves the ground at 6.4 m/s */
 +/* Link speeds up and brakes over a few frames (traced from your own runs: standing to 7.5 m/s in about 6 frames, a 9.9 m/s
@@ -149,19 +150,15 @@ index c05d6c3..73bc8b6 100644
 +static KEEP int lonk_goto_set;
 +static KEEP int lonk_emote, lonk_emoted;   /* a one-off emote (its gait: GAIT_LOOK, GAIT_EAT...) he's doing instead of moving, once per mood */
 +static KEEP unsigned lonk_emote_left, lonk_emote_late;   /* frames left; frames it's waited to start (those don't count, up to a second) */
-+/* The walk, run and dash clips carry Link forward by themselves (root motion) over each loop, then snap back when they
-+   loop: his body ran ahead of where we put him and jumped back every 0.8 s or so. So he's placed that far behind,
-+   times how far into the loop the clip is (the body slot's 0..1 loop position at +0x1e0): metres per loop for idle,
-+   walk, run, dash. "survey lonk root <walk> <run> <dash>" changes them while playing. */
-+/* Measured, not by eye: Link runs 5.7 m/s with the 24-frame run clip at rate 1.5 and sprints 9 m/s with the 18-frame
-+   sprint clip at 1.75 (the Player's frame controllers; the lengths from his own loop position in a trace), so one loop
-+   of each carries him 5.7 * 24/30 / 1.5 = 3.04 m and 9 * 18/30 / 1.75 = 3.09 m. By eye it was 2.9 and 3.7: a sprint
-+   loop put him 0.6 m too far back. */
-+static KEEP float lonk_root[4] = {0, 1.44f, 3.04f, 3.09f};
++/* The walk, run and dash clips carry Link forward by themselves (their Root bone, about 3 m a loop). The mod takes his
++   Skl_Root and Root from a standing clip (a bone blender over all of PauseMenuWait), so his body stays where he's placed:
++   undoing the drift in here never quite matched the game's blend, and he snapped at every stop. */
 +static KEEP float lonk_rate;   /* the clip rate last set on his body */
++/* His run's bounce went with the drift (both are the Root bone, which the mod takes from a standing clip): he ran level,
++   "pressed", Camille said. So it's put back here, twice a stride (each step) on his loop: metres up and down, and where
++   in the loop he's lowest. "survey lonk bob <metres> <phase>" while playing. The sprint keeps its own (in other bones). */
++static KEEP float lonk_bob[2] = {0.04f, 0.0f};   /* 4 cm: Camille, by eye ("PERFECT") */
 +static KEEP uintptr_t lonk_body;   /* his body's animation slot (the one playing PauseMenuWait), found by pouch_gait */
-+static uint32_t lonk_switches;   /* his body slot's switch count and the newest clip's blend weight, for the trace */
-+static float lonk_weight;
 +static KEEP int lonk_trace;   /* "survey lonk trace": his and the player's positions every 3 frames */
 +static KEEP unsigned lonk_respawn_left;   /* his body vanished (you died, a loading zone) while the brain runs: he's back after this */
 +static KEEP float trail[TRAIL_MAX][3];   /* the player's recent footsteps: ground heights Lonk can stand on */
@@ -194,7 +191,7 @@ index c05d6c3..73bc8b6 100644
  
  static int read_mem(uintptr_t address, void *out, size_t size) {
      if (!address || address > UINTPTR_MAX - size) return 0;
-@@ -254,6 +381,45 @@ static uintptr_t player_actor(void) {
+@@ -254,6 +378,45 @@ static uintptr_t player_actor(void) {
      }
      return 0;
  }
@@ -240,7 +237,7 @@ index c05d6c3..73bc8b6 100644
  void runtime_survey_init(Module *m) {
      const char *enabled = getenv("TOTK_SURVEY");
      if (!enabled || strcmp(enabled, "1")) return;
-@@ -272,6 +438,21 @@ void runtime_survey_init(Module *m) {
+@@ -272,6 +435,21 @@ void runtime_survey_init(Module *m) {
          runtime_fail("survey requires verified game-version forceSetMatrix entry");
      survey_main = (uintptr_t)m->base;
      survey_force = (void (*)(void *, const float *, uint32_t))(m->base + FORCE_MATRIX);
@@ -262,7 +259,7 @@ index c05d6c3..73bc8b6 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,22 +463,1842 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,22 +460,1831 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -738,7 +735,7 @@ index c05d6c3..73bc8b6 100644
 +       HoldAnimationType too (from the weapon in your hands, it seems), so ours goes in every frame, after the game's.
 +       Each move clip plays at Link's own rate for it, scaled by his speed. Blackboard setters by name: string +0x28,
 +       int +0x30, float +0x38, bool +0x40. */
-+    static const int hold[GAITS] = {0, 0, 2, 3, 4, 0, 0, 0, 0, 0, 5, 5, 0, 0};   /* (an emote: what's under it, the idle; the take-off: the fall after it) */
++    static const int hold[GAITS] = {0, 1, 2, 3, 4, 0, 0, 0, 0, 0, 5, 5, 0, 0};   /* (an emote: what's under it, the idle; the take-off: the fall after it) */
 +    /* The emotes and his take-off are the UseItem command, played in his body slot, its string picking the clip (the mod
 +       renamed some: look around, the take-off, a startle, a sulk, look up). They used to go through PauseMenuWait's case
 +       1, where the root's sync (which makes run and sprint flow into each other) started them wherever his loop was: an
@@ -799,11 +796,13 @@ index c05d6c3..73bc8b6 100644
 +        }
 +        if (!waiting) ((void (*)(uintptr_t, const void *, int))set_int)(bb, &h_key, hold[gait]);
 +        if (gait != lonk_gait && !waiting) fprintf(stderr, "[survey] gait: %s\n", gait_names[gait]);
-+        /* the rate Link's own tree plays them at (its frame controllers: run 1.5, sprint 1.75), scaled by how fast he goes
++        /* the rate Link's own tree plays them at (its frame controllers: walk 0.9, run 1.5, sprint 1.75), scaled by how fast he goes
 +           against Link's own speeds; matching his steps to the ground instead came out at 1.1 to 1.2, which looked a bit
 +           slow. Everything else at 1, as in the Player's tree (the take-off too: Nml_Wait_Jump has no frame controller) */
 +        int moving = !emote_cmd && (waiting ? lonk_gait : gait) >= GAIT_WALK && (waiting ? lonk_gait : gait) <= GAIT_DASH;
-+        float rate = !moving ? 1.0f : fminf(fmaxf((waiting ? lonk_gait : gait) == GAIT_DASH ? 1.75f * speed / LONK_SPRINT : 1.5f * speed / LONK_RUN, 1.0f), 2.5f);   /* never slow motion */
++        int shown = waiting ? lonk_gait : gait;
++        float rate = !moving ? 1.0f : shown == GAIT_WALK ? fminf(fmaxf(0.9f * speed / LONK_WALK, 0.5f), 2.0f) :
++                     fminf(fmaxf(shown == GAIT_DASH ? 1.75f * speed / LONK_SPRINT : 1.5f * speed / LONK_RUN, 1.0f), 2.5f);   /* never slow motion */
 +        memcpy((void *)(body + 0xd0), &rate, sizeof rate);
 +        lonk_rate = rate;
 +        lonk_body = body; lonk_body_emote = emote_cmd;
@@ -1122,20 +1121,19 @@ index c05d6c3..73bc8b6 100644
 +/* One frame of Lonk: the behaviour moves the anchor (yaw only; local Z = facing, as spawn_request reads it), then every live
 +   body piece is put there. A piece whose name no longer reads back is dropped. */
 +#if defined(TOTK_GAME_V143)
-+/* idle, run or dash from his speed (no walk: Camille's call, Link mostly runs or sprints too). The bands overlap by
-+   0.3 m/s each side. Between run and sprint a new gait holds for 12 frames (your sprint dips, and he'd flicker); to start
++/* idle, walk, run or dash from his speed (no walk, at first: keeping your walking pace, his run looked like running
++   while holding back, Camille said). The bands overlap by 0.3 m/s each side. Between moving gaits a new one holds for 12 frames (your sprint dips, and he'd flicker); to start
 +   or stop, 2: that used to be 12 too, on a speed smoothed over 20 more, so he ran on the spot for half a second after
 +   every stop (and slid off in his idle pose at every start). Braking to a stop (stopping), he goes to the idle right away,
 +   the way Link's brake starts as soon as you let go: its 10-frame fade then ends about when he does. Called every frame,
 +   emotes or not, so a gait from before an emote doesn't come back after it (it did: 12 frames of running on the spot). */
 +static int lonk_move_gait(float v, int stopping) {
-+    static const float edge[3] = {0.4f, 0.4f, 7.3f};   /* idle | (walk, unused) | run | dash */
++    static const float edge[3] = {0.4f, 4.0f, 7.3f};   /* idle | walk | run | dash (Link's walk fades into his run from 2.9 to 5.6 m/s) */
 +    static int g = GAIT_IDLE;
 +    static unsigned held;
 +    int want = g;
 +    while (want < GAIT_DASH && v > edge[want] + 0.3f) want++;
 +    while (want > GAIT_IDLE && v < edge[want - 1] - 0.3f) want--;
-+    if (want == GAIT_WALK) want = v > edge[0] ? GAIT_RUN : GAIT_IDLE;
 +    if (stopping) want = GAIT_IDLE;
 +    held = want == g ? 0 : held + 1;
 +    if (held >= (want == GAIT_IDLE || g == GAIT_IDLE ? 2u : 12u)) { g = want; held = 0; }
@@ -1631,7 +1629,12 @@ index c05d6c3..73bc8b6 100644
 +#endif
 +        a[0] += ux * step; a[2] += uz * step;
 +    } else lonk_v = 0;
-+    int stopping = !lonk_air && room < lonk_v * lonk_v / (2 * LONK_BRAKE) + 0.02f;   /* braking to a stop (or stopped) */
++    /* braking to a stop (or stopped), but only for a spot that stays put: right behind you on the run he's always within
++       his braking distance, and counted as stopping he slid along after you in his idle pose (Camille) */
++    static float last_target[2];
++    float target_v = hypotf(target[0] - last_target[0], target[2] - last_target[1]) / fmaxf(lonk_dt, 0.001f);
++    last_target[0] = target[0]; last_target[1] = target[2];
++    int stopping = !lonk_air && target_v < 1.0f && room < lonk_v * lonk_v / (2 * LONK_BRAKE) + 0.02f;
 +    /* steering stats, every 10 s: frames he wanted to move, frames he got anywhere, detours, boxed in, stuck, lost */
 +    static unsigned st_want, st_moved, st_frames;
 +    int got_on = hypotf(a[0] - before[0], a[2] - before[1]) > 0.02f;
@@ -1785,16 +1788,37 @@ index c05d6c3..73bc8b6 100644
 +    if (!feet_mode && !(lonk_kind == LONK_BEHIND && entering) && isfinite(a[1]) && fabsf(ground - a[1]) < 30) ground = a[1] + (ground - a[1]) * 0.15f;
 +    for (unsigned i = 0; i < stalker_count; i++) {
 +        float y = ground;
++#if defined(TOTK_GAME_V143)
++        if ((lonk_gait == GAIT_RUN || lonk_gait == GAIT_WALK) && !lonk_air && lonk_body && !lonk_body_emote) {
++            float bob_loop = 0;
++            read_mem(lonk_body + 0x1e0, &bob_loop, sizeof bob_loop);
++            if (isfinite(bob_loop) && bob_loop >= 0 && bob_loop <= 1)
++                y += lonk_bob[0] * (lonk_gait == GAIT_WALK ? 0.5f : 1.0f) * fminf(lonk_speed / LONK_WALK, 1.0f) *
++                     -cosf(4 * 3.14159f * (bob_loop - lonk_bob[1]));
++        }
++#endif
 +        if (lonk_trace && i == 0 && frame % 3 == 0) {   /* where the game has him (before we move him) vs where we put him */
 +            float was[3] = {NAN, NAN, NAN};
 +            read_mem(stalkers[i].actor + ACTOR_POS, was, sizeof was);
-+            float loop = NAN;
++            float loop = NAN, w = NAN, p_loop = NAN, p_rate = NAN;
++            uint32_t switches = 0;
 +#if defined(TOTK_GAME_V143)
-+            if (lonk_body) read_mem(lonk_body + 0x1e0, &loop, 4);
++            if (lonk_body) { read_mem(lonk_body + 0x1e0, &loop, 4); read_mem(lonk_body + 0x184, &w, 4); read_mem(lonk_body + 0xbc, &switches, 4); }
++            /* and your own body's Move slot: its rate and loop, to set his walk by yours */
++            uintptr_t pas = anim_state(player), ptable = pas ? read_ptr(pas + 0x20) : 0;
++            uint32_t pslots = 0;
++            if (pas) read_mem(pas + 0x18, &pslots, 4);
++            for (uint32_t k = 0; k < pslots && k < 4 && ptable; k++) {
++                uintptr_t slot = read_ptr(ptable + k * 0x48);
++                char cmd[16] = {0};
++                if (slot && read_mem(read_ptr(slot + 0x10), cmd, sizeof cmd - 1) && !strcmp(cmd, "Move")) {
++                    read_mem(slot + 0x1e0, &p_loop, 4); read_mem(slot + 0xd0, &p_rate, 4); break;
++                }
++            }
 +#endif
-+            fprintf(stderr, "[survey] trace: f=%llu %s gait=%d v=%.2f want=%.2f anchor=%.2f,%.2f,%.2f actor=%.2f,%.2f,%.2f player=%.2f,%.2f,%.2f loop=%.3f rate=%.2f sw=%x w=%.2f air=%d dt=%.1f/%.1f\n",
++            fprintf(stderr, "[survey] trace: f=%llu %s gait=%d v=%.2f want=%.2f anchor=%.2f,%.2f,%.2f actor=%.2f,%.2f,%.2f player=%.2f,%.2f,%.2f loop=%.3f rate=%.2f sw=%x w=%.2f air=%d dt=%.1f/%.1f you: v=%.2f loop=%.3f rate=%.2f\n",
 +                    (unsigned long long)frame, lonk_names[lonk_kind], lonk_gait, lonk_speed, lonk_v, a[0], ground, a[2], was[0], was[1], was[2], p[0], p[1], p[2], loop, lonk_rate,
-+                    lonk_switches >> 16, lonk_weight, lonk_air, lonk_dt * 1000, lonk_dt_wall * 1000);
++                    switches >> 16, w, lonk_air, lonk_dt * 1000, lonk_dt_wall * 1000, player_speed, p_loop, p_rate);
 +        }
 +#if defined(TOTK_GAME_V143)
 +        if (lonk_trace && i == 0) {   /* raw, every frame, to lonk_trace.bin next to the log: his body animation slot and his model */
@@ -1827,47 +1851,9 @@ index c05d6c3..73bc8b6 100644
 +        }
 +#endif
 +        if (ground_mode == GROUND_PHYSICS) read_mem(stalkers[i].actor + ACTOR_POS + 4, &y, sizeof y);   /* keep its own height */
-+        float back = 0;
-+#if defined(TOTK_GAME_V143)
-+        /* The mod's selector keeps the loop phase when he switches gait, and the new clip fades in over the old one (its
-+           Fade In Frame, 5 at the game's 30 a second: 10 of ours, on an eased curve), so the drift per loop has to fade
-+           with it. That used to be a guess of the fade (it ran a frame early, since the game only switches on its next
-+           update), and a gait switch on the frame his loop wrapped round counted as a restart: it held the old clip's
-+           whole drift (up to 3 m) and faded it out, so stopping out of a sprint now and then snapped him a stride back.
-+           Now it follows the game's own blend: his slot counts its switches (the high half of +0xbc) and has the new
-+           clip's eased weight at +0x184; the old clip keeps playing at its own pace underneath. */
-+        static int shown_gait = -1, blending;
-+        static float from_root, old_loop, old_step, last_loop = -1, last_w = 1;
-+        static uint32_t last_switch;
-+        static unsigned unseen;
-+        float loop = -1, w = 1;
-+        uint32_t switches = 0;
-+        if (lonk_body) { read_mem(lonk_body + 0x1e0, &loop, sizeof loop); read_mem(lonk_body + 0x184, &w, sizeof w); read_mem(lonk_body + 0xbc, &switches, sizeof switches); }
-+        if (!isfinite(loop) || loop < 0 || loop > 1) loop = 0;
-+        if (!(w >= 0 && w <= 1)) w = 1;
-+#define GAIT_ROOT(g) ((g) >= GAIT_WALK && (g) <= GAIT_DASH ? lonk_root[g] : 0.0f)
-+        int switched = (switches >> 16) != (last_switch >> 16) || w < last_w - 0.05f;   /* (idle -> run doesn't count one, but the weight starts over) */
-+        last_switch = switches;
-+        /* a switch the game never shows (the same clip again, a hop between emotes): after a few frames it counts anyway */
-+        unseen = lonk_gait != shown_gait && !switched ? unseen + 1 : 0;
-+        if (switched || unseen > 4) {
-+            from_root = blending ? GAIT_ROOT(shown_gait) * last_w + from_root * (1 - last_w) : GAIT_ROOT(shown_gait);   /* (mid-blend: roughly) */
-+            if (!blending) old_loop = last_loop;
-+            shown_gait = lonk_gait; blending = 1; unseen = 0;
-+        }
-+        if (blending) {
-+            old_loop += old_step;
-+            if (old_loop >= 1) old_loop -= 1;
-+            if (w >= 0.999f) blending = 0;
-+        } else if (loop > last_loop && loop - last_loop < 0.2f) old_step = loop - last_loop;   /* how fast the clip goes */
-+        back = blending ? GAIT_ROOT(shown_gait) * w * loop + from_root * (1 - w) * old_loop : GAIT_ROOT(shown_gait) * loop;
-+        last_loop = loop; last_w = w;
-+        lonk_switches = switches; lonk_weight = w;
-+#undef GAIT_ROOT
-+#endif
-+        float matrix[12] = {hz, 0, hx, a[0] - hx * back,
++        float matrix[12] = {hz, 0, hx, a[0],
 +                            0,  1, 0,  y,
-+                            -hx, 0, hz, a[2] - hz * back};
++                            -hx, 0, hz, a[2]};
 +        survey_force((void *)stalkers[i].actor, matrix, 0);
 +    }
 +    a[1] = ground;
@@ -2043,10 +2029,10 @@ index c05d6c3..73bc8b6 100644
 +        return 1;
 +    }
 +    /* "survey lonk start": the whole Lonk in one line, his body (PouchPlayer, 4 m in front) and the brain for an hour */
-+    float roots[3];
-+    if (!kind && (used = 0, sscanf(line, "survey lonk root %f %f %f %n", &roots[0], &roots[1], &roots[2], &used)) == 3 && used && !line[used]) {
-+        for (int k = 0; k < 3; k++) lonk_root[k + 1] = fminf(fmaxf(roots[k], 0), 10);
-+        fprintf(stderr, "[survey] lonk: root motion per loop walk %.2f run %.2f dash %.2f\n", lonk_root[1], lonk_root[2], lonk_root[3]);
++    float bob[2];
++    if (!kind && (used = 0, sscanf(line, "survey lonk bob %f %f %n", &bob[0], &bob[1], &used)) == 2 && used && !line[used] && isfinite(bob[0]) && isfinite(bob[1])) {
++        lonk_bob[0] = fminf(fmaxf(bob[0], 0), 0.3f); lonk_bob[1] = bob[1] - floorf(bob[1]);
++        fprintf(stderr, "[survey] lonk: his run bounces %.3f m, lowest at loop %.2f (and halfway round)\n", lonk_bob[0], lonk_bob[1]);
 +        return 1;
 +    }
 +    if (!kind && (used = 0, sscanf(line, "survey lonk sheathe %n", &used)) == 0 && used && !line[used]) {
@@ -2108,7 +2094,7 @@ index c05d6c3..73bc8b6 100644
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,15 +2308,78 @@ void runtime_survey_cancel_user(void) {
+@@ -307,15 +2294,78 @@ void runtime_survey_cancel_user(void) {
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
@@ -2187,7 +2173,7 @@ index c05d6c3..73bc8b6 100644
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
      } else if (request.kind == 1) {
-@@ -340,8 +2404,152 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -340,8 +2390,152 @@ void runtime_survey_tick(uint64_t frame) {
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }
