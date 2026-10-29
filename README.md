@@ -94,7 +94,8 @@ That spawns him 4 m in front of you and runs his brain for an hour.
 | `survey lonk outfit <set\|random>` | a whole armor set: `hylian`, `wild`, `zora`, `desert`, `snowquill`, `flamebreaker`, `stealth`, `climbing`, `radiant`, `soldier`, `rubber`, `barbarian`, `royal`, `glide`, `froggy`, `miner`, `ember`, `charged`, `frostbite`, `mystic`, `zonaite`, `awakening`, `depths`, `yiga` |
 | `survey lonk <mood> <frames>` | force a mood: `stalk`, `buddy`, `block`, `behind`, `wander`, `gift`, `flee`, `party`, `fight`, `hide` |
 | `survey lonk hit [gift\|eat\|silly]` | as if you'd swung at him (any reaction, or that one) |
-| `survey lonk emote <name>` | `look`, `lookup`, `eat`, `meal`, `yuck`, `jump`, `sulk`, `surprise` |
+| `survey lonk emote <name>` | `look`, `lookup`, `eat`, `meal` (the same as `eat` now), `yuck`, `jump`, `sulk`, `surprise` |
+| `survey lonk drawat\|putat <0..1>` | when, in his draw / put-away clip, the weapon reaches his hand / his back |
 | `survey lonk goto <right> <forward> [m/s]` | send him somewhere (metres from you) |
 | `survey lonk nobuddy` / `survey lonk buddyok` | he stops / starts picking buddy mode himself (your whistle still calls him) |
 | `survey lonk stop` | stop his brain |
@@ -116,6 +117,7 @@ reload.
   far away and getting nowhere, stuck) for 3 seconds, he pops back next to you.
 - He steers with a knee-high probe: thin things (trees, fences) can still slip through, and anything knee high or lower
   he just walks over.
+- As your twin he only reaches for his weapons standing still; moving, they just switch between his back and his hands.
 - With the mod installed, the inventory Link runs, sprints, celebrates, startles or eats in the pause menu when you hold
   a weapon.
 

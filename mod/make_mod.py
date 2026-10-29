@@ -60,6 +60,14 @@ UPPER = {'Sword': (363, 'Sword_Move_Run_Upper'), 'Lsword': (364, 'Lsword_Move_Ru
 ARMED = {11: (223, [220, 259]), 12: (226, [230, 290])}
 USES = {'EatCookingSkewer': 'DemoLookAround', 'EatTooHard': 'Nml_Wait_Jump', 'Drink': 'Demo_Surprise',
         'UseFairy': 'Demo_Get_Cooking_Bad', 'UseEnergyMaterial': 'DemoLookUp'}
+# Drawing and putting away his weapons: Link's own clips (his hand reaching over his shoulder), played as an emote (so
+# only when he stands: the clips are whole-body for him). UseItem "EatCookingDish" (his meal: the patch eats with the
+# plain clip now) goes to an int selector on HoldAnimationType, which nothing reads during an emote. Values 21 to 25 pick
+# the clip (at 1 to 5 the menu's AI draws his sword), anything else is putting a sword away. The selector is a free one
+# (an idle branch's weapon cases), the clips six free leaves with no frame controllers (bow and sword tired poses).
+EQUIP_USE, EQUIP = 'EatCookingDish', 239
+EQUIP_CLIPS = [(21, 321, 'Equip_Sword_On_Natural'), (22, 322, 'Equip_Lsword_On_Natural'), (23, 324, 'Equip_Spear_On_Natural'),
+               (24, 325, 'Equip_Lsword_Off_Natural'), (25, 333, 'Equip_Spear_Off_Natural'), (None, 334, 'Equip_Sword_Off_Natural')]
 
 
 def romfs_reader(folder):
@@ -168,6 +176,18 @@ def main():
         nodes[second]['Body']['Child Nodes'] = [{'Condition': 'Spear', 'Node Index': UPPER['Spear'][0]},
                                                 {'Default': nodes[second]['Body']['Child Nodes'][1]['Default'], 'Node Index': UPPER['Sword'][0]}]
         entries[case - CASE_SHIFT]['Node Index'] = armed
+    equip = nodes.get(EQUIP, {})
+    cases = equip.get('Body', {}).get('Child Nodes', [])
+    if (equip.get('Node Type') != 'IntSelector' or len(cases) != len(EQUIP_CLIPS) or 'Default' not in cases[-1] or
+            any(nodes[leaf]['Node Type'] != 'SkeletalAnimation' or nodes[leaf]['Body'].get('Frame Controls') for _, leaf, _ in EQUIP_CLIPS)):
+        sys.exit('no free selector and clips for drawing his weapons: not the 1.4.3 ASB?')
+    equip['Body']['Parameter']['Select Flag'] = 'NoSelectOnUpdate'   # (picked when the emote starts)
+    for entry, (value, leaf, clip) in zip(cases, EQUIP_CLIPS):
+        nodes[leaf]['Body']['Animation'] = clip
+        entry['Node Index'] = leaf
+        if value is not None:
+            entry['Condition'] = value
+    next(c for c in use['Body']['Child Nodes'] if c.get('Condition') == EQUIP_USE)['Node Index'] = EQUIP
     AsbFile.from_dict(doc).to_binary(str(work) + '/')
     edited = (work / 'PouchPlayer.root.asb').read_bytes()
 

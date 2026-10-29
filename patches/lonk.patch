@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..95e10d4 100644
+index c05d6c3..93efe51 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -40,7 +40,7 @@ index c05d6c3..95e10d4 100644
  #include <limits.h>
  #include <mach/mach.h>
  #include "mach_vm_compat.h"
-@@ -181,24 +184,146 @@ void runtime_survey_init(Module *m) {
+@@ -181,24 +184,147 @@ void runtime_survey_init(Module *m) {
  int runtime_survey_command(const char *line) { (void)line; return 0; }
  #endif
  #else
@@ -150,6 +150,7 @@ index c05d6c3..95e10d4 100644
 +static KEEP int lonk_goto_set;
 +static KEEP int lonk_emote, lonk_emoted;   /* a one-off emote (its gait: GAIT_LOOK, GAIT_EAT...) he's doing instead of moving, once per mood */
 +static KEEP unsigned lonk_emote_left, lonk_emote_late;   /* frames left; frames it's waited to start (those don't count, up to a second) */
++static KEEP int lonk_air;   /* in the air */
 +/* The walk, run and dash clips carry Link forward by themselves (their Root bone, about 3 m a loop). The mod takes his
 +   Skl_Root and Root from a standing clip (a bone blender over all of PauseMenuWait), so his body stays where he's placed:
 +   undoing the drift in here never quite matched the game's blend, and he snapped at every stop. */
@@ -192,7 +193,7 @@ index c05d6c3..95e10d4 100644
  
  static int read_mem(uintptr_t address, void *out, size_t size) {
      if (!address || address > UINTPTR_MAX - size) return 0;
-@@ -254,6 +379,45 @@ static uintptr_t player_actor(void) {
+@@ -254,6 +380,45 @@ static uintptr_t player_actor(void) {
      }
      return 0;
  }
@@ -238,7 +239,7 @@ index c05d6c3..95e10d4 100644
  void runtime_survey_init(Module *m) {
      const char *enabled = getenv("TOTK_SURVEY");
      if (!enabled || strcmp(enabled, "1")) return;
-@@ -272,6 +436,21 @@ void runtime_survey_init(Module *m) {
+@@ -272,6 +437,21 @@ void runtime_survey_init(Module *m) {
          runtime_fail("survey requires verified game-version forceSetMatrix entry");
      survey_main = (uintptr_t)m->base;
      survey_force = (void (*)(void *, const float *, uint32_t))(m->base + FORCE_MATRIX);
@@ -260,7 +261,7 @@ index c05d6c3..95e10d4 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,22 +461,1954 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,22 +462,1994 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -724,10 +725,11 @@ index c05d6c3..95e10d4 100644
 +   the cold and hot idles at Nml_Move_Walk and Nml_Move_Run, so the temperature becomes his gait. The blackboard is
 +   [as+0x40]; its vtable+0x38 sets a float by name, the way ExecutePouchPlayerSetASBBParameter (0x241cc08) does. */
 +enum { GAIT_IDLE, GAIT_WALK, GAIT_RUN, GAIT_DASH, GAIT_PARTY, GAIT_LOOK, GAIT_SURPRISE, GAIT_EAT, GAIT_MEAL, GAIT_YUCK, GAIT_JUMP,
-+       GAIT_FALL, GAIT_SULK, GAIT_LOOKUP, GAITS };
++       GAIT_FALL, GAIT_SULK, GAIT_LOOKUP, GAIT_EQUIP, GAITS };
 +static const char *const gait_names[GAITS] = {"idle", "walk", "run", "dash", "party", "look around", "surprise", "eat", "meal", "yuck",
-+                                              "jump", "fall", "sulk", "look up"};
++                                              "jump", "fall", "sulk", "look up", "draw"};
 +static int lonk_body_emote;   /* his body slot is playing the UseItem command (an emote, his take-off) */
++static int lonk_equip_clip;   /* the mod's draw/put away clip: 21 sword, 22 two-hander, 23 spear out; 24 two-hander, 25 spear, else sword away */
 +static int lonk_armed;   /* his weapons are out (twin_draw), and what kind: the mod's walk and run carry them (arms) */
 +static char lonk_arm_kind[8] = "Sword";
 +/* You hit him (LONK_MAD): what he does about it once he's stepped back. "survey lonk hit [gift|eat|silly]" picks one. */
@@ -743,7 +745,8 @@ index c05d6c3..95e10d4 100644
 +       Each move clip plays at Link's own rate for it, scaled by his speed. Blackboard setters by name: string +0x28,
 +       int +0x30, float +0x38, bool +0x40. */
 +    /* (the mod's cases sit at 11 to 15: at 1 to 5 the menu's AI took them for a weapon in his hands and drew his sword) */
-+    static const int hold[GAITS] = {0, 11, 12, 13, 14, 0, 0, 0, 0, 0, 15, 15, 0, 0};   /* (an emote: what's under it, the idle; the take-off: the fall after it) */
++    static int hold[GAITS] = {0, 11, 12, 13, 14, 0, 0, 0, 0, 0, 15, 15, 0, 0, 0};   /* (an emote: what's under it, the idle; the take-off: the fall after it) */
++    hold[GAIT_EQUIP] = lonk_equip_clip;   /* drawing or putting away: which clip (the mod's selector under UseItem, 21 to 25) */
 +    /* The emotes and his take-off are the UseItem command, played in his body slot, its string picking the clip (the mod
 +       renamed some: look around, the take-off, a startle, a sulk, look up). They used to go through PauseMenuWait's case
 +       1, where the root's sync (which makes run and sprint flow into each other) started them wherever his loop was: an
@@ -751,7 +754,8 @@ index c05d6c3..95e10d4 100644
 +       wait, started at its end and sat in its last pose. As a command of its own, a clip starts at its first frame at
 +       once (traced: 0.7 of 29 frames), and when it's done the game fades him back to PauseMenuWait by itself (the ASB's
 +       UseItem -> PauseMenuWait transition, 10 frames), which is also how we know it's over. */
-+    static const char *const use_item[GAITS] = {[GAIT_LOOK] = "EatCookingSkewer", [GAIT_EAT] = "EatFood", [GAIT_MEAL] = "EatCookingDish",
++    /* (the meal's "EatCookingDish" is the mod's draw and put away now: a meal eats like a snack) */
++    static const char *const use_item[GAITS] = {[GAIT_LOOK] = "EatCookingSkewer", [GAIT_EAT] = "EatFood", [GAIT_MEAL] = "EatFood", [GAIT_EQUIP] = "EatCookingDish",
 +        [GAIT_YUCK] = "EatBizarre", [GAIT_JUMP] = "EatTooHard", [GAIT_SURPRISE] = "Drink", [GAIT_SULK] = "UseFairy", [GAIT_LOOKUP] = "UseEnergyMaterial"};
 +    struct { const char *name; uint64_t zero; } h_key = {"HoldAnimationType", 0}, u_key = {"UseItem", 0};
 +    int waiting = 0;
@@ -784,6 +788,7 @@ index c05d6c3..95e10d4 100644
 +            /* an emote: a new one starts its own clip (the same one again too: from one emote to the next) */
 +            if (gait != lonk_gait) {
 +                ((void (*)(uintptr_t, const void *, const char *))set_string)(bb, &u_key, use_item[gait]);
++                ((void (*)(uintptr_t, const void *, int))set_int)(bb, &h_key, hold[gait]);   /* (before: the draw clip's pick) */
 +                if (anim_command(actor, "UseItem", body_slot) > 0) emote_cmd = 1;
 +            }
 +        } else if (emote_cmd) {   /* back from an emote before its clip was done (a landing, a mood that can't wait) */
@@ -1104,9 +1109,15 @@ index c05d6c3..95e10d4 100644
 +        fprintf(stderr, "[survey] sheathe: states weapon/bow/shield %u/%u/%u -> %u/%u/%u\n", before[0], before[3], before[4], after[0], after[3], after[4]);
 +    }
 +}
++static void lonk_emote_start(int gait);
++static KEEP float lonk_draw_at = 0.12f, lonk_put_at = 0.15f;   /* how far into the draw clip his hand is on the hilt, into the put away clip it lets go (its loop, 0 to 1): "survey lonk drawat|putat <x>" */
 +/* Twins draw together: your sword or shield out, his come out too, and go away when yours do. The menu's own "draw",
 +   0x4f5700(eu, link) (state byte eu+0x4620+link 2), and "put away", 0x4f5194(eu, link, 0), on the weapon (0) and the
-+   shield (4); is one drawn: 0x3e322c(eu, link). Each frame, whichever of his doesn't match yours. */
++   shield (4); is one drawn: 0x3e322c(eu, link). Each frame, whichever of his doesn't match yours. Standing, he reaches
++   for them like Link (the mod's draw/put away clips, an emote): drawn once his hand is over his shoulder (Link's own
++   tree has its WeaponDrawn event at frame 0, but there the clip starts further in: at its frame 0, Camille saw the sword
++   jump into his hand before he reached for it), put away 15% in (Link's WeaponHold event is at frame 4 of 14: a bit late, Camille); moving, they just switch (the clips
++   are his whole body: his legs would stop). */
 +static void twin_draw(uintptr_t player) {
 +    static const uint32_t w_draw[] = {0xd102c3ff, 0xa9067bfd, 0xa90767fa, 0xa9085ff8, 0xa90957f6, 0xa90a4ff4};
 +    static const uint32_t w_drawn[] = {0xd101c3ff, 0xa9017bfd, 0xf90013fb, 0xa90367fa, 0xa9045ff8, 0xa90557f6};
@@ -1116,11 +1127,17 @@ index c05d6c3..95e10d4 100644
 +    bool (*drawn)(uintptr_t, uint32_t) = (bool (*)(uintptr_t, uint32_t))game_fn(0x3e322c, w_drawn, 6);
 +    uintptr_t pe = pouch_eu(player);
 +    if (!draw || !sheathe || !drawn || !pe) return;
-+    static int was;
++    static int was, reaching, fresh;   /* reaching: 1 drawing, 2 putting away (his clip is on its way); fresh: it's started over */
++    static unsigned settle;   /* frames he's had to stop in (you'd stopped walking, he was still braking: they just switched) */
 +    int yours = drawn(pe, 0) || drawn(pe, 4);
 +    lonk_armed = yours;
 +    if (yours != was) fprintf(stderr, "[survey] twins: you %s your weapons, so does he\n", yours ? "draw" : "put away");
 +    was = yours;
++    int clip_on = lonk_emote == GAIT_EQUIP && lonk_emote_left, playing = clip_on && lonk_gait == GAIT_EQUIP;
++    float loop = 0;
++    if (playing && lonk_body) read_mem(lonk_body + 0x1e0, &loop, sizeof loop);
++    if (reaching && (!clip_on || (reaching == 1) != yours)) reaching = 0;   /* cut short, or you changed your mind: they just switch */
++    if (playing && loop < 0.15f) fresh = 1;   /* (the slot shows the last clip's loop for a frame or two) */
 +    for (unsigned i = 0; i < stalker_count; i++) {
 +        if (strcmp(stalkers[i].name, "PouchPlayer")) continue;
 +        uintptr_t eu = pouch_eu(stalkers[i].actor);
@@ -1128,6 +1145,23 @@ index c05d6c3..95e10d4 100644
 +        char weapon[64];
 +        eu_link_name(eu, 0, weapon);
 +        snprintf(lonk_arm_kind, sizeof lonk_arm_kind, "%s", !strncmp(weapon, "Weapon_Lsword", 13) ? "Lsword" : !strncmp(weapon, "Weapon_Spear", 12) ? "Spear" : "Sword");
++        int his = drawn(eu, 0) || drawn(eu, 4);
++        /* (or still in his draw clip: it takes a second, and you'd put yours away before it was over, and his just went) */
++        int busy = lonk_emote_left && lonk_emote != GAIT_EQUIP;
++        int can = !lonk_air && !busy && (lonk_gait == GAIT_IDLE || lonk_gait == GAIT_EQUIP) && lonk_v < 0.3f;
++        settle = his == yours || can ? 0 : settle + lonk_ticks;
++        if (his != yours && !reaching && !can && settle < 30 && lonk_v < 1.5f) continue;   /* half a second to come to a stop (still walking, it just switches) */
++        if (his != yours && !reaching && can) {
++            int kind = !strcmp(lonk_arm_kind, "Lsword") ? 1 : !strcmp(lonk_arm_kind, "Spear") ? 2 : 0;
++            lonk_equip_clip = yours ? 21 + kind : kind ? 23 + kind : 26;
++            lonk_emote_start(GAIT_EQUIP);
++            if (lonk_gait == GAIT_EQUIP) lonk_gait = -1;   /* from one of these clips to the other: pouch_gait starts it over */
++            reaching = yours ? 1 : 2; fresh = 0;
++            fprintf(stderr, "[survey] twins: he reaches for his %s (%s)\n", lonk_arm_kind, yours ? "draw" : "put away");
++        }
++        if (reaching == 1 && (!playing || !fresh || loop < lonk_draw_at)) continue;
++        if (reaching == 2 && (!playing || !fresh || loop < lonk_put_at)) continue;
++        reaching = 0;
 +        for (unsigned k = 0; k < 2; k++) {
 +            uint32_t link = k ? 4 : 0;
 +            if (yours && !drawn(eu, link)) draw(eu, link);
@@ -1207,8 +1241,7 @@ index c05d6c3..95e10d4 100644
 +    return 1;
 +}
 +static float lonk_jump;   /* a jump waiting for its clip to start (its upward speed, m/s); then his feet leave the ground */
-+/* in the air (Camille's rule): he keeps the way and speed he took off with and forgets about you till he lands */
-+static KEEP int lonk_air;
++/* in the air (Camille's rule): he keeps the way and speed he took off with and forgets about you till he lands (lonk_air, above) */
 +static KEEP unsigned lonk_falling;   /* frames he's been coming down (a jump past its top, or off a ledge) */
 +static KEEP float lonk_air_vel[2];   /* m/s, sideways */
 +static float lonk_buddy_side = 1;   /* which side of you he walks on in buddy mode (1 right, -1 left) */
@@ -1242,7 +1275,7 @@ index c05d6c3..95e10d4 100644
 +    /* (in 60ths of a second; the clip's own end usually comes first now: these are in case it never does, except the
 +       party, which holds its last pose till this runs out, and the jump, which ends when he lands) */
 +    static const unsigned frames[GAITS] = {[GAIT_LOOK] = 480, [GAIT_SURPRISE] = 480, [GAIT_EAT] = 480, [GAIT_MEAL] = 480, [GAIT_YUCK] = 480,
-+                                           [GAIT_JUMP] = 120, [GAIT_SULK] = 600, [GAIT_LOOKUP] = 480, [GAIT_PARTY] = 150};
++                                           [GAIT_JUMP] = 120, [GAIT_SULK] = 600, [GAIT_LOOKUP] = 480, [GAIT_PARTY] = 150, [GAIT_EQUIP] = 90};
 +    if (lonk_air && gait != GAIT_JUMP) return;   /* in the air he's busy (a mood change used to start one mid-jump) */
 +    lonk_emote = gait; lonk_emote_left = frames[gait] ? frames[gait] : 120; lonk_emote_late = 0;
 +    fprintf(stderr, "[survey] lonk: emote %s\n", gait_names[gait]);
@@ -2066,7 +2099,15 @@ index c05d6c3..95e10d4 100644
 +        pthread_mutex_unlock(&survey_lock);
 +        return 1;
 +    }
-+    /* "survey lonk hit [gift|fight|silly]": as if you'd swung at him (any of the three, or that one) */
++    float draw_at;   /* "survey lonk drawat|putat <0..1>": when, in his draw / put away clip, the weapon gets to his hand / his back */
++    char which[8];
++    if (!kind && (used = 0, sscanf(line, "survey lonk %7[a-z] %f %n", which, &draw_at, &used)) == 2 && used && !line[used] && draw_at >= 0 && draw_at <= 1 &&
++        (!strcmp(which, "drawat") || !strcmp(which, "putat"))) {
++        *(which[0] == 'd' ? &lonk_draw_at : &lonk_put_at) = draw_at;
++        fprintf(stderr, "[survey] lonk: %s %.2f of the clip\n", which, draw_at);
++        return 1;
++    }
++    /* "survey lonk hit [gift|eat|silly]": as if you'd swung at him (any of the three, or that one) */
 +    char mad[16] = "";
 +    int hit = (used = 0, sscanf(line, "survey lonk hit %n", &used)) == 0 && used && !line[used];
 +    if (!kind && (hit || ((used = 0, sscanf(line, "survey lonk hit %15[a-z] %n", mad, &used)) == 1 && used && !line[used]))) {
@@ -2218,7 +2259,7 @@ index c05d6c3..95e10d4 100644
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,15 +2418,79 @@ void runtime_survey_cancel_user(void) {
+@@ -307,15 +2459,79 @@ void runtime_survey_cancel_user(void) {
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
@@ -2298,7 +2339,7 @@ index c05d6c3..95e10d4 100644
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
      } else if (request.kind == 1) {
-@@ -340,8 +2515,152 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -340,8 +2556,152 @@ void runtime_survey_tick(uint64_t frame) {
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }

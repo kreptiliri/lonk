@@ -117,7 +117,7 @@ More emotes than slots: the selector only has cases 1 to 5, and adding cases cra
 full-body command, `UseItem`: a selector on the blackboard *string* `UseItem` (eat food, eat a meal, eat a skewer, eat
 something gross, drink, use a fairy...), one clip each. The menu's AI never writes that string (it writes `Arrow`,
 through the setter at vtable `+0x28`), so the patch picks his emote with it: three eating clips stay as they are (a
-bite, a meal, a gross one), and five get renamed: `DemoLookAround` (his look around), `DemoLookUp`, `Nml_Wait_Jump` (his
+bite, a meal, a gross one; the meal is his weapon draw now, below), and five get renamed: `DemoLookAround` (his look around), `DemoLookUp`, `Nml_Wait_Jump` (his
 take-off), `Demo_Get_Cooking_Bad` (a sulk) and `Demo_Surprise` (his startle). For an emote the patch starts the
 `UseItem` command in his body's slot (the request names the slot: `0x4dc628` writes the rate to
 `[as+0x20] + slot x 0x48 + 0xd0` and starts the command there). A command of its own starts at its first frame at once
@@ -216,8 +216,19 @@ run method `0x2507a80`: with nothing held it calls `0x4f5194(eu, link, 0)` on th
 
 As your twin he draws when you draw and puts them away when you do: each frame, his weapon (0) and shield (4) follow
 yours, through the game's own draw `0x4f5700(eu, link)` and put-away `0x4f5194(eu, link, 0)`, checked with
-`0x3e322c(eu, link)` (is it drawn). Not yet: the reach for his back (Link plays a draw and a sheathe animation; his just
-move), and fused weapons (he carries the plain one).
+`0x3e322c(eu, link)` (is it drawn). Not yet: fused weapons (he carries the plain one).
+
+Standing, he reaches for them like Link: Link's own `Equip_Sword_On_Natural` / `Equip_Sword_Off_Natural` (and the
+`Lsword` and `Spear` ones) as an emote. The `UseItem` value `EatCookingDish` (his meal, which now eats like a snack)
+goes to a free int selector (an idle branch's weapon cases) on `HoldAnimationType`, which nothing reads during an emote;
+21 to 23 draw a sword, two-hander or spear, 24 and 25 put away a two-hander or spear, anything else a sword (1 to 5
+would have the menu's AI draw his sword). The clips are six free leaves with no frame controllers. The weapon switches
+partway in: 12% into the draw clip (Link's tree has its `WeaponDrawn` event at frame 0, but there the clip starts
+further in; at frame 0 Camille saw the sword jump into his hand before he reached for it) and 15% into the put-away
+(Link's `WeaponHold` event is at frame 4 of 14; Camille found that a bit late). Both are Camille's eye, a few frames
+at a time; `survey lonk drawat|putat <0..1>` changes them live. The clip takes about a second: putting away before
+it's over cuts into it. If he's braking when you change, he gets half a second to stop. Moving, his weapons still just
+switch (Camille's call): the clips are his whole body, so his legs would stop.
 
 Weapons out, he walks and runs like you do with them out: Link's tree lays the weapon's `_Upper` run clip
 (`Sword_Move_Run_Upper`, `Lsword_...`, `Spear_...`) over his run's arms. Lonk's walk and run cases go through a bool
