@@ -93,6 +93,12 @@ blender only reachable from an idle branch's weapon cases 2 and 3, which the idl
 sprint, straight from the root), with 340's settings copied over. Traced: his jump is 0.65 m and 0.38 s, yours 0.63 m
 and 0.40 s.
 
+With that blender over `UseItem`, the game stopped ending his emotes: it fades him back to `PauseMenuWait` when the
+command's clip is done, and the blender's standing side is a loop that never ends. He held each emote's last pose until
+a backup timer ran out (a startle: 0.7 s of clip, 5.5 s in all). Now an emote also ends when its clip has sat at its
+last frame (loop position 1) for two frames. And shoved in the middle of one, he lets it go and steps out of your way,
+instead of sliding along in its pose.
+
 `Root` also carries the run's bounce, so without it he ran level, "pressed". The patch puts the bounce back: twice a
 stride on his loop, 4 cm (Camille, by eye), less on the walk; the sprint keeps its own in other bones. `survey lonk bob
 <metres> <phase>` changes it while playing.

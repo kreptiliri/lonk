@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..2fef8f1 100644
+index c05d6c3..a19f1ab 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -260,7 +260,7 @@ index c05d6c3..2fef8f1 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,22 +461,1877 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,22 +461,1890 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -1593,9 +1593,16 @@ index c05d6c3..2fef8f1 100644
 +        /* its clip is done when the game has faded him back to PauseMenuWait (not the take-off: that one ends when he
 +           lands); before, he held the clip's last pose until the timer ran out (look around: a second of clip, three of
 +           standing there) */
-+        static unsigned back_frames;
++        static unsigned back_frames, end_frames;
 +        back_frames = lonk_gait == lonk_emote && lonk_emote != GAIT_JUMP && lonk_emote != GAIT_PARTY && !lonk_body_emote ? back_frames + 1 : 0;
 +        if (back_frames >= 2 && lonk_emote_left > 1) lonk_emote_left = 1;
++        /* or when its clip sits at its last frame: since the mod's bone blender is over UseItem too, its other side (a
++           standing loop) never ends, so the game never fades him back by itself, and he held the last pose (a startle:
++           0.7 s of clip, 5.5 s of standing there; Camille: "he does that for too long") */
++        float emote_loop = 0;
++        if (lonk_body_emote && lonk_body) read_mem(lonk_body + 0x1e0, &emote_loop, sizeof emote_loop);
++        end_frames = lonk_gait == lonk_emote && lonk_emote != GAIT_JUMP && lonk_emote != GAIT_PARTY && lonk_body_emote && emote_loop >= 0.999f ? end_frames + 1 : 0;
++        if (end_frames >= 2 && lonk_emote_left > 1) lonk_emote_left = 1;
 +        if (playing && lonk_ticks && !(lonk_emote_left = tick_down(lonk_emote_left))) {
 +            lonk_jump = 0;   /* a jump that never took off doesn't go off later */
 +            if (lonk_jump_aimed) {   /* a ledge jump: made it, or one more failed try (two, and he pops over to you) */
@@ -1741,7 +1748,13 @@ index c05d6c3..2fef8f1 100644
 +#if defined(TOTK_GAME_V143)
 +        if (ground_mode == GROUND_TERRAIN && isfinite(a[1])) pushable = !way_blocked(a, ox / od, oz / od);   /* not into a wall or off a ledge */
 +#endif
-+        if (pushable) { a[0] = p[0] + ox / od * 1.1f; a[2] = p[2] + oz / od * 1.1f; pushed_left = 10; }
++        if (pushable) {
++            float shove = 1.1f - od;
++            a[0] = p[0] + ox / od * 1.1f; a[2] = p[2] + oz / od * 1.1f; pushed_left = 10;
++            /* shoved in the middle of an emote, he lets it go and steps out of your way, instead of sliding along in its
++               pose (Camille: you could push him around frozen in his startle) */
++            if (shove > 0.02f && lonk_emote_left > 1 && lonk_emote != GAIT_JUMP) lonk_emote_left = 1;
++        }
 +    }
 +    /* his speed (m/s, smoothed; a teleport counts as standing still) picks the gait, and moving he faces where he goes */
 +    static float lonk_speed;
@@ -2141,7 +2154,7 @@ index c05d6c3..2fef8f1 100644
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,15 +2341,79 @@ void runtime_survey_cancel_user(void) {
+@@ -307,15 +2354,79 @@ void runtime_survey_cancel_user(void) {
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
@@ -2221,7 +2234,7 @@ index c05d6c3..2fef8f1 100644
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
      } else if (request.kind == 1) {
-@@ -340,8 +2438,152 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -340,8 +2451,152 @@ void runtime_survey_tick(uint64_t frame) {
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }
