@@ -208,6 +208,11 @@ and the patch adds the 10: they stay on his back. (The menu's own sheathe is `On
 run method `0x2507a80`: with nothing held it calls `0x4f5194(eu, link, 0)` on the weapon (0), the shield (4) and the bow
 (3); `survey lonk sheathe` does the same: it changed their states, not where his sword was.)
 
+As your twin he draws when you draw and puts them away when you do: each frame, his weapon (0) and shield (4) follow
+yours, through the game's own draw `0x4f5700(eu, link)` and put-away `0x4f5194(eu, link, 0)`, checked with
+`0x3e322c(eu, link)` (is it drawn). Not yet: the reach for his back (Link plays a draw and a sheathe animation; his just
+move), the lower arm swing of Link's walk and run with weapons out, and fused weapons (he carries the plain one).
+
 `survey drop` takes pieces off him. There's no delete call yet, so each one gets view mask 0 (`0x50138c`) and is
 moved 50 m underground.
 
