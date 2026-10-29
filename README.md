@@ -110,8 +110,8 @@ reload.
 
 ## Known issues
 
-- He may still hitch a little as he runs (the run carries him forward by itself, and the amount it's undone by is tuned
-  by eye). Switching between run and sprint keeps his stride now, so that snip should be gone.
+- His sword and shield come out in his hands (drawn) instead of on his back.
+- His ponytail doesn't sway as he moves (it does on you).
 - He can't climb or swim: walls and ledges over 7 m he walks around, and if he gets stranded (far above or below you,
   far away and getting nowhere, stuck) for 3 seconds, he pops back next to you.
 - He steers with a knee-high probe: thin things (trees, fences) can still slip through, and anything knee high or lower

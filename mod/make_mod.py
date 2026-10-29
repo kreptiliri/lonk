@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""Builds Lonk's RomFS mod from your own game files: his run, sprint and his emotes.
+"""Builds Lonk's RomFS mod from your own game files: his walk, run, sprint and his emotes.
 
 The inventory Link (PouchPlayer) has one full-body animation command, the pause menu's PauseMenuWait. Its tree starts
 with a selector on the ASB blackboard int "HoldAnimationType" (the weapon he holds in the menu): 1 to 5 go to the weapon
-poses, anything else to the plain idle. The game never writes that int itself, unlike "Temperature" and "Stamina", which
-the menu's AI sets every frame from where you are (so using those, he fought the game for his walk, and his clip kept
-restarting). This mod points cases 2 to 5 at four of the menu's weapon-equip clips, renamed to Link's run, sprint, the
-cooking "great meal" celebration (his party) and a startle, and case 1 at the UseItem command's eating tree, where the
-blackboard string "UseItem" picks one of eight more emotes. The patch sets the int (and the string).
-Adding new commands or nodes to the ASB crashes the game, so nothing else changes. (Side effect: with the mod installed,
-the inventory Link runs, sprints, celebrates, startles or eats when you hold a weapon in the menu.)
+poses, anything else to the plain idle. This mod points cases 1 to 5 at five of the menu's weapon-equip clips, renamed
+to Link's walk, run, sprint, the cooking "great meal" celebration (his party) and his fall; the patch sets the int every
+frame (the game writes it too). His emotes are PouchPlayer's second full-body command, UseItem: a selector on the
+blackboard string "UseItem" picks one of eight. And a bone blender over all of PauseMenuWait keeps the clips from
+carrying him around (below). Adding new commands or nodes to the ASB crashes the game, so it only reuses what's there.
+(Side effect: with the mod installed, the inventory Link walks, runs, sprints, celebrates or falls when you hold a
+weapon in the menu.)
 
 Nothing from the game is in this repo. The script reads AS/PouchPlayer.root.asb.zs and the zstd dictionaries from the RomFS
 that MacNativeGames prepared (extracted/v143/romfs: romfs.bin + index.json), edits it with dt-12345's ASB tool, and writes
@@ -30,12 +30,19 @@ ASB = 'AS/PouchPlayer.root.asb.zs'
 ROOT = 205   # PauseMenuWait's first node: the HoldAnimationType selector
 # HoldAnimationType -> (the weapon-equip clip whose node gets reused, what it plays now). Only reachable from the root's
 # cases 1 to 5, never from the plain idle.
-CASES = {2: ('PauseMenu_Equip_Lsword', 'Nml_Move_Run'), 3: ('PauseMenu_Equip_Spear', 'Nml_Move_Dash'),
+CASES = {1: ('PauseMenu_Equip_Sword', 'Nml_Move_Walk'), 2: ('PauseMenu_Equip_Lsword', 'Nml_Move_Run'), 3: ('PauseMenu_Equip_Spear', 'Nml_Move_Dash'),
          4: ('PauseMenu_Equip_SwordNoShield', 'Demo_Get_Cooking_VeryGood'), 5: ('PauseMenu_Equip_Shield', 'Fall_Loop')}
-# Case 1 (the walk, which he doesn't use) leads to the UseItem command's tree instead: a selector on the blackboard
-# string "UseItem", which the menu's AI never writes, so the patch picks his emote with it. Three of its eating clips stay
-# (one-handed, a meal, a bad one), and five get renamed (the drink became his startle) (UseItem value -> what it plays now).
+# The UseItem command's tree: a selector on the blackboard string "UseItem", which the menu's AI never writes, so the patch
+# picks his emote with it. Three of its eating clips stay (one-handed, a meal, a bad one), and five get renamed (the drink
+# became his startle) (UseItem value -> what it plays now).
 USE_ITEM = 202
+# The run and sprint clips carry him forward by themselves (their top bone, Skl_Root, travels about 3 m a stride), while
+# the patch places him by code: undoing that drift at every stop and switch never quite matched the game's own blend, and
+# he snapped. So his whole PauseMenuWait goes through a bone blender that takes Skl_Root from a standing clip and the rest
+# from his tree, the way Link's own tree uses its Skl_Root bone group (Skl_Root and Root: the drift is in Root). Node 340 is the one free blender (an unused bow
+# pose, [arms' clip, body's clip]); its group becomes Lift (only for carrying things), weighted on Skl_Root and Root
+# alone (Skl_Root alone left the drift in).
+STILL = 340
 USES = {'EatCookingSkewer': 'DemoLookAround', 'EatTooHard': 'Nml_Wait_Jump', 'Drink': 'Demo_Surprise',
         'UseFairy': 'Demo_Get_Cooking_Bad', 'UseEnergyMaterial': 'DemoLookUp'}
 
@@ -108,7 +115,17 @@ def main():
         if leaf['Node Type'] != 'SkeletalAnimation':
             sys.exit(f'UseItem {value} is not a single clip: not the 1.4.3 ASB?')
         leaf['Body']['Animation'] = now
-    entries[1]['Node Index'] = USE_ITEM
+    still = nodes.get(STILL, {})
+    lift = next((g for g in doc['Bone Groups'] if g['Name'] == 'Lift'), None)
+    standing = nodes.get(still.get('Body', {}).get('Child Nodes', [None, None])[1], {})
+    if still.get('Node Type') != 'BoneBlender' or lift is None or standing.get('Body', {}).get('Animation') != 'Nml_Wait':
+        sys.exit('no free bone blender over a standing clip: not the 1.4.3 ASB?')
+    lift['Unknown'] = 0   # bones it doesn't list: from his tree (it was 1: his arms took the standing pose, a Naruto run)
+    for bone in lift['Bones']:
+        bone['Unknown'] = 1.0 if bone['Name'] in ('Skl_Root', 'Root') else 0.0
+    still['Body']['Bone Group Name'] = 'Lift'
+    still['Body']['Child Nodes'] = [standing['Node Index'], ROOT]
+    next(c for c in doc['Commands'] if c['Name'] == 'PauseMenuWait')['Node Index'] = STILL
     AsbFile.from_dict(doc).to_binary(str(work) + '/')
     edited = (work / 'PouchPlayer.root.asb').read_bytes()
 
