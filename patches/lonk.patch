@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..9673ee8 100644
+index c05d6c3..2fef8f1 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -40,7 +40,7 @@ index c05d6c3..9673ee8 100644
  #include <limits.h>
  #include <mach/mach.h>
  #include "mach_vm_compat.h"
-@@ -181,24 +184,145 @@ void runtime_survey_init(Module *m) {
+@@ -181,24 +184,146 @@ void runtime_survey_init(Module *m) {
  int runtime_survey_command(const char *line) { (void)line; return 0; }
  #endif
  #else
@@ -156,7 +156,8 @@ index c05d6c3..9673ee8 100644
 +static KEEP float lonk_rate;   /* the clip rate last set on his body */
 +/* His run's bounce went with the drift (both are the Root bone, which the mod takes from a standing clip): he ran level,
 +   "pressed", Camille said. So it's put back here, twice a stride (each step) on his loop: metres up and down, and where
-+   in the loop he's lowest. "survey lonk bob <metres> <phase>" while playing. The sprint keeps its own (in other bones). */
++   in the loop he's lowest. "survey lonk bob <metres> <phase>" while playing. The sprint keeps its own (in other bones).
++   Weapons out, a quarter more: the weapon's run clip has less bounce of its own than the run (Camille: lower). */
 +static KEEP float lonk_bob[2] = {0.04f, 0.0f};   /* 4 cm: Camille, by eye ("PERFECT") */
 +static KEEP uintptr_t lonk_body;   /* his body's animation slot (the one playing PauseMenuWait), found by pouch_gait */
 +static KEEP int lonk_trace;   /* "survey lonk trace": his and the player's positions every 3 frames */
@@ -191,7 +192,7 @@ index c05d6c3..9673ee8 100644
  
  static int read_mem(uintptr_t address, void *out, size_t size) {
      if (!address || address > UINTPTR_MAX - size) return 0;
-@@ -254,6 +378,45 @@ static uintptr_t player_actor(void) {
+@@ -254,6 +379,45 @@ static uintptr_t player_actor(void) {
      }
      return 0;
  }
@@ -237,7 +238,7 @@ index c05d6c3..9673ee8 100644
  void runtime_survey_init(Module *m) {
      const char *enabled = getenv("TOTK_SURVEY");
      if (!enabled || strcmp(enabled, "1")) return;
-@@ -272,6 +435,21 @@ void runtime_survey_init(Module *m) {
+@@ -272,6 +436,21 @@ void runtime_survey_init(Module *m) {
          runtime_fail("survey requires verified game-version forceSetMatrix entry");
      survey_main = (uintptr_t)m->base;
      survey_force = (void (*)(void *, const float *, uint32_t))(m->base + FORCE_MATRIX);
@@ -259,7 +260,7 @@ index c05d6c3..9673ee8 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,22 +460,1866 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,22 +461,1877 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -727,6 +728,8 @@ index c05d6c3..9673ee8 100644
 +static const char *const gait_names[GAITS] = {"idle", "walk", "run", "dash", "party", "look around", "surprise", "eat", "meal", "yuck",
 +                                              "jump", "fall", "sulk", "look up"};
 +static int lonk_body_emote;   /* his body slot is playing the UseItem command (an emote, his take-off) */
++static int lonk_armed;   /* his weapons are out (twin_draw), and what kind: the mod's walk and run carry them (arms) */
++static char lonk_arm_kind[8] = "Sword";
 +static void pouch_gait(int gait, float speed) {
 +    /* PauseMenuWait starts with a selector on the int HoldAnimationType; the mod points its cases 2 to 5 at the run, sprint,
 +       the cooking "great meal" celebration (his party) and his fall; 0 is the plain idle, which shivers, sweats or pants by
@@ -796,6 +799,11 @@ index c05d6c3..9673ee8 100644
 +            }
 +        }
 +        if (!waiting) ((void (*)(uintptr_t, const void *, int))set_int)(bb, &h_key, hold[gait]);
++        /* weapons out: the mod's walk and run play the weapon's arms (a bool selector on IsAttachedWeapon, then its kind in
++           the string "Arrow", which the menu only uses for the bow) */
++        struct { const char *name; uint64_t zero; } a_key = {"IsAttachedWeapon", 0}, k_key = {"Arrow", 0};
++        ((void (*)(uintptr_t, const void *, bool))set_bool)(bb, &a_key, lonk_armed != 0);
++        ((void (*)(uintptr_t, const void *, const char *))set_string)(bb, &k_key, lonk_arm_kind);
 +        if (gait != lonk_gait && !waiting) fprintf(stderr, "[survey] gait: %s\n", gait_names[gait]);
 +        /* the rate Link's own tree plays them at (its frame controllers: walk 0.9, run 1.5, sprint 1.75), scaled by how fast he goes
 +           against Link's own speeds; matching his steps to the ground instead came out at 1.1 to 1.2, which looked a bit
@@ -1106,12 +1114,16 @@ index c05d6c3..9673ee8 100644
 +    if (!draw || !sheathe || !drawn || !pe) return;
 +    static int was;
 +    int yours = drawn(pe, 0) || drawn(pe, 4);
++    lonk_armed = yours;
 +    if (yours != was) fprintf(stderr, "[survey] twins: you %s your weapons, so does he\n", yours ? "draw" : "put away");
 +    was = yours;
 +    for (unsigned i = 0; i < stalker_count; i++) {
 +        if (strcmp(stalkers[i].name, "PouchPlayer")) continue;
 +        uintptr_t eu = pouch_eu(stalkers[i].actor);
 +        if (!eu) continue;
++        char weapon[64];
++        eu_link_name(eu, 0, weapon);
++        snprintf(lonk_arm_kind, sizeof lonk_arm_kind, "%s", !strncmp(weapon, "Weapon_Lsword", 13) ? "Lsword" : !strncmp(weapon, "Weapon_Spear", 12) ? "Spear" : "Sword");
 +        for (unsigned k = 0; k < 2; k++) {
 +            uint32_t link = k ? 4 : 0;
 +            if (yours && !drawn(eu, link)) draw(eu, link);
@@ -1821,7 +1833,7 @@ index c05d6c3..9673ee8 100644
 +            float bob_loop = 0;
 +            read_mem(lonk_body + 0x1e0, &bob_loop, sizeof bob_loop);
 +            if (isfinite(bob_loop) && bob_loop >= 0 && bob_loop <= 1)
-+                y += lonk_bob[0] * (lonk_gait == GAIT_WALK ? 0.5f : 1.0f) * fminf(lonk_speed / LONK_WALK, 1.0f) *
++                y += lonk_bob[0] * (lonk_gait == GAIT_WALK ? 0.5f : 1.0f) * (lonk_armed ? 1.25f : 1.0f) * fminf(lonk_speed / LONK_WALK, 1.0f) *
 +                     -cosf(4 * 3.14159f * (bob_loop - lonk_bob[1]));
 +        }
 +#endif
@@ -2129,7 +2141,7 @@ index c05d6c3..9673ee8 100644
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,15 +2329,79 @@ void runtime_survey_cancel_user(void) {
+@@ -307,15 +2341,79 @@ void runtime_survey_cancel_user(void) {
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
@@ -2209,7 +2221,7 @@ index c05d6c3..9673ee8 100644
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
      } else if (request.kind == 1) {
-@@ -340,8 +2426,152 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -340,8 +2438,152 @@ void runtime_survey_tick(uint64_t frame) {
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }
