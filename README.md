@@ -90,7 +90,7 @@ That spawns him 4 m in front of you and runs his brain for an hour.
 | Command | |
 |---|---|
 | `survey lonk start` | spawn him and start his brain |
-| `survey lonk twin` / `survey lonk naked` | dress him like you (and follow your changes) / back to his underwear |
+| `survey lonk twin` / `survey lonk naked` | dress him like you (and follow your changes, fused weapons included) / back to his underwear |
 | `survey lonk outfit <set\|random>` | a whole armor set: `hylian`, `wild`, `zora`, `desert`, `snowquill`, `flamebreaker`, `stealth`, `climbing`, `radiant`, `soldier`, `rubber`, `barbarian`, `royal`, `glide`, `froggy`, `miner`, `ember`, `charged`, `frostbite`, `mystic`, `zonaite`, `awakening`, `depths`, `yiga` |
 | `survey lonk <mood> <frames>` | force a mood: `stalk`, `buddy`, `block`, `behind`, `wander`, `gift`, `flee`, `party`, `fight`, `hide` |
 | `survey lonk hit [gift\|eat\|silly]` | as if you'd swung at him (any reaction, or that one) |
@@ -119,7 +119,8 @@ reload.
 - He steers with a knee-high probe: thin things (trees, fences) can still slip through, and anything knee high or lower
   he just walks over.
 - As your twin he only reaches for his weapons standing still; moving, they just switch between his back and his hands.
-- As your twin he carries your weapon without its fused part.
+- As your twin he holds a two-hander in one hand when he stands still (his tree has no two-handed idle; it looks tough, so
+  it stays), and he doesn't copy a shield-only guard.
 - With the mod installed, the inventory Link runs, sprints, celebrates, startles or eats in the pause menu when you hold
   a weapon.
 

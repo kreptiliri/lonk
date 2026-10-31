@@ -216,7 +216,31 @@ run method `0x2507a80`: with nothing held it calls `0x4f5194(eu, link, 0)` on th
 
 As your twin he draws when you draw and puts them away when you do: each frame, his weapon (0) and shield (4) follow
 yours, through the game's own draw `0x4f5700(eu, link)` and put-away `0x4f5194(eu, link, 0)`, checked with
-`0x3e322c(eu, link)` (is it drawn). Not yet: fused weapons (he carries the plain one).
+`0x3e322c(eu, link)` (is it drawn). Your weapon decides: a shield alone in your hand is your guard (holding ZL with
+everything on your back), and he has no pose for it (he reached for "the air" over his shoulder and held his shield at
+his side), so he ignores it; his shield only comes out with his weapon, and only if yours is out (with a two-hander
+yours stays on your back, so his does too). Standing with a two-hander out he holds it in one hand (his tree has no
+two-handed idle): I like it, it stays.
+
+Fused weapons: the equip with an empty name already reads your fuse from the pouch (`0x1b7c3f4` sets
+`Equipment_Attachment` and `Equipment_AttachmentLife` on the new weapon), and his weapon makes its part and holds it on
+the blade. But the part's model stays in the menu's scene like all his pieces, and it isn't one of his equipment user's
+links, and his weapon doesn't point at it. What finds it: every actor sits in one tree sorted by a creation number
+(the node at `actor+0x390`: two children, the parent with flag bits, the number in the low 32 bits of `+0x3a8`), and a
+weapon makes its part just after itself (your sword d86c, its rock d86d; his d86f, d870). When all three are made at
+once the parts come after all three, so the patch takes the actors numbered up to 8 after his weapon, bow or shield,
+within 3 m of it (a spear's part sits 2.3 m from its grip), not his own pieces, still in the menu's scene, and moves
+them into the world each frame. Read only (the tree walk never calls the game). Tested: rock, horns, monster parts,
+on swords, spears, two-handers and shields.
+
+Fusing keeps a weapon's name, so the twins watcher also compares what's fused on yours: the parts numbered after your
+weapons (names sorted, "Weapon_" ones left out: mid-swap your new weapon looked like a part for a second), and your
+Link's own animation flags `IsAttachedWeapon` and `IsAttachedShield` (in Link's tree they mean "fused": they pick the
+`_Build` clips), which catch a fuse done in the field, where the part is made long after the weapon. They're read
+straight from the blackboard (the name table at `[[[bb+0xd0]+0x10]+0x20]`, the bytes at `[bb+0x28]+4`), only while that
+weapon is in your hand (put away they read 0), the first look counting as the baseline. A change that holds for two
+checks re-copies your weapon, bow and shield (the equip copies the fuse); after you put something on, it waits 3 s for
+the parts to settle (he used to re-copy everything a second time, I saw him unequip and equip).
 
 Standing, he reaches for them like Link: Link's own `Equip_Sword_On_Natural` / `Equip_Sword_Off_Natural` (and the
 `Lsword` and `Spear` ones) as an emote. The `UseItem` value `EatCookingDish` (his meal, which now eats like a snack)

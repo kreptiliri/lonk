@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..8359c7c 100644
+index c05d6c3..a697d9c 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -262,7 +262,7 @@ index c05d6c3..8359c7c 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,22 +463,2084 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,22 +463,2315 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -554,7 +554,81 @@ index c05d6c3..8359c7c 100644
 +}
 +static void eu_scan(uintptr_t eu);
 +static void weapon_scan(uintptr_t eu, const char *who);
++static int actor_name_at(uintptr_t actor, char out[64]);
++static void weapon_scan_area(uintptr_t base, size_t size, uintptr_t self, const char *who, const char *path);
 +static uintptr_t pouch_eu(uintptr_t actor);
++static uintptr_t fuse_menu_scene;   /* the menu's scene his pieces come from (dress_show sees it) */
++static uintptr_t fuse_node_ok(uintptr_t n) { return n >= 0x100000000ull && n <= 0x7fffffffffffull && !(n & 7) ? n : 0; }
++static uint32_t fuse_key(uintptr_t n) { uint32_t k = 0; read_mem(n + 0x18, &k, 4); return k; }
++static uintptr_t fuse_lookup(uintptr_t from, uint32_t key) {   /* the actor with creation number key, 0 if none */
++    uintptr_t n = from, up;
++    for (int k = 0; k < 64 && (up = fuse_node_ok(read_ptr(n + 0x10) & ~7ull)); k++) n = up;   /* up to the root */
++    for (int k = 0; k < 64 && n; k++) {
++        uint32_t here = fuse_key(n);
++        if (here == key) return n - 0x390;
++        uintptr_t c0 = fuse_node_ok(read_ptr(n)), c1 = fuse_node_ok(read_ptr(n + 8)), next = 0;
++        /* (which side is smaller: whichever child's key is on that side) */
++        if (c0 && (key < here) == (fuse_key(c0) < here)) next = c0;
++        else if (c1 && (key < here) == (fuse_key(c1) < here)) next = c1;
++        n = next;
++    }
++    return 0;
++}
++static void eu_link_name(uintptr_t eu, unsigned index, char out[64]);
++static int actor_name_at(uintptr_t actor, char out[64]);
++static uintptr_t eu_link_actor(uintptr_t eu, unsigned index) {   /* read only: live when handle+0x48 == id */
++    uintptr_t q = read_ptr(eu + 0x20 + index * 0x18 + 8);
++    uint32_t id = 0, now = 0;
++    return q && read_mem(eu + 0x20 + index * 0x18 + 0x10, &id, 4) && id != 0xffffffffu && read_mem(q + 0x48, &now, 4) && now == id ? read_ptr(q + 0x40) : 0;
++}
++/* The parts fused on an equipment user's weapon, bow and shield (links 0, 3, 4): actors numbered just after one of those
++   (up to 8 on: when all three are made at once, the parts come after all three, so which goes on which isn't told
++   apart), within 3 m of it (a spear's part sits 2.3 m from its grip), not one of the user's own pieces (a sheath, a quiver).
++   Up to 4, the number found. */
++static unsigned fuse_parts(uintptr_t eu, uintptr_t out[4]) {
++    unsigned n = 0;
++    for (unsigned k = 0; eu && k < 3; k++) {
++        uintptr_t w = eu_link_actor(eu, (unsigned[]){0, 3, 4}[k]);
++        float wp[3];
++        if (!w || !read_mem(w + ACTOR_POS, wp, sizeof wp)) continue;
++        uint32_t key = fuse_key(w + 0x390);
++        for (uint32_t d = 1; d <= 8 && n < 4; d++) {
++            uintptr_t part = fuse_lookup(w + 0x390, key + d);
++            float pp[3];
++            char name[64];
++            if (!part || !read_mem(part + ACTOR_POS, pp, sizeof pp) || !valid_xyz(pp) ||
++                hypotf(hypotf(pp[0] - wp[0], pp[1] - wp[1]), pp[2] - wp[2]) > 3 || !actor_name_at(part, name)) continue;
++            int skip = part == read_ptr(eu + 0x18);
++            for (unsigned l = 0; l < 20; l++) skip |= eu_link_actor(eu, l) == part;
++            for (unsigned i = 0; i < n; i++) skip |= out[i] == part;
++            if (!skip) out[n++] = part;
++        }
++    }
++    return n;
++}
++static uintptr_t anim_state(uintptr_t actor);
++/* One bool on an actor's animation blackboard, by name, read only (-1: none). The way the game's set-by-name (vtable +0xb0,
++   0x29393e0) finds it: r = [bb+0xd0], resource [r+0x10]; the bools' table [res+0x20]: count u16 +0x18, first u16 +0x1a,
++   name offsets u32 (low 24 bits) from +0x30; names at [res+8] + i32 [[res+8]+0x24]; values: bytes at [bb+0x28]+4. In
++   Link's own tree "IsAttachedWeapon" is "the weapon in hand is fused" (it picks the _Build clips), "IsAttachedShield" too. */
++static int bb_bool(uintptr_t actor, const char *name) {
++    uintptr_t as = anim_state(actor), bb = as ? read_ptr(as + 0x40) : 0, r = bb ? read_ptr(bb + 0xd0) : 0, res = r ? read_ptr(r + 0x10) : 0;
++    uintptr_t desc = res ? read_ptr(res + 0x20) : 0, base = res ? read_ptr(res + 8) : 0, vals = bb ? read_ptr(bb + 0x28) : 0;
++    int32_t pool_off = 0;
++    uint16_t count = 0, first = 0;
++    if (!desc || !base || !vals || !read_mem(base + 0x24, &pool_off, 4) || !read_mem(desc + 0x18, &count, 2) || !read_mem(desc + 0x1a, &first, 2)) return -1;
++    size_t len = strlen(name) + 1;
++    for (uint32_t i = 0; i < count && i < 512; i++) {
++        uint32_t so = 0;
++        char text[64] = {0};
++        if (!read_mem(desc + ((uintptr_t)first + i) * 4 + 0x30, &so, 4) || !read_mem(base + (uintptr_t)(intptr_t)pool_off + (so & 0xffffff), text, len < sizeof text ? len : sizeof text - 1)) continue;
++        if (strcmp(text, name)) continue;
++        uint32_t n = 0;
++        uint8_t v = 0;
++        return read_mem(vals, &n, 4) && i < n && read_mem(vals + 4 + i, &v, 1) ? v : -1;
++    }
++    return -1;
++}
 +static void peek_run(uintptr_t player) {
 +    static const uint32_t w_model[] = {0xf9411408, 0xb4000168, 0xf9400500, 0xb4000100, 0xf9400008};
 +    uintptr_t (*get_model)(uintptr_t) = (uintptr_t (*)(uintptr_t))game_fn(0xba8854, w_model, 5);
@@ -578,6 +652,60 @@ index c05d6c3..8359c7c 100644
 +    uintptr_t pouch = 0, addr = 0;
 +    for (unsigned i = 0; i < stalker_count; i++) if (!strcmp(stalkers[i].name, "PouchPlayer")) pouch = stalkers[i].actor;
 +    if (n == 1 && !strcmp(tok[0], "euscan")) { eu_scan(pouch ? pouch_eu(pouch) : 0); return; }
++    if (n == 2 && !strcmp(tok[0], "aread")) {   /* read-only: what one actor points at (and one pointer deeper) */
++        uintptr_t a = (uintptr_t)strtoull(tok[1], NULL, 16);
++        weapon_scan_area(a, 0x1000, a, tok[1], "a");
++        for (uintptr_t off = 0; off < 0x1000; off += 8) {
++            uintptr_t c = read_ptr(a + off);
++            uint64_t probe;
++            if (c < 0x100000000ull || c > 0x7fffffffffffull || (c & 7) || c == a || !read_mem(c, &probe, 8)) continue;
++            char path[32]; snprintf(path, sizeof path, "a+%#llx>", (unsigned long long)off);
++            weapon_scan_area(c, 0x300, a, tok[1], path);
++        }
++        return;
++    }
++    if (n == 2 && !strcmp(tok[0], "bbget")) { fprintf(stderr, "[survey] bbget %s: you %d him %d\n", tok[1], bb_bool(player, tok[1]), pouch ? bb_bool(pouch, tok[1]) : -2); return; }
++    if (n == 1 && !strcmp(tok[0], "bbvt")) {   /* your animation blackboard's vtable, as main offsets */
++        uintptr_t as = anim_state(player), bb = as ? read_ptr(as + 0x40) : 0, vt = bb ? read_ptr(bb) : 0;
++        fprintf(stderr, "[survey] bbvt: as %#llx bb %#llx vt %#llx\n", (unsigned long long)as, (unsigned long long)bb, (unsigned long long)vt);
++        for (int k = 0; vt && k < 24; k++) fprintf(stderr, "[survey] bbvt: +%#x main+%#llx\n", k * 8, (unsigned long long)(read_ptr(vt + k * 8) - survey_main));
++        return;
++    }
++    if (n == 1 && !strcmp(tok[0], "fuse")) {   /* what fuse_show sees: the actors numbered after each of his weapons */
++        uintptr_t eu = pouch ? pouch_eu(pouch) : 0;
++        fprintf(stderr, "[survey] fuse peek: menu scene %#llx\n", (unsigned long long)fuse_menu_scene);
++        for (unsigned k = 0; eu && k < 3; k++) {
++            char wn[64];
++            unsigned li = (unsigned[]){0, 3, 4}[k];
++            eu_link_name(eu, li, wn);
++            uintptr_t q = read_ptr(eu + 0x20 + li * 0x18 + 8), w = 0;   /* the link's actor, read only: live when handle+0x48 == id */
++            uint32_t id = 0, now = 0;
++            if (read_mem(eu + 0x20 + li * 0x18 + 0x10, &id, 4) && q && read_mem(q + 0x48, &now, 4) && now == id) w = read_ptr(q + 0x40);
++            uint32_t key = w ? fuse_key(w + 0x390) : 0;
++            fprintf(stderr, "[survey] fuse peek: link %u %s actor %#llx key %x\n", li, wn, (unsigned long long)w, key);
++            for (uint32_t d = 1; w && d <= 6; d++) {
++                uintptr_t part = fuse_lookup(w + 0x390, key + d);
++                char text[64] = "-";
++                float pp[3] = {NAN, NAN, NAN}, wp[3] = {NAN, NAN, NAN};
++                if (part) { actor_name_at(part, text); read_mem(part + ACTOR_POS, pp, sizeof pp); read_mem(w + ACTOR_POS, wp, sizeof wp); }
++                uintptr_t m = part && get_model ? get_model(part) : 0;
++                fprintf(stderr, "[survey] fuse peek:   +%u %s %#llx %.2f m scene %#llx\n", d, text, (unsigned long long)part,
++                        hypotf(hypotf(pp[0] - wp[0], pp[1] - wp[1]), pp[2] - wp[2]), (unsigned long long)(m ? read_ptr(m + 0x60) : 0));
++            }
++        }
++        return;
++    }
++    if (n == 4 && !strcmp(tok[0], "raw")) {   /* raw <hex addr> <hex off> <words>: 8-byte words, read only */
++        uintptr_t a = (uintptr_t)strtoull(tok[1], NULL, 16) + (uintptr_t)strtoull(tok[2], NULL, 16);
++        int w = atoi(tok[3]);
++        for (int k = 0; k < w && k < 64; k += 4) {
++            uint64_t q[4] = {0}; read_mem(a + k * 8, q, sizeof q);
++            fprintf(stderr, "[survey] raw %s+%#llx: %llx %llx %llx %llx\n", tok[1], (unsigned long long)(strtoull(tok[2], NULL, 16) + k * 8),
++                    (unsigned long long)q[0], (unsigned long long)q[1], (unsigned long long)q[2], (unsigned long long)q[3]);
++        }
++        return;
++    }
++    if (n == 1 && !strcmp(tok[0], "euread")) { weapon_scan_area(pouch ? pouch_eu(pouch) : 0, 0x4700, 0, "him", "eu"); weapon_scan_area(pouch_eu(player), 0x4700, 0, "you", "eu"); return; }
 +    if (n == 1 && !strcmp(tok[0], "wscan")) { weapon_scan(pouch_eu(player), "you"); weapon_scan(pouch ? pouch_eu(pouch) : 0, "him"); return; }
 +    if (n == 1 && !strcmp(tok[0], "watchcmds")) { lonk_watch_cmds = !lonk_watch_cmds; fprintf(stderr, "[survey] watchcmds %d\n", lonk_watch_cmds); return; }
 +    if (n == 1 && !strcmp(tok[0], "around")) {   /* what 24 chest-high rays from him hit within 15 m (characters too), by actor name */
@@ -962,6 +1090,7 @@ index c05d6c3..8359c7c 100644
 +}
 +/* Every frame once he's dressed: the game keeps putting his pieces back in the menu's scene (that's the flashing, then no legs), so they
 +   go back to the world scene each frame. Logs how often that was needed every 10 s. */
++static unsigned fuse_show(uintptr_t eu, uintptr_t world, bool quiet);
 +static void dress_keep(uintptr_t player) {
 +    static const uint32_t w_done[] = {0x52887508, 0x8b080008, 0xb9400109, 0x7100053f, 0x54000500, 0xb9400909};
 +    static const uint32_t w_model[] = {0xf9411408, 0xb4000168, 0xf9400500, 0xb4000100, 0xf9400008};
@@ -974,6 +1103,7 @@ index c05d6c3..8359c7c 100644
 +        if (strcmp(stalkers[i].name, "PouchPlayer")) continue;
 +        uintptr_t eu = pouch_eu(stalkers[i].actor);
 +        if (eu && world && all_created(eu)) moved += dress_show(eu, world, true);
++        if (eu && world && lonk_twin) moved += fuse_show(eu, world, true);   /* (each new part logged once) */
 +    }
 +    if (++frames == 600) { fprintf(stderr, "[survey] dress keep: %u pieces moved back to the world in 600 frames\n", moved); frames = moved = 0; }
 +}
@@ -982,6 +1112,38 @@ index c05d6c3..8359c7c 100644
 +   {actor, holds a reference} through x8 (the reference is a count at actor+0x1b0, dropped the way 0x1b6cd78 drops it).
 +   A pouch user's pieces may be made for the menu's own scene, so each one is bound to the world scene and drawn everywhere,
 +   like the body (pouch_show). */
++/* His fused parts (a rock on his sword...). The menu's equip makes his weapon with your fuse material ("Equipment_Attachment"),
++   and the weapon makes the part and holds it on the blade, but the part's model stays in the menu's scene like all his
++   pieces (tested: plain sword, plain shield). It isn't in his equipment user's links, and his weapon doesn't point at it
++   the way yours does (your weapon+0x398). What does: every actor sits in one tree, sorted by a creation number, its node at
++   actor+0x390 = {child, child, parent | bits, key (low 32 bits)}, and a weapon makes its part right after itself (your
++   sword d86c, its rock d86d; his d86f, d870). So: the few actors numbered just after his weapon, near it, stuck in the
++   menu's scene. Read only, a few reads a frame. */
++static int actor_name_at(uintptr_t actor, char out[64]);
++static unsigned fuse_show(uintptr_t eu, uintptr_t world, bool quiet) {
++    static const uint32_t w_model[] = {0xf9411408, 0xb4000168, 0xf9400500, 0xb4000100, 0xf9400008};
++    static const uint32_t w_bind[] = {0xaa0003e8, 0xf9403000, 0xf100001f, 0xfa411004, 0x54000081};
++    static const uint32_t w_mask[] = {0x79449008, 0xb9401009, 0x6b08013f, 0x1a883128, 0x34000168};
++    uintptr_t (*get_model)(uintptr_t) = (uintptr_t (*)(uintptr_t))game_fn(0xba8854, w_model, 5);
++    void (*bind)(uintptr_t, uintptr_t) = (void (*)(uintptr_t, uintptr_t))game_fn(0x585d58, w_bind, 5);
++    void (*set_mask)(uintptr_t, uint32_t) = (void (*)(uintptr_t, uint32_t))game_fn(0x50138c, w_mask, 5);
++    if (!get_model || !bind || !set_mask || !fuse_menu_scene || !world) return 0;
++    unsigned moved = 0;
++    uintptr_t parts[4];
++    unsigned n = fuse_parts(eu, parts);
++    for (unsigned i = 0; i < n; i++) {
++        uintptr_t model = get_model(parts[i]);
++        if (!model || read_ptr(model + 0x60) != fuse_menu_scene) continue;
++        bind(model, world);
++        set_mask(model, 0xffffffffu);
++        moved++;
++        static uintptr_t told[4];
++        char text[64];
++        if (!quiet || told[i] != parts[i]) { actor_name_at(parts[i], text); fprintf(stderr, "[survey] fuse: %s (fused on his weapons) into the world\n", text); }
++        told[i] = parts[i];
++    }
++    return moved;
++}
 +static unsigned dress_show(uintptr_t eu, uintptr_t world, bool quiet) {
 +    static const uint32_t w_valid[] = {0xa9bd7bfd, 0xf9000bf5, 0xa9024ff4, 0x910003fd, 0xb9401008};
 +    static const uint32_t w_get[] = {0xd10183ff, 0xa9017bfd, 0xf90013f9, 0xa9035ff8, 0xa90457f6};
@@ -1009,6 +1171,7 @@ index c05d6c3..8359c7c 100644
 +            bind(model, world);
 +            set_mask(model, 0xffffffffu);
 +            moved++;
++            if (scene) fuse_menu_scene = scene;
 +            if (!quiet) fprintf(stderr, "[survey] dress show: link %d %s (%#llx) model=%#llx scene %#llx -> %#llx\n", slot, text, (unsigned long long)ref.actor,
 +                    (unsigned long long)model, (unsigned long long)scene, (unsigned long long)world);
 +        }
@@ -1106,7 +1269,11 @@ index c05d6c3..8359c7c 100644
 +        uintptr_t v = read_ptr(base + off), q = read_ptr(base + off + 8);
 +        char text[64];
 +        if (v != self && v >= 0x100000000ull && v <= 0x7fffffffffffull && !(v & 7) && actor_name_at(v, text))
-+            fprintf(stderr, "[survey] wscan %s: %s+%#llx -> actor %s (%#llx)\n", who, path, (unsigned long long)off, text, (unsigned long long)v);
++        {
++            float at[3] = {NAN, NAN, NAN};
++            read_mem(v + ACTOR_POS, at, sizeof at);
++            fprintf(stderr, "[survey] wscan %s: %s+%#llx -> actor %s (%#llx) at %.2f,%.2f,%.2f\n", who, path, (unsigned long long)off, text, (unsigned long long)v, at[0], at[1], at[2]);
++        }
 +        /* an ActorLink, decoded by reading only (calling the game's get on what merely looks like one crashed the game: it locks
 +           the handle's mutex): {.., handle +8, id +0x10}, live when handle+0x48 == id, the actor's base at handle+0x40 */
 +        uint32_t id = 0, now = 0;
@@ -1131,8 +1298,20 @@ index c05d6c3..8359c7c 100644
 +        if (!ref.actor) continue;
 +        char text[64], path[32];
 +        actor_name_at(ref.actor, text);
-+        fprintf(stderr, "[survey] wscan %s: link %d = %s (%#llx)\n", who, k ? 4 : 0, text, (unsigned long long)ref.actor);
++        {
++            float at[3] = {NAN, NAN, NAN};
++            read_mem(ref.actor + ACTOR_POS, at, sizeof at);
++            fprintf(stderr, "[survey] wscan %s: link %d = %s (%#llx) at %.2f,%.2f,%.2f\n", who, k ? 4 : 0, text, (unsigned long long)ref.actor, at[0], at[1], at[2]);
++        }
 +        weapon_scan_area(ref.actor, 0x1000, ref.actor, who, "w");
++        {   /* the component that points at your fused part (w+0x398), raw */
++            uintptr_t c = read_ptr(ref.actor + 0x398);
++            uint64_t q[16] = {0};
++            read_mem(c, q, sizeof q);
++            fprintf(stderr, "[survey] wscan %s: w+0x398 = %#llx:", who, (unsigned long long)c);
++            for (int k = 0; k < 16; k++) fprintf(stderr, " %llx", (unsigned long long)q[k]);
++            fprintf(stderr, "\n");
++        }
 +        for (uintptr_t off = 0; off < 0x1000; off += 8) {   /* one pointer deeper: its components */
 +            uintptr_t c = read_ptr(ref.actor + off);
 +            uint64_t probe;
@@ -1186,7 +1365,9 @@ index c05d6c3..8359c7c 100644
 +    if (!draw || !sheathe || !drawn || !pe) return;
 +    static int was, reaching, fresh;   /* reaching: 1 drawing, 2 putting away (his clip is on its way); fresh: it's started over */
 +    static unsigned settle;   /* frames he's had to stop in (you'd stopped walking, he was still braking: they just switched) */
-+    int yours = drawn(pe, 0) || drawn(pe, 4);
++    /* your weapon decides: a shield alone in your hand is your guard (holding ZL, everything else on your back), which he
++       has no pose for: he drew "the air" from his back and held his shield at his side (tested: should he even copy it) */
++    int yours = drawn(pe, 0);
 +    lonk_armed = yours;
 +    if (yours != was) fprintf(stderr, "[survey] twins: you %s your weapons, so does he\n", yours ? "draw" : "put away");
 +    was = yours;
@@ -1202,7 +1383,7 @@ index c05d6c3..8359c7c 100644
 +        char weapon[64];
 +        eu_link_name(eu, 0, weapon);
 +        snprintf(lonk_arm_kind, sizeof lonk_arm_kind, "%s", !strncmp(weapon, "Weapon_Lsword", 13) ? "Lsword" : !strncmp(weapon, "Weapon_Spear", 12) ? "Spear" : "Sword");
-+        int his = drawn(eu, 0) || drawn(eu, 4);
++        int his = drawn(eu, 0);
 +        /* (or still in his draw clip: it takes a second, and you'd put yours away before it was over, and his just went) */
 +        int busy = lonk_emote_left && lonk_emote != GAIT_EQUIP;
 +        int can = !lonk_air && !busy && (lonk_gait == GAIT_IDLE || lonk_gait == GAIT_EQUIP) && lonk_v < 0.3f;
@@ -1219,14 +1400,16 @@ index c05d6c3..8359c7c 100644
 +        if (reaching == 1 && (!playing || !fresh || loop < lonk_draw_at)) continue;
 +        if (reaching == 2 && (!playing || !fresh || loop < lonk_put_at)) continue;
 +        reaching = 0;
-+        for (unsigned k = 0; k < 2; k++) {
++        for (unsigned k = 0; k < 2; k++) {   /* each one as yours: with a two-hander your shield stays on your back (tested) */
 +            uint32_t link = k ? 4 : 0;
-+            if (yours && !drawn(eu, link)) draw(eu, link);
-+            else if (!yours && drawn(eu, link)) sheathe(eu, link, 0);
++            int want = yours && drawn(pe, link);
++            if (want && !drawn(eu, link)) draw(eu, link);
++            else if (!want && drawn(eu, link)) sheathe(eu, link, 0);
 +        }
 +    }
 +}
-+/* Twins: once a second, what the player has on (weapon, bow, shield, head, upper, lower); what changed is copied onto him */
++/* Twins: once a second, what the player has on (weapon, bow, shield, head, upper, lower, and what's fused on the first
++   three); what changed is copied onto him (the equip copies your fuse too) */
 +static void twin_watch(uintptr_t player) {
 +    static const uint32_t w_equip[] = {0xd10383ff, 0xa9087bfd, 0xa9096ffc, 0xa90a67fa, 0xa90b5ff8, 0xa90c57f6};
 +    void (*equip)(uintptr_t, uint32_t, const char **, int32_t, bool, bool) =
@@ -1236,6 +1419,7 @@ index c05d6c3..8359c7c 100644
 +    static const char *empty = "";
 +    uintptr_t pe = pouch_eu(player);
 +    if (!equip || !pe) return;
++    int changed = 0;
 +    for (unsigned k = 0; k < 6; k++) {
 +        unsigned slot = slots[k];
 +        char now[64];
@@ -1250,7 +1434,54 @@ index c05d6c3..8359c7c 100644
 +            if (eu) { equip(eu, slot, &empty, -1, 0, 0); dress_watch = dress_watch ? dress_watch : 300; }
 +        }
 +        fprintf(stderr, "[survey] twins: you put on %s, so does he\n", now);
++        changed = 1;
 +    }
++    /* fusing keeps the weapon's name, so what's fused on yours is watched too (all three re-copied: the equip copies the fuse) */
++    /* (names sorted and once each; "Weapon_" ones left out: mid-swap your new weapon showed up as a part for a second, and he
++       re-copied everything over and over; and a change counts once it's held for two checks) */
++    static char fused_seen[256], fused_was[256];
++    static int fused_watching;
++    char fused[256] = "", names[4][64];
++    uintptr_t parts[4];
++    unsigned np = fuse_parts(pe, parts), nn = 0;
++    for (unsigned i = 0; i < np; i++) {
++        char name[64];
++        if (!actor_name_at(parts[i], name) || !strncmp(name, "Weapon_", 7)) continue;
++        unsigned at = 0, dup = 0;
++        for (unsigned j = 0; j < nn; j++) { dup |= !strcmp(names[j], name); at += strcmp(names[j], name) < 0; }
++        if (dup) continue;
++        for (unsigned j = nn; j > at; j--) memcpy(names[j], names[j - 1], sizeof names[0]);
++        snprintf(names[at], sizeof names[0], "%s", name); nn++;
++    }
++    for (unsigned i = 0; i < nn; i++) { size_t l = strlen(fused); snprintf(fused + l, sizeof fused - l, "%s%s", l ? "," : "", names[i]); }
++    /* fusing in the field makes the part long after the weapon (not numbered next to it): your Link's own "fused" flags,
++       which are about what's in your hands: only read with it out (put away, it read 0 and he re-copied everything) */
++    static const uint32_t w_drawn[] = {0xd101c3ff, 0xa9017bfd, 0xf90013fb, 0xa90367fa, 0xa9045ff8, 0xa90557f6};
++    bool (*drawn)(uintptr_t, uint32_t) = (bool (*)(uintptr_t, uint32_t))game_fn(0x3e322c, w_drawn, 6);
++    static int flag_w = -9, flag_s = -9;   /* (-9: not seen out yet: the first look is the baseline, not a change) */
++    int first_look = 0;
++    if (drawn && drawn(pe, 0)) { int v = bb_bool(player, "IsAttachedWeapon"); first_look |= flag_w == -9 && v != -9; flag_w = v; }
++    if (drawn && drawn(pe, 4)) { int v = bb_bool(player, "IsAttachedShield"); first_look |= flag_s == -9 && v != -9; flag_s = v; }
++    { size_t l = strlen(fused); snprintf(fused + l, sizeof fused - l, " w%d s%d", flag_w, flag_s); }
++    int held = !strcmp(fused, fused_was);
++    snprintf(fused_was, sizeof fused_was, "%s", fused);
++    /* (just started watching, or you just put something on and he copied it, fuse and all: what you have now he has, once
++       it's settled: after a swap the parts change for a couple of seconds, and he used to re-copy on top) */
++    static unsigned settle;
++    if (changed) settle = 3;
++    if (!fused_watching || settle || first_look) { snprintf(fused_seen, sizeof fused_seen, "%s", fused); if (settle) settle--; }
++    if (held && strcmp(fused, fused_seen)) {
++        if (fused_watching) {
++            for (unsigned i = 0; i < stalker_count; i++) {
++                if (strcmp(stalkers[i].name, "PouchPlayer")) continue;
++                uintptr_t eu = pouch_eu(stalkers[i].actor);
++                if (eu) { for (unsigned w = 0; w < 3; w++) equip(eu, (uint32_t[]){0, 7, 8}[w], &empty, -1, 0, 0); dress_watch = dress_watch ? dress_watch : 300; }
++            }
++            fprintf(stderr, "[survey] twins: you fused something (%s), so does he\n", fused[0] ? fused : "nothing now");
++        }
++        snprintf(fused_seen, sizeof fused_seen, "%s", fused);
++    }
++    fused_watching = 1;
 +}
 +#endif
 +/* One frame of Lonk: the behaviour moves the anchor (yaw only; local Z = facing, as spawn_request reads it), then every live
@@ -2306,7 +2537,7 @@ index c05d6c3..8359c7c 100644
 +        if (!busy) {
 +            request.kind = 3; strcpy(request.tag, "lonk"); strcpy(request.name, "PouchPlayer");
 +            request.off[0] = 4; request.off[1] = 0; request.off[2] = 0;
-+            stalk_left = 216000; stalk_speed = LONK_RUN; stalk_stop = 1.5f; lonk_brain = 1; lonk_phase_left = 0;
++            stalk_left = 216000000; stalk_speed = LONK_RUN; stalk_stop = 1.5f; lonk_brain = 1; lonk_phase_left = 0;
 +            atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
 +        }
 +        pthread_mutex_unlock(&survey_lock);
@@ -2321,7 +2552,7 @@ index c05d6c3..8359c7c 100644
 +    if (!kind && (used = 0, sscanf(line, "survey lonk %15s %u %n", word, &frames, &used)) == 2 && used && !line[used]) {
 +        int which = strcmp(word, "brain") ? -1 : LONK_KINDS;
 +        for (int k = 0; k < LONK_KINDS; k++) if (!strcmp(word, lonk_names[k])) which = k;
-+        if (which < 0 || frames > 216000) { fprintf(stderr, "[survey] rejected: lonk <brain|stalk|block|behind|wander|gift|flee|party|buddy> <1..216000 frames>\n"); return 1; }
++        if (which < 0 || frames > 216000000) { fprintf(stderr, "[survey] rejected: lonk <brain|stalk|block|behind|wander|gift|flee|party|buddy> <1..216000000 frames>\n"); return 1; }
 +        pthread_mutex_lock(&survey_lock);
 +        stalk_left = survey_enabled ? frames : 0; stalk_speed = 2.5f; stalk_stop = 1.5f;
 +        lonk_brain = which == LONK_KINDS;
@@ -2350,7 +2581,7 @@ index c05d6c3..8359c7c 100644
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,15 +2550,80 @@ void runtime_survey_cancel_user(void) {
+@@ -307,15 +2781,80 @@ void runtime_survey_cancel_user(void) {
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
@@ -2431,7 +2662,7 @@ index c05d6c3..8359c7c 100644
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
      } else if (request.kind == 1) {
-@@ -340,8 +2648,152 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -340,8 +2879,152 @@ void runtime_survey_tick(uint64_t frame) {
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }
