@@ -416,7 +416,10 @@ Link moves. Four times a second he looks from Link for 1.4 m of room on his side
 the other side (he used to swap only after a whole second stuck, and sliding along the wall didn't count, so he kept
 trying to get round it), and with no room either side he walks behind. Turn round and he keeps the side he's on and
 turns with you; turning on the spot he stays put until you're done (he used to set off in the first frames of the
-turn, and halfway round he no longer counted as on your other side, so he walked all the way round you). A gift spawns an apple
+turn, and halfway round he no longer counted as on your other side, so he walked all the way round you). Behind
+follows a step back and sprints like stalk does: when you sprint, or when he's over 8 m behind (it only had a run, and
+I left him jogging). Turn round with him within 4 m and in front of you and he startles; once he's been behind your back
+for 3 s again, you can catch him again (once per mood meant once in a long behind and never again). A gift spawns an apple
 (`Item_Fruit_A`), a fish (`Item_FishGet_A`), a monster part (`Item_Enemy_01`) or a `BarrelBomb` next to Link through the
 same spawn call,
 then Lonk celebrates for two and a half seconds and flees for four.

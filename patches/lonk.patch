@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..2c4d523 100644
+index c05d6c3..7fae3ac 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -262,7 +262,7 @@ index c05d6c3..2c4d523 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,22 +463,2426 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,22 +463,2432 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -1789,11 +1789,12 @@ index c05d6c3..2c4d523 100644
 +    float *a = lonk_anchor, target[3] = {p[0], p[1], p[2]}, speed = stalk_speed, stop = stalk_stop;
 +    int face_player = 1, buddy_face = 0, entering = !lonk_entered;
 +    lonk_entered = 1;
-+    /* stalking you, he sprints when you do, or when he's fallen behind (more than 8 m off, till he's within 4) */
++    /* stalking you or behind you, he sprints when you do, or when he's fallen behind (more than 8 m off, till he's within 4).
++       Behind only had his run: you sprinted off at 8 m/s and he jogged after you at 5.7 (tested) */
 +    static int stalk_dash;
 +    float off = hypotf(p[0] - a[0], p[2] - a[2]);
 +    stalk_dash = player_sprinting || off > 8 || (stalk_dash && off > 4);
-+    if (lonk_kind == LONK_STALK && stalk_dash) speed = LONK_SPRINT;
++    if ((lonk_kind == LONK_STALK || lonk_kind == LONK_BEHIND) && stalk_dash) speed = LONK_SPRINT;
 +    switch (lonk_kind) {
 +    case LONK_BLOCK: target[0] = p[0] + fx * 2.5f; target[2] = p[2] + fz * 2.5f; speed = LONK_SPRINT; stop = 0.2f; break;
 +    case LONK_BEHIND:
@@ -1806,7 +1807,7 @@ index c05d6c3..2c4d523 100644
 +#endif
 +            a[0] = at[0]; a[2] = at[1];
 +        }
-+        speed = LONK_RUN; stop = 1.2f; break;
++        speed = stalk_dash ? LONK_SPRINT : LONK_RUN; stop = 1.2f; break;
 +    case LONK_WANDER: {
 +        /* after a wander and its emote, a couple of seconds' rest and he's off somewhere else (with the brain off, a
 +           wander used to be one trip, then standing there for the rest of the hour); a "goto" stays put */
@@ -1983,6 +1984,11 @@ index c05d6c3..2c4d523 100644
 +    default: break;
 +    }
 +    /* emotes: arrived somewhere on a wander, he looks around; creeping up behind you and you turn round, he startles */
++    /* behind you, out of your sight (behind your back) for 3 s: you can catch him again. Once a mood, he startled once
++       at the start of a long behind and never again (tested) */
++    static unsigned unseen;
++    unseen = lonk_kind == LONK_BEHIND && (a[0] - p[0]) * fx + (a[2] - p[2]) * fz < 0 ? unseen + lonk_ticks : 0;
++    if (unseen > 180 && lonk_emoted && !lonk_emote_left) lonk_emoted = 0;
 +    /* arrived somewhere on a wander: looks around, looks up, or has a snack (which is sometimes gross) */
 +    if (!lonk_emoted && !lonk_emote_left) {
 +        float lx = a[0] - p[0], lz = a[2] - p[2], ll = hypotf(lx, lz);
@@ -2692,7 +2698,7 @@ index c05d6c3..2c4d523 100644
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,15 +2892,80 @@ void runtime_survey_cancel_user(void) {
+@@ -307,15 +2898,80 @@ void runtime_survey_cancel_user(void) {
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
@@ -2773,7 +2779,7 @@ index c05d6c3..2c4d523 100644
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
      } else if (request.kind == 1) {
-@@ -340,8 +2990,152 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -340,8 +2996,152 @@ void runtime_survey_tick(uint64_t frame) {
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }
