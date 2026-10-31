@@ -124,6 +124,8 @@ reload.
 - As your twin he holds a two-hander in one hand when he stands still (his tree has no two-handed idle; it looks tough, so
   it stays), and he doesn't copy a shield-only guard.
 - As your twin he's in his underwear for about half a second after he spawns, until his clothes are on.
+- On stairs and slopes he follows the average floor height over 80 cm, so his feet can sit a few centimetres into or
+  above uneven ground that keeps rising or falling. I haven't seen it, but that's where to look if his feet float.
 - With the mod installed, the inventory Link runs, sprints, celebrates, startles or eats in the pause menu when you hold
   a weapon.
 

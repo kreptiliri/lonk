@@ -68,6 +68,11 @@ him your sword): I only found out because skipping our write for a few frames ma
   20 frames, held another 12, and he ran on the spot for half a second after every stop. Braking to a stop, he goes to
   the idle at once (Link's brake starts as soon as you let go), and its fade ends about when he stops. Between run and
   sprint a new gait still holds for 12 frames; to start or stop, 2.
+- your sprint counts after a tenth of a second at sprint speed (over 7.6 m/s). Waiting for your half-second average
+  left him a second in his run clip at nearly double speed. Up stairs everyone is slower along the ground (in my trace
+  your run went 4.3 m/s and your sprint 6.5, under the line), so your speed is scaled up by how fast you climb, averaged
+  over half a second so a jump doesn't count: both come out about as on the flat. Beside you (buddy) his gait follows
+  your run or sprint with no 12-frame hold.
 
 The first version drove `Temperature` instead (cold idle = walk). Fighting the menu's node over it every frame flipped
 him between the idle and the walk, and each flip restarted the walk: a few steps, snap back, again. He also blushed
@@ -306,10 +311,18 @@ and Link, a boulder up to 3 m tall counted as floor, so he stepped onto it, and 
 how he walked up walls and onto cave roofs. Floor lower than his feet and he falls (Link's 32 m/s², down to that floor);
 floor too steep (normal y under 0.6) and he doesn't step onto it.
 
+Walking up stairs, easing onto each step by itself made him rise in jerks: 10 cm, then less and less, 7 times a second,
+next to your steady 3.6 cm a frame. It looked like he ran at a low frame rate. So while he walks he follows the average
+of the floor at five points over 80 cm along his way, and to him a staircase is a ramp. Only where the floor keeps going
+one way (stairs, a hill): over a rock, up then down, the average sank his feet into it. A drop of more than half a metre
+he still falls down.
+
 The same raycast steers him: before each step he probes 1 m ahead at chest height (anything there is a wall) and at knee height, and if something's there (and it isn't
 a walkable slope, judged by the hit normal at `+0x30`) he tries 30, 45, 90 and then 120 degrees to one side, then the
 other, starting with whichever side worked last so he doesn't dither. A ledge counts too: no floor within 2.5 m below his
-feet 0.8 m ahead. Boxed in, he waits.
+feet 0.8 m ahead. Boxed in, he waits. A stair isn't a wall: when what the knee ray hit has its top a step above his
+knee, rising gently from his feet, he walks on. Up steep stairs the ray hit the steps a metre ahead, and he swerved out
+and back every few frames.
 
 He also looks before he picks where to go. A wander tries 8 random directions and measures how far each one is really
 walkable (the knee-high ray for walls, then a floor ray every metre, following the floor up and down), and goes to the
@@ -325,7 +338,8 @@ Link's height. Up a staircase or off on a run of his own is fine. Following you 
 
 Walking through Link puts the mannequin's collision above Link's head, which the game reads as a low ceiling, and
 forces a crouch. Lonk keeps 1.1 m away and slides around instead, unless that would put him in a wall or off a ledge
-(which is how you could shove him through walls).
+(which is how you could shove him through walls). Beside you (buddy) he keeps 1.4 m: running in circles round you, he
+cut in to 1.1 and it looked too close.
 
 ## Seeing enemies
 
@@ -397,7 +411,12 @@ Tested: "so creepy he spawned behind me, keep it".
 ## The brain
 
 Every 6 to 12 seconds a weighted dice roll picks a behaviour: stalk 25, buddy, block, behind, wander and gift 15 each,
-never two gifts in a row. Buddy walks 1.6 m to one side of Link at Link's own (smoothed) speed. A gift spawns an apple
+never two gifts in a row. Buddy walks 1.6 m to one side of Link at Link's own (smoothed) speed, a little ahead once
+Link moves. Four times a second he looks from Link for 1.4 m of room on his side; a wall or a drop there and he takes
+the other side (he used to swap only after a whole second stuck, and sliding along the wall didn't count, so he kept
+trying to get round it), and with no room either side he walks behind. Turn round and he keeps the side he's on and
+turns with you; turning on the spot he stays put until you're done (he used to set off in the first frames of the
+turn, and halfway round he no longer counted as on your other side, so he walked all the way round you). A gift spawns an apple
 (`Item_Fruit_A`), a fish (`Item_FishGet_A`), a monster part (`Item_Enemy_01`) or a `BarrelBomb` next to Link through the
 same spawn call,
 then Lonk celebrates for two and a half seconds and flees for four.

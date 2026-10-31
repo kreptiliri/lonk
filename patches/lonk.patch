@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..3c136f9 100644
+index c05d6c3..14ae9fe 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -262,7 +262,7 @@ index c05d6c3..3c136f9 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,22 +463,2330 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,22 +463,2426 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -457,7 +457,12 @@ index c05d6c3..3c136f9 100644
 +    if (ray_cast(chest, chest_end, hit, NULL)) return 1;
 +    if (!ray_cast(start, end, hit, normal)) return 0;
 +    float nl = sqrtf(normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]);
-+    return !(nl > 0.5f && nl < 1.5f && normal[1] / nl > 0.65f);
++    if (nl > 0.5f && nl < 1.5f && normal[1] / nl > 0.65f) return 0;
++    /* a stair: what he hit has its top a step above his knee, rising gently from his feet. Going up stairs the knee ray
++       hit the steps a metre ahead as walls and he swerved out and back every few frames (tested) */
++    float d = hypotf(hit[0] - at[0], hit[2] - at[2]), h;
++    if (ray_height(hit[0] + dx * 0.2f, hit[2] + dz * 0.2f, at[1] + 0.95f, at[1] + 0.6f, &h) && h - at[1] < 0.7f * (d + 0.2f) + 0.2f) return 0;
++    return 1;
 +}
 +/* A ledge 0.8 m along (dx, dz): no floor from a step above his feet to 2.5 m below them (a wall too tall to step onto reads
 +   the same, but the knee-high probe usually sees that first). */
@@ -1493,7 +1498,7 @@ index c05d6c3..3c136f9 100644
 +   every stop (and slid off in his idle pose at every start). Braking to a stop (stopping), he goes to the idle right away,
 +   the way Link's brake starts as soon as you let go: its 10-frame fade then ends about when he does. Called every frame,
 +   emotes or not, so a gait from before an emote doesn't come back after it (it did: 12 frames of running on the spot). */
-+static int lonk_move_gait(float v, int stopping) {
++static int lonk_move_gait(float v, int stopping, int quick) {   /* quick: v only jumps between gaits (beside you), no hold */
 +    static const float edge[3] = {0.4f, 4.0f, 7.3f};   /* idle | walk | run | dash (Link's walk fades into his run from 2.9 to 5.6 m/s) */
 +    static int g = GAIT_IDLE;
 +    static unsigned held;
@@ -1502,7 +1507,7 @@ index c05d6c3..3c136f9 100644
 +    while (want > GAIT_IDLE && v < edge[want - 1] - 0.3f) want--;
 +    if (stopping) want = GAIT_IDLE;
 +    held = want == g ? 0 : held + 1;
-+    if (held >= (want == GAIT_IDLE || g == GAIT_IDLE ? 2u : 12u)) { g = want; held = 0; }
++    if (held >= (want == GAIT_IDLE || g == GAIT_IDLE || quick ? 2u : 12u)) { g = want; held = 0; }
 +    return g;
 +}
 +#endif
@@ -1515,6 +1520,20 @@ index c05d6c3..3c136f9 100644
 +/* right at the foot of the ledge: the wall is within 1.2 m of him, your way (a jump from further back lands short).
 +   Picks the landing spot: straight across the wall (its normal), a metre past its face, wherever you're standing (aimed
 +   at you, he landed short of you or got pushed back off by keeping his distance from you). */
++/* the way up to you is stairs or a slope he can walk: a floor every quarter metre, never more than a step above the last,
++   and climbing as he goes (a ray started inside a ledge finds the floor at its foot: that doesn't climb). Behind you on
++   stairs he's 0.6 m lower and jumped up to you, again and again (tested) */
++static int lonk_walk_up(const float a[3], const float p[3]) {
++    float dx = p[0] - a[0], dz = p[2] - a[2], d = hypotf(dx, dz);
++    if (d < 0.3f || !isfinite(a[1])) return 0;
++    dx /= d; dz /= d;
++    float reach = fminf(d, 2.5f), y = a[1], h;
++    for (float s = 0.25f; s <= reach + 0.01f; s += 0.25f) {
++        if (!ray_height(a[0] + dx * s, a[2] + dz * s, y + 0.5f, y - 0.5f, &h) || h - y > 0.45f) return 0;
++        y = h;
++    }
++    return y - a[1] > (p[1] - a[1]) * reach / d - 0.3f;
++}
 +static int lonk_at_edge(const float a[3], const float p[3]) {
 +    float dx = p[0] - a[0], dz = p[2] - a[2], d = hypotf(dx, dz);
 +    if (d < 0.1f || !ray_blocked(a, dx / d, dz / d, 1.2f)) return 0;
@@ -1533,6 +1552,7 @@ index c05d6c3..3c136f9 100644
 +static KEEP unsigned lonk_falling;   /* frames he's been coming down (a jump past its top, or off a ledge) */
 +static KEEP float lonk_air_vel[2];   /* m/s, sideways */
 +static float lonk_buddy_side = 1;   /* which side of you he walks on in buddy mode (1 right, -1 left) */
++static unsigned lonk_buddy_round;   /* swapped for a wall: going round you to the other side, don't swap him back */
 +static float lonk_enemy[3], lonk_flee_from[3];   /* the enemy he last saw; what the next flee runs from (else you) */
 +static unsigned lonk_enemy_left, lonk_fight_cooldown;
 +static int lonk_flee_from_set;
@@ -1699,6 +1719,12 @@ index c05d6c3..3c136f9 100644
 +    static float player_pace;
 +    static int player_sprinting;
 +    player_pace += (player_speed - player_pace) * ease(0.04f);
++    /* how fast you climb, over half a second (a jump's up and down cancel out): up stairs your run was 4.3 m/s along the
++       ground and your sprint 6.5, under the sprint line, so he ran on beside your sprint (tested). Counted climbing, both
++       come out as on the flat (run 5.7, sprint ~8.6) */
++    static float player_climb;
++    player_climb += ((moved_p > 2 ? 0 : (p[1] - last_p[1]) / lonk_dt) - player_climb) * ease(0.04f);
++    float sprint_speed = player_speed * (1 + 0.65f * fminf(fmaxf(player_climb / fmaxf(player_speed, 1), 0), 0.8f));
 +    lonk_pace += (player_speed - lonk_pace) * ease(0.01f);
 +    lonk_still = player_speed < 0.3f ? lonk_still + lonk_ticks : 0;
 +#if defined(TOTK_GAME_V143)
@@ -1708,8 +1734,12 @@ index c05d6c3..3c136f9 100644
 +        lonk_climate = state && read_mem(state + 0x658, &flags, sizeof flags) && (flags >> 39 & 3);
 +    }
 +#endif
-+    if (player_pace > 7.6f) player_sprinting = 1;
-+    else if (player_pace < 6.6f) player_sprinting = 0;
++    /* your sprint counts from a tenth of a second of sprint speed, not from your half-second pace (that left him a second
++       in his run clip at nearly double speed, tested); a dip in your sprint still needs your pace down too */
++    static unsigned fast_for;
++    fast_for = sprint_speed > 7.6f ? fast_for + lonk_ticks : 0;
++    if (player_pace > 7.6f || fast_for >= 6) player_sprinting = 1;
++    else if (player_pace < 6.6f && sprint_speed < 7.0f) player_sprinting = 0;
 +    memcpy(last_p, p, sizeof last_p);
 +    /* footsteps: a new one every 25 cm the player moves */
 +    unsigned last = (trail_head + TRAIL_MAX - 1) % TRAIL_MAX;
@@ -1817,9 +1847,49 @@ index c05d6c3..3c136f9 100644
 +        }
 +        break;
 +    case LONK_BUDDY: {   /* walks beside you, a step to one side, at your pace, looking where you look */
++        static unsigned look_left;   /* 4 times a second: is there room for him on his side of you? */
++        static int squeezed;         /* no room either side (a corridor): he walks behind you */
 +        float side = lonk_buddy_side;
-+        if (entering) side = lonk_buddy_side = arc4random_uniform(2) ? 1 : -1;
-+        target[0] = p[0] - fz * 1.6f * side + fx * 0.3f; target[2] = p[2] + fx * 1.6f * side + fz * 0.3f;
++        if (entering) { side = lonk_buddy_side = arc4random_uniform(2) ? 1 : -1; look_left = 0; squeezed = 0; lonk_buddy_round = 0; }
++        /* you turn round: he stays on the side he's on and turns with you, instead of crossing over to his old side */
++        lonk_buddy_round = tick_down(lonk_buddy_round);
++        float lat = (a[0] - p[0]) * -fz + (a[2] - p[2]) * fx;   /* his offset to your right (side 1) */
++        if (!lonk_buddy_round && !squeezed && fabsf(lat) > 0.8f && (lat > 0) != (side > 0)) {
++            side = lonk_buddy_side = lat > 0 ? 1 : -1;
++            look_left = 0;   /* room there? look now */
++        }
++#if defined(TOTK_GAME_V143)
++        /* he only swapped sides once he'd been stuck a whole second, and sliding along the wall didn't count: he kept
++           trying to get round it (tested). So look from you (half a metre out, not from inside your body) for his spot */
++        look_left = tick_down(look_left);
++        if (!look_left && isfinite(p[1])) {
++            look_left = 15;
++            float sx = -fz * side, sz = fx * side;
++            float from_here[3] = {p[0] + sx * 0.5f, p[1], p[2] + sz * 0.5f}, from_there[3] = {p[0] - sx * 0.5f, p[1], p[2] - sz * 0.5f};
++            float here = path_free(from_here, sx, sz, 1.4f), there = path_free(from_there, -sx, -sz, 1.4f);
++            if (here < 1.0f && there > here + 0.4f) {
++                side = lonk_buddy_side = -side; lonk_buddy_round = 150;
++                fprintf(stderr, "[survey] lonk: buddy: no room on that side (%.1f m), the other side\n", here);
++            }
++            int was = squeezed;
++            squeezed = here < 1.0f && there < 1.0f;
++            if (squeezed != was) fprintf(stderr, "[survey] lonk: buddy: %s\n", squeezed ? "no room either side, behind you" : "room beside you again");
++        }
++#endif
++        /* a step ahead of you only once you're moving: standing, after you turned round he was 0.6 m off his spot and
++           stepped to it, facing the step and then you again, quick snaps (tested) */
++        float lead = 0.3f * fminf(player_speed / 2, 1);
++        if (squeezed) { target[0] = p[0] - fx * 1.6f; target[2] = p[2] - fz * 1.6f; }
++        else { target[0] = p[0] - fz * 1.6f * side + fx * lead; target[2] = p[2] + fx * 1.6f * side + fz * lead; }
++        /* you turning on the spot: he stays put and turns with you. He used to set off for his side in the first frames of
++           your turn, and halfway round you he no longer counted as being on your other side, so he walked all the way (tested) */
++        static float last_yaw;
++        static unsigned turn_hold;
++        float yaw = atan2f(fx, fz), turn_rate = fabsf(remainderf(yaw - last_yaw, 6.2832f)) / fmaxf(lonk_dt, 0.001f);
++        last_yaw = yaw;
++        turn_hold = tick_down(turn_hold);
++        if (player_speed < 0.5f && turn_rate > 1.5f && !entering) turn_hold = 12;
++        if (turn_hold && player_speed < 0.5f) { target[0] = a[0]; target[2] = a[2]; }   /* (you walk off: he comes at once) */
 +        float off = hypotf(target[0] - a[0], target[2] - a[2]);
 +        speed = fminf(fmaxf(player_speed * 1.05f + off * 2, 1.0f), LONK_SPRINT + 1); stop = 0.15f;
 +        if (off < 0.6f) { face_player = 0; buddy_face = 1; }
@@ -2098,7 +2168,7 @@ index c05d6c3..3c136f9 100644
 +    lonk_no_gain = follows ? no_gain : 0;
 +    jump_rest = tick_down(jump_rest);
 +    if (follows && (lonk_blocked > 8 || no_gain > 10) && rise > 0.6f && rise < 7 && hypotf(p[0] - a[0], p[2] - a[2]) < 20 &&
-+        !lonk_emote_left && lonk_jump == 0 && !jump_rest && lonk_at_edge(a, p)) {
++        !lonk_emote_left && lonk_jump == 0 && !jump_rest && lonk_at_edge(a, p) && !lonk_walk_up(a, p)) {
 +        lonk_no_gain = 0; jump_rest = 90; lonk_jump_aimed = 1;
 +        lonk_jump = sqrtf(2 * LONK_GRAVITY * (rise + 0.6f));
 +        lonk_emote_start(GAIT_JUMP);
@@ -2127,7 +2197,7 @@ index c05d6c3..3c136f9 100644
 +        }
 +        if (stuck) lonk_stat_stuck++;
 +        if (stuck && lonk_kind == LONK_BUDDY) {   /* that side of you is a wall: the other side, then */
-+            lonk_buddy_side = -lonk_buddy_side;
++            lonk_buddy_side = -lonk_buddy_side; lonk_buddy_round = 150;
 +            stuck = 0;
 +        }
 +        if (stuck && lonk_kind == LONK_BLOCK) {   /* can't get in front of you (a wall there): he just tags along instead */
@@ -2142,15 +2212,17 @@ index c05d6c3..3c136f9 100644
 +    float ox = a[0] - p[0], oz = a[2] - p[2], od = hypotf(ox, oz);
 +    static unsigned pushed_left;   /* you've been shoving him along: his gait follows how fast he really goes */
 +    pushed_left = tick_down(pushed_left);
-+    if (od < 1.1f && !lonk_jump_aimed && !lonk_air) {   /* (not while jumping up a ledge: it pushed him back off) */
++    /* beside you he keeps 1.4 m: running round you in circles he cut in to 1.1 and it looked too close (tested) */
++    float keep = lonk_kind == LONK_BUDDY ? 1.4f : 1.1f;
++    if (od < keep && !lonk_jump_aimed && !lonk_air) {   /* (not while jumping up a ledge: it pushed him back off) */
 +        if (od < 0.01f) { ox = -fx; oz = -fz; od = 1; }
 +        int pushable = 1;
 +#if defined(TOTK_GAME_V143)
 +        if (ground_mode == GROUND_TERRAIN && isfinite(a[1])) pushable = !way_blocked(a, ox / od, oz / od);   /* not into a wall or off a ledge */
 +#endif
 +        if (pushable) {
-+            float shove = 1.1f - od;
-+            a[0] = p[0] + ox / od * 1.1f; a[2] = p[2] + oz / od * 1.1f; pushed_left = 10;
++            float shove = keep - od;
++            a[0] = p[0] + ox / od * keep; a[2] = p[2] + oz / od * keep; pushed_left = 10;
 +            /* shoved in the middle of an emote, he lets it go and steps out of your way, instead of sliding along in its
 +               pose (tested: you could push him around frozen in his startle) */
 +            if (shove > 0.02f && lonk_emote_left > 1 && lonk_emote != GAIT_JUMP) lonk_emote_left = 1;
@@ -2168,7 +2240,7 @@ index c05d6c3..3c136f9 100644
 +    float gait_v = lonk_kind == LONK_BUDDY && lonk_v > 0.8f && player_pace > 1 ? (player_sprinting ? LONK_SPRINT : LONK_RUN) :
 +                   stopping ? lonk_v : fmaxf(lonk_v, want_v);   /* (getting up to a sprint: the sprint, not 12 frames of a run at rate 2.4) */
 +    if (pushed_left) gait_v = fmaxf(gait_v, lonk_speed);
-+    int move_gait = lonk_move_gait(gait_v, stopping && !pushed_left);
++    int move_gait = lonk_move_gait(gait_v, stopping && !pushed_left, lonk_kind == LONK_BUDDY && lonk_v > 0.8f && player_pace > 1 && !pushed_left);
 +    pouch_gait(lonk_falling > (lonk_air ? 0 : 12) ? GAIT_FALL : lonk_emote_left ? lonk_emote : lonk_kind == LONK_PARTY ? GAIT_PARTY : move_gait,
 +               pushed_left ? fmaxf(lonk_v, lonk_speed) : lonk_v);   /* (his legs go at the speed he's at, getting up to it too) */
 +#endif
@@ -2208,7 +2280,30 @@ index c05d6c3..3c136f9 100644
 +        }
 +        if (ray_floor(a[0], a[2], feet + 0.7f, feet - 60, &h, &up)) {
 +            ground_src = "ray";
-+            if (h < feet - 0.05f || (lonk_air && vy > 0)) {   /* (going up, uphill, his feet are near the ground but he's flying) */ vy -= LONK_GRAVITY * lonk_dt; feet = fmaxf(feet + vy * lonk_dt, h); ground_src = "falling"; if (feet == h) { vy = 0; ground_src = "ray"; } }
++            /* walking, he follows the floor's average over 80 cm along his way: up stairs, easing onto each step on its
++               own, he went up in jerks (10 cm, then almost nothing, 7 times a second) and looked like he ran at a low
++               frame rate (tested). Averaged, a staircase is a ramp; a drop of more than half a metre still isn't */
++            float hs = h;
++            int glide = 0;
++            if (!lonk_air && lonk_speed > 0.5f && moved > 0.001f && moved < 2) {
++                /* only where the floor keeps going one way (stairs, a hill): over a rock (up, then down) the average
++                   sank his feet into it */
++                float ux = mx / moved, uz = mz / moved, hk[5], sum = 0;
++                int ok = 1, rises = 1, falls = 1;
++                for (int k = -2; k <= 2 && ok; k++) {
++                    if (!k) hk[2] = h;
++                    else ok = ray_height(a[0] + ux * 0.2f * k, a[2] + uz * 0.2f * k, h + 0.5f, h - 0.5f, &hk[k + 2]);
++                }
++                for (int k = 0; k < 5 && ok; k++) {
++                    sum += hk[k];
++                    if (k && hk[k] < hk[k - 1] - 0.03f) rises = 0;
++                    if (k && hk[k] > hk[k - 1] + 0.03f) falls = 0;
++                }
++                if (ok && (rises || falls)) hs = sum / 5;
++                glide = ok && (rises || falls) && fabsf(hs - feet) < 0.5f && fabsf(h - feet) < 0.5f;
++            }
++            if (glide) { feet += (hs - feet) * ease(0.3f); vy = 0; ground_src = "stairs"; }
++            else if (h < feet - 0.05f || (lonk_air && vy > 0)) {   /* (going up, uphill, his feet are near the ground but he's flying) */ vy -= LONK_GRAVITY * lonk_dt; feet = fmaxf(feet + vy * lonk_dt, h); ground_src = "falling"; if (feet == h) { vy = 0; ground_src = "ray"; } }
 +            else if (up < 0.6f) { ground_src = "steep"; vy = 0; }   /* a wall's face isn't a step: he doesn't climb it */
 +            else { feet += (h - feet) * ease(0.3f); vy = 0; }
 +        } else if (ray_floor(a[0], a[2], feet + 3, feet - 0.5f, &h, &up) && up > 0.6f) { feet = h; vy = 0; ground_src = "step up"; }   /* feet just under a mound */
@@ -2271,9 +2366,10 @@ index c05d6c3..3c136f9 100644
 +                }
 +            }
 +#endif
-+            fprintf(stderr, "[survey] trace: f=%llu %s gait=%d v=%.2f want=%.2f anchor=%.2f,%.2f,%.2f actor=%.2f,%.2f,%.2f player=%.2f,%.2f,%.2f loop=%.3f rate=%.2f sw=%x w=%.2f air=%d dt=%.1f/%.1f you: v=%.2f loop=%.3f rate=%.2f\n",
++            fprintf(stderr, "[survey] trace: f=%llu %s gait=%d v=%.2f want=%.2f anchor=%.2f,%.2f,%.2f actor=%.2f,%.2f,%.2f player=%.2f,%.2f,%.2f loop=%.3f rate=%.2f sw=%x w=%.2f air=%d dt=%.1f/%.1f side=%.0f face=%.0f you: v=%.2f loop=%.3f rate=%.2f face=%.0f\n",
 +                    (unsigned long long)frame, lonk_names[lonk_kind], lonk_gait, lonk_speed, lonk_v, a[0], ground, a[2], was[0], was[1], was[2], p[0], p[1], p[2], loop, lonk_rate,
-+                    switches >> 16, w, lonk_air, lonk_dt * 1000, lonk_dt_wall * 1000, player_speed, p_loop, p_rate);
++                    switches >> 16, w, lonk_air, lonk_dt * 1000, lonk_dt_wall * 1000, lonk_buddy_side,
++                    atan2f(face[0], face[1]) * 57.3f, player_speed, p_loop, p_rate, atan2f(fx, fz) * 57.3f);   /* faces: degrees, 0 = +z */
 +        }
 +#if defined(TOTK_GAME_V143)
 +        if (lonk_trace && i == 0) {   /* raw, every frame, to lonk_trace.bin next to the log: his body animation slot and his model */
@@ -2596,7 +2692,7 @@ index c05d6c3..3c136f9 100644
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,15 +2796,80 @@ void runtime_survey_cancel_user(void) {
+@@ -307,15 +2892,80 @@ void runtime_survey_cancel_user(void) {
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
@@ -2677,7 +2773,7 @@ index c05d6c3..3c136f9 100644
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
      } else if (request.kind == 1) {
-@@ -340,8 +2894,152 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -340,8 +2990,152 @@ void runtime_survey_tick(uint64_t frame) {
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }
