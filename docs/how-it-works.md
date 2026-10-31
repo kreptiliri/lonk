@@ -57,7 +57,7 @@ him your sword): I only found out because skipping our write for a few frames ma
   so he shivers in the snow and sweats in the heat by himself.
 - idle, walk below 4 m/s, run below 7.3, sprint above, at Link's own speeds measured from a trace (5.7 running, 9
   sprinting). With a speed dish your run went 6.1 (the sprint stayed 9), so stalking or behind you he runs at your speed
-  when it's above his own (up to 1.3x; not measured on him yet). Link's tree fades the walk into the run between 2.9 and 5.6 m/s; Lonk switches at 4. (He had no walk
+  when it's above his own (up to 1.3x; I checked it in game). Link's tree fades the walk into the run between 2.9 and 5.6 m/s; Lonk switches at 4. (He had no walk
   for a while: keeping your walking pace on the run clip looked like running while holding back.) The clip's rate
   (`slot+0xd0`) is the one Link's own tree uses (its frame controllers: walk 0.9, run 1.5, sprint 1.75), scaled by
   his speed against Link's. Matching his steps to the ground by measurement instead came out at 1.1 to 1.2, and
