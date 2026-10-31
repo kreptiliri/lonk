@@ -352,12 +352,22 @@ MacBook Air. A frame at 60 fps has 16.7 ms.
 
 ## Coming back
 
-Every frame each body piece's name is read back from the actor (`actor+0x218`); a piece that no longer reads back is
-forgotten. If that was PouchPlayer, Lonk respawns two seconds after the player stands somewhere real again (the player
+Every frame, first thing (also while the game is paused for a load), each body piece's name is read back from the actor
+(`actor+0x218`); a piece that no longer reads back is forgotten. PouchPlayer is also forgotten as soon as his body loses
+its model (`0xba8854` returns 0): on a death or a fast travel the game takes the body apart model and gear first, and the
+name only goes much later. In between, his gear code and the twin weapon code kept calling into the dying body; on the
+second fast travel in a row the game crashed in `0xcbffa0` (his equipment user) once that memory was reused. Once he's
+forgotten, nothing touches him. If that was PouchPlayer, Lonk respawns two seconds after the player stands somewhere real again (the player
 actor that exists on the loading screen sits at the origin, so that doesn't count), whether his brain runs or a single
 mood does (with the brain off he used to stay gone: I fast-travelled and lost him). Nothing of the old body
 carries over: its animation slot (freed with it), a jump or an emote in progress. Tested by dropping Link from 150 m:
-game over, Continue, and he's back, dressed, picking his next mood.
+game over, Continue, and he's back, dressed, picking his next mood. Tested: 5 shrine fast travels in a row and a
+bomb-barrel death, back every time, no crash.
+
+On a death screen the player still stands where they died, so he respawns there, and the game then puts the player at
+the autosave. He used to sprint over from the grave. Now, when the player moves more than 15 m in one frame (a respawn,
+a load) and he's more than 10 m away, he pops in behind them, the same way he does when he's lost (`spot_near`).
+Tested: "so creepy he spawned behind me, keep it".
 
 ## The brain
 

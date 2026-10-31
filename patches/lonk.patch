@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..93efe51 100644
+index c05d6c3..8359c7c 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -40,7 +40,7 @@ index c05d6c3..93efe51 100644
  #include <limits.h>
  #include <mach/mach.h>
  #include "mach_vm_compat.h"
-@@ -181,24 +184,147 @@ void runtime_survey_init(Module *m) {
+@@ -181,24 +184,148 @@ void runtime_survey_init(Module *m) {
  int runtime_survey_command(const char *line) { (void)line; return 0; }
  #endif
  #else
@@ -162,6 +162,7 @@ index c05d6c3..93efe51 100644
 +static KEEP float lonk_bob[2] = {0.04f, 0.0f};   /* 4 cm: by eye ("PERFECT") */
 +static KEEP uintptr_t lonk_body;   /* his body's animation slot (the one playing PauseMenuWait), found by pouch_gait */
 +static KEEP int lonk_trace;   /* "survey lonk trace": his and the player's positions every 3 frames */
++static unsigned lonk_you_moved;   /* frames since you teleported (lonk_step: he pops next to you) */
 +static KEEP unsigned lonk_respawn_left;   /* his body vanished (you died, a loading zone) while the brain runs: he's back after this */
 +static KEEP float trail[TRAIL_MAX][3];   /* the player's recent footsteps: ground heights Lonk can stand on */
 +static KEEP unsigned trail_count, trail_head;
@@ -193,7 +194,7 @@ index c05d6c3..93efe51 100644
  
  static int read_mem(uintptr_t address, void *out, size_t size) {
      if (!address || address > UINTPTR_MAX - size) return 0;
-@@ -254,6 +380,45 @@ static uintptr_t player_actor(void) {
+@@ -254,6 +381,45 @@ static uintptr_t player_actor(void) {
      }
      return 0;
  }
@@ -239,7 +240,7 @@ index c05d6c3..93efe51 100644
  void runtime_survey_init(Module *m) {
      const char *enabled = getenv("TOTK_SURVEY");
      if (!enabled || strcmp(enabled, "1")) return;
-@@ -272,6 +437,21 @@ void runtime_survey_init(Module *m) {
+@@ -272,6 +438,21 @@ void runtime_survey_init(Module *m) {
          runtime_fail("survey requires verified game-version forceSetMatrix entry");
      survey_main = (uintptr_t)m->base;
      survey_force = (void (*)(void *, const float *, uint32_t))(m->base + FORCE_MATRIX);
@@ -261,7 +262,7 @@ index c05d6c3..93efe51 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,22 +462,1994 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,22 +463,2084 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -330,7 +331,7 @@ index c05d6c3..93efe51 100644
 +    fprintf(stderr, "[survey] lonk: -> %s (%u frames)\n", lonk_names[kind], frames);
 +}
 +/* The dice: mostly stalking, sometimes in the way, a gift, a wander or right behind you. */
-+static KEEP int lonk_no_buddy;
++static KEEP int lonk_no_buddy, lonk_no_stalk;
 +static KEEP int lonk_home = -1;   /* the mood you set with the brain off: a reaction (fleeing your sword, your whistle) comes back to it */
 +static float lonk_pace;   /* the player's speed over the last few seconds (m/s), and how long they've stood still */
 +static unsigned lonk_still;
@@ -343,6 +344,7 @@ index c05d6c3..93efe51 100644
 +    else if (lonk_still > 600) { weight[LONK_WANDER] = 22; weight[LONK_HIDE] = 18; weight[LONK_GIFT] = 20; weight[LONK_BEHIND] = 20; weight[LONK_BUDDY] = 8; }
 +    if (lonk_climate) weight[LONK_GIFT] += 25;
 +    if (lonk_no_buddy) weight[LONK_BUDDY] = 0;   /* "survey lonk nobuddy": he never picks buddy himself (your whistle still works) */
++    if (lonk_no_stalk) weight[LONK_STALK] = 0;   /* "survey lonk nostalk": nor stalking */
 +    static int last_kind = -1;
 +    if (last_kind == LONK_GIFT) weight[LONK_GIFT] = 0;   /* no two gifts in a row */
 +    unsigned total = 0, pick;
@@ -551,6 +553,7 @@ index c05d6c3..93efe51 100644
 +    }
 +}
 +static void eu_scan(uintptr_t eu);
++static void weapon_scan(uintptr_t eu, const char *who);
 +static uintptr_t pouch_eu(uintptr_t actor);
 +static void peek_run(uintptr_t player) {
 +    static const uint32_t w_model[] = {0xf9411408, 0xb4000168, 0xf9400500, 0xb4000100, 0xf9400008};
@@ -575,6 +578,7 @@ index c05d6c3..93efe51 100644
 +    uintptr_t pouch = 0, addr = 0;
 +    for (unsigned i = 0; i < stalker_count; i++) if (!strcmp(stalkers[i].name, "PouchPlayer")) pouch = stalkers[i].actor;
 +    if (n == 1 && !strcmp(tok[0], "euscan")) { eu_scan(pouch ? pouch_eu(pouch) : 0); return; }
++    if (n == 1 && !strcmp(tok[0], "wscan")) { weapon_scan(pouch_eu(player), "you"); weapon_scan(pouch ? pouch_eu(pouch) : 0, "him"); return; }
 +    if (n == 1 && !strcmp(tok[0], "watchcmds")) { lonk_watch_cmds = !lonk_watch_cmds; fprintf(stderr, "[survey] watchcmds %d\n", lonk_watch_cmds); return; }
 +    if (n == 1 && !strcmp(tok[0], "around")) {   /* what 24 chest-high rays from him hit within 15 m (characters too), by actor name */
 +        float at[3];
@@ -1086,6 +1090,59 @@ index c05d6c3..93efe51 100644
 +        if (ref.held) __atomic_fetch_sub((int32_t *)(ref.actor + 0x1b0), 1, __ATOMIC_SEQ_CST);
 +    }
 +}
++/* "survey peek wscan": what an equipment user's weapon (link 0) and shield (4) point at, looking for the fused part: actor
++   pointers and ActorLinks in the actor and one pointer deeper, by name */
++static int actor_name_at(uintptr_t actor, char out[64]) {
++    uintptr_t np = read_ptr(actor + GAME_ACTOR_NAME);
++    out[0] = 0;
++    if (np < 0x100000000ull || np > 0x7fffffffffffull || !read_mem(np, out, 63)) return 0;
++    out[63] = 0;
++    int k = 0;
++    while (out[k] && (isalnum((unsigned char)out[k]) || out[k] == '_')) k++;
++    return k >= 4 && !out[k];
++}
++static void weapon_scan_area(uintptr_t base, size_t size, uintptr_t self, const char *who, const char *path) {
++    for (uintptr_t off = 0; off + 8 <= size; off += 8) {
++        uintptr_t v = read_ptr(base + off), q = read_ptr(base + off + 8);
++        char text[64];
++        if (v != self && v >= 0x100000000ull && v <= 0x7fffffffffffull && !(v & 7) && actor_name_at(v, text))
++            fprintf(stderr, "[survey] wscan %s: %s+%#llx -> actor %s (%#llx)\n", who, path, (unsigned long long)off, text, (unsigned long long)v);
++        /* an ActorLink, decoded by reading only (calling the game's get on what merely looks like one crashed the game: it locks
++           the handle's mutex): {.., handle +8, id +0x10}, live when handle+0x48 == id, the actor's base at handle+0x40 */
++        uint32_t id = 0, now = 0;
++        if (q < 0x100000000ull || q > 0x7fffffffffffull || (q & 7) || !read_mem(base + off + 0x10, &id, 4) || id == 0xffffffffu || !id) continue;
++        if (!read_mem(q + 0x48, &now, 4) || now != id) continue;
++        uintptr_t obj = read_ptr(q + 0x40);
++        if (obj && obj != self && actor_name_at(obj, text))
++            fprintf(stderr, "[survey] wscan %s: %s+%#llx -> link %s (%#llx)\n", who, path, (unsigned long long)off, text, (unsigned long long)obj);
++    }
++}
++static void weapon_scan(uintptr_t eu, const char *who) {
++    static const uint32_t w_valid[] = {0xa9bd7bfd, 0xf9000bf5, 0xa9024ff4, 0x910003fd, 0xb9401008};
++    static const uint32_t w_get[] = {0xd10183ff, 0xa9017bfd, 0xf90013f9, 0xa9035ff8, 0xa90457f6};
++    typedef struct { uintptr_t actor; uint8_t held, pad[23]; } link_ref;
++    bool (*valid)(uintptr_t) = (bool (*)(uintptr_t))game_fn(0x1b2f20, w_valid, 5);
++    link_ref (*get)(uintptr_t) = (link_ref (*)(uintptr_t))game_fn(0x1afbe4, w_get, 5);
++    if (!eu || !valid || !get) { fprintf(stderr, "[survey] wscan %s: no equipment user\n", who); return; }
++    for (unsigned k = 0; k < 2; k++) {
++        uintptr_t link = eu + 0x20 + (k ? 4 : 0) * 0x18;
++        if (!valid(link)) continue;
++        link_ref ref = get(link);
++        if (!ref.actor) continue;
++        char text[64], path[32];
++        actor_name_at(ref.actor, text);
++        fprintf(stderr, "[survey] wscan %s: link %d = %s (%#llx)\n", who, k ? 4 : 0, text, (unsigned long long)ref.actor);
++        weapon_scan_area(ref.actor, 0x1000, ref.actor, who, "w");
++        for (uintptr_t off = 0; off < 0x1000; off += 8) {   /* one pointer deeper: its components */
++            uintptr_t c = read_ptr(ref.actor + off);
++            uint64_t probe;
++            if (c < 0x100000000ull || c > 0x7fffffffffffull || (c & 7) || c == ref.actor || !read_mem(c, &probe, 8)) continue;
++            snprintf(path, sizeof path, "w+%#llx>", (unsigned long long)off);
++            weapon_scan_area(c, 0x300, ref.actor, who, path);
++        }
++        if (ref.held) __atomic_fetch_sub((int32_t *)(ref.actor + 0x1b0), 1, __ATOMIC_SEQ_CST);
++    }
++}
 +/* His weapons on his back. A pouch user's weapons come out drawn (in his hands: his sword and shield sat there through
 +   every run); the menu's AI node OneShotChangeDrawnSwordStateForPouchPlayer (getName 0x2508168, run 0x2507a80, found
 +   through its name string and its vtable) puts them away, when you hold nothing in the menu, with 0x4f5194(eu, link, 0)
@@ -1331,6 +1388,38 @@ index c05d6c3..93efe51 100644
 +    (void)a; (void)p; (void)out;
 +    return 0;
 +}
++/* Forgets bodies the game has taken apart (a death, a fast travel), before anything else touches them this frame: it runs
++   while the game is paused for a load too (lonk_step doesn't), since his gear and weapon code call into his body every frame,
++   and that crashed the game once the body's memory was reused. */
++static void stalkers_check(void) {
++    static const uint32_t w_body[] = {0xf9411408, 0xb4000168, 0xf9400500, 0xb4000100, 0xf9400008};
++    uintptr_t (*get_model)(uintptr_t) = (uintptr_t (*)(uintptr_t))game_fn(0xba8854, w_body, 5);
++    static KEEP uintptr_t had_model;   /* his body once it's had a model */
++    for (unsigned i = 0; i < stalker_count;) {
++        uintptr_t actor = stalkers[i].actor, name = read_ptr(actor + GAME_ACTOR_NAME);
++        char text[64] = {0};
++        float pos[3];
++        /* a death or a fast travel: the game takes his body apart (model and gear go first, the name much later). Writing
++           into it meanwhile (his animation slot goes with it) crashed the game on the second fast travel: so a body that's
++           lost its model is gone */
++        int pouch = !strcmp(stalkers[i].name, "PouchPlayer"), modeled = pouch && get_model && get_model(actor);
++        if (modeled) had_model = actor;
++        if (!name || !read_mem(name, text, sizeof text - 1) || strcmp(text, stalkers[i].name) ||
++            !read_mem(actor + ACTOR_POS, pos, sizeof pos) || !valid_xyz(pos) || (pouch && !modeled && had_model == actor)) {
++            if (had_model == actor) had_model = 0;
++            fprintf(stderr, "[survey] lonk: dropped %s (%#llx)\n", stalkers[i].name, (unsigned long long)actor);
++            /* he comes back with a mood running, brain or not (with the brain off he used to stay gone after a death or a
++               loading zone), and nothing of the old body carries over: its animation slot (freed with it), a jump, an emote */
++            if (!strcmp(stalkers[i].name, "PouchPlayer")) {
++                lonk_respawn_left = 120;
++                lonk_body = 0; lonk_air = 0; lonk_falling = 0; lonk_jump = 0; lonk_jump_aimed = 0; lonk_emote_left = 0; lonk_v = 0;
++            }
++            stalkers[i] = stalkers[--stalker_count];
++            continue;
++        }
++        ++i;
++    }
++}
 +static void lonk_step(uint64_t frame, uintptr_t player) {
 +    {
 +        static uint64_t last_ns;
@@ -1370,6 +1459,9 @@ index c05d6c3..93efe51 100644
 +    /* the player's speed (m/s, smoothed), for walking beside him */
 +    static float last_p[3], player_speed;
 +    float moved_p = hypotf(p[0] - last_p[0], p[2] - last_p[2]);
++    /* you jumped 15 m in a frame: a respawn after dying (an autosave can be far off) or a load. He'd sprinted over from
++       where you died (tested: pop next to me) */
++    if (moved_p > 15) lonk_you_moved = 30;
 +    player_speed += ((moved_p > 2 ? 0 : moved_p / lonk_dt) - player_speed) * ease(0.2f);
 +    /* for copying your run or sprint beside you: your speed over about half a second, and a wide gap between the two,
 +       or every dip in your sprint flipped his clip (and each flip restarts it) */
@@ -1394,22 +1486,10 @@ index c05d6c3..93efe51 100644
 +        memcpy(trail[trail_head], p, sizeof p); trail_head = (trail_head + 1) % TRAIL_MAX;
 +        if (trail_count < TRAIL_MAX) trail_count++;
 +    }
++    stalkers_check();
 +    for (unsigned i = 0; i < stalker_count;) {
-+        uintptr_t actor = stalkers[i].actor, name = read_ptr(actor + GAME_ACTOR_NAME);
-+        char text[64] = {0};
 +        float pos[3];
-+        if (!name || !read_mem(name, text, sizeof text - 1) || strcmp(text, stalkers[i].name) ||
-+            !read_mem(actor + ACTOR_POS, pos, sizeof pos) || !valid_xyz(pos)) {
-+            fprintf(stderr, "[survey] lonk: dropped %s (%#llx)\n", stalkers[i].name, (unsigned long long)actor);
-+            /* he comes back with a mood running, brain or not (with the brain off he used to stay gone after a death or a
-+               loading zone), and nothing of the old body carries over: its animation slot (freed with it), a jump, an emote */
-+            if (!strcmp(stalkers[i].name, "PouchPlayer")) {
-+                lonk_respawn_left = 120;
-+                lonk_body = 0; lonk_air = 0; lonk_falling = 0; lonk_jump = 0; lonk_jump_aimed = 0; lonk_emote_left = 0; lonk_v = 0;
-+            }
-+            stalkers[i] = stalkers[--stalker_count];
-+            continue;
-+        }
++        if (!read_mem(stalkers[i].actor + ACTOR_POS, pos, sizeof pos) || !valid_xyz(pos)) { ++i; continue; }
 +        if (!lonk_anchored) { memcpy(lonk_anchor, pos, sizeof pos); lonk_anchored = 1; }
 +        ++i;
 +    }
@@ -1913,6 +1993,8 @@ index c05d6c3..93efe51 100644
 +        const char *why = fabsf(feet - p[1]) > 5 && lonk_blocked > 30 ? "height" : (far > 30 && lonk_blocked > 30) || far > 60 ? "far" : lonk_no_gain > 240 ? "no way to you" : !strcmp(ground_src, "none") ? "no floor" :
 +                          stuck_seconds ? "stuck" : NULL;
 +        lost = why ? lost + lonk_ticks : 0;
++        if (lonk_you_moved && far > 10) { lost = 999; why = "you teleported"; }
++        if (lonk_you_moved) lonk_you_moved--;
 +        if (lost > 180) {
 +            fprintf(stderr, "[survey] lonk: lost (%s), back behind you\n", why);
 +            lonk_stat_lost++;
@@ -2135,6 +2217,15 @@ index c05d6c3..93efe51 100644
 +        atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release); pthread_mutex_unlock(&survey_lock);
 +        return 1;
 +    }
++    int nostalk = (used = 0, sscanf(line, "survey lonk nostalk %n", &used)) == 0 && used && !line[used];
++    if (!kind && (nostalk || ((used = 0, sscanf(line, "survey lonk stalkok %n", &used)) == 0 && used && !line[used]))) {
++        pthread_mutex_lock(&survey_lock);
++        lonk_no_stalk = nostalk;
++        if (nostalk && lonk_kind == LONK_STALK && lonk_brain) lonk_phase_left = 0;
++        fprintf(stderr, "[survey] lonk: stalk mode %s\n", nostalk ? "off" : "back on");
++        pthread_mutex_unlock(&survey_lock);
++        return 1;
++    }
 +    int nobuddy = (used = 0, sscanf(line, "survey lonk nobuddy %n", &used)) == 0 && used && !line[used];
 +    if (!kind && (nobuddy || ((used = 0, sscanf(line, "survey lonk buddyok %n", &used)) == 0 && used && !line[used]))) {
 +        pthread_mutex_lock(&survey_lock);
@@ -2259,7 +2350,7 @@ index c05d6c3..93efe51 100644
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,15 +2459,79 @@ void runtime_survey_cancel_user(void) {
+@@ -307,15 +2550,80 @@ void runtime_survey_cancel_user(void) {
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
@@ -2281,6 +2372,7 @@ index c05d6c3..93efe51 100644
 +    if (request.kind == 3 && actor) {   /* tag "prop": a thing on its own, not a piece of him */
 +        spawn_body = strcmp(request.tag, "prop") != 0; spawn_request(request.tag, request.name, request.off, frame, actor); request.kind = 0;
 +    }
++    if (stalker_count) stalkers_check();
 +    if (stalk_left && actor) { lonk_step(frame, actor); if (!--stalk_left) fprintf(stderr, "[survey] lonk: done\n"); }
 +    /* never gone for long: once the player stands somewhere real again (not the loading screen's origin), he respawns */
 +    if (lonk_respawn_left && actor && !spawn_left && !request.kind) {
@@ -2339,7 +2431,7 @@ index c05d6c3..93efe51 100644
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
      } else if (request.kind == 1) {
-@@ -340,8 +2556,152 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -340,8 +2648,152 @@ void runtime_survey_tick(uint64_t frame) {
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }

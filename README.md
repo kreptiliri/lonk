@@ -98,6 +98,7 @@ That spawns him 4 m in front of you and runs his brain for an hour.
 | `survey lonk drawat\|putat <0..1>` | when, in his draw / put-away clip, the weapon reaches his hand / his back |
 | `survey lonk goto <right> <forward> [m/s]` | send him somewhere (metres from you) |
 | `survey lonk nobuddy` / `survey lonk buddyok` | he stops / starts picking buddy mode himself (your whistle still calls him) |
+| `survey lonk nostalk` / `survey lonk stalkok` | he stops / starts picking stalk mode himself |
 | `survey lonk stop` | stop his brain |
 | `survey equip <slot> <Name> [dye]` | put one piece on him (0 weapon, 7 bow, 8 shield, 9 head, 10 upper, 11 lower; `-` copies yours) |
 | `survey spawn prop <Name> [forward [sideways [up]]]` | spawn something on its own (an enemy, to watch him pick a fight) |
@@ -118,6 +119,7 @@ reload.
 - He steers with a knee-high probe: thin things (trees, fences) can still slip through, and anything knee high or lower
   he just walks over.
 - As your twin he only reaches for his weapons standing still; moving, they just switch between his back and his hands.
+- As your twin he carries your weapon without its fused part.
 - With the mod installed, the inventory Link runs, sprints, celebrates, startles or eats in the pause menu when you hold
   a weapon.
 
