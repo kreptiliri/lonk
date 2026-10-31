@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..14ae9fe 100644
+index c05d6c3..2c4d523 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -98,7 +98,7 @@ index c05d6c3..14ae9fe 100644
 +static KEEP char spawn_name[64], spawn_tag[64];
 +/* Lonk: every body piece spawned by "survey spawn" is placed each frame at one anchor (so the pieces read as one figure),
 +   through forceSetMatrix, yaw only. "survey stalk <frames> [m/s [stop m]]" walks it to the player; "survey lonk ..." runs
-+   the behaviours or the dice brain. Survives user input (the user is playing). */
++   the behaviours or the dice brain. Survives your input (you're playing). */
 +enum { STALK_MAX = 16, TRAIL_MAX = 512 };
 +enum { LONK_STALK, LONK_BLOCK, LONK_BEHIND, LONK_WANDER, LONK_GIFT, LONK_FLEE, LONK_PARTY, LONK_BUDDY, LONK_FIGHT, LONK_HIDE, LONK_MAD, LONK_KINDS };
 +static const char *const lonk_names[LONK_KINDS] = {"stalk", "block", "behind", "wander", "gift", "flee", "party", "buddy", "fight", "hide", "mad"};
@@ -588,7 +588,7 @@ index c05d6c3..14ae9fe 100644
 +}
 +/* The parts fused on an equipment user's weapon, bow and shield (links 0, 3, 4): actors numbered just after one of those
 +   (up to 8 on: when all three are made at once, the parts come after all three, so which goes on which isn't told
-+   apart), within 3 m of it (a spear's part sits 2.3 m from its grip), not one of the user's own pieces (a sheath, a quiver).
++   apart), within 3 m of it (a spear's part sits 2.3 m from its grip), not one of your own pieces (a sheath, a quiver).
 +   Up to 4, the number found. */
 +static unsigned fuse_parts(uintptr_t eu, uintptr_t out[4]) {
 +    unsigned n = 0;
@@ -2697,7 +2697,7 @@ index c05d6c3..14ae9fe 100644
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
 +#ifdef SURVEY_SPAWN
-+    /* a spawn in flight keeps being watched (gifts, body pieces): the user is playing, not cancelling it */
++    /* a spawn in flight keeps being watched (gifts, body pieces): you're playing, not cancelling it */
 +    if (stalk_left || spawn_left || pouch_idle_left || drop_request[0] || dress_left || dress_watch || lonk_respawn_left || stalker_count) atomic_store(&runtime_survey_pending, 1);
 +#endif
      fprintf(stderr, "[survey] cancelled: user input\n");
