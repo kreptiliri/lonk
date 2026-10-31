@@ -83,13 +83,15 @@ He only runs in the port's test mode, on a copy of your save.
 survey lonk start
 ```
 
-That spawns him 4 m in front of you and runs his brain for an hour.
+That spawns him 4 m in front of you and runs his brain (for 1000 hours). `survey lonk start stalk` (or any mood)
+spawns him already in that mood instead, with the brain off. Send `twin` / `nobuddy` before `start` so they're set
+from his first frame.
 
 ### Commands
 
 | Command | |
 |---|---|
-| `survey lonk start` | spawn him and start his brain |
+| `survey lonk start [mood]` | spawn him and start his brain, or spawn him straight into one mood (brain off) |
 | `survey lonk twin` / `survey lonk naked` | dress him like you (and follow your changes, fused weapons included) / back to his underwear |
 | `survey lonk outfit <set\|random>` | a whole armor set: `hylian`, `wild`, `zora`, `desert`, `snowquill`, `flamebreaker`, `stealth`, `climbing`, `radiant`, `soldier`, `rubber`, `barbarian`, `royal`, `glide`, `froggy`, `miner`, `ember`, `charged`, `frostbite`, `mystic`, `zonaite`, `awakening`, `depths`, `yiga` |
 | `survey lonk <mood> <frames>` | force a mood: `stalk`, `buddy`, `block`, `behind`, `wander`, `gift`, `flee`, `party`, `fight`, `hide` |
@@ -121,6 +123,7 @@ reload.
 - As your twin he only reaches for his weapons standing still; moving, they just switch between his back and his hands.
 - As your twin he holds a two-hander in one hand when he stands still (his tree has no two-handed idle; it looks tough, so
   it stays), and he doesn't copy a shield-only guard.
+- As your twin he's in his underwear for about half a second after he spawns, until his clothes are on.
 - With the mod installed, the inventory Link runs, sprints, celebrates, startles or eats in the pause menu when you hold
   a weapon.
 
