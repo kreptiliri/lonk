@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..7fae3ac 100644
+index c05d6c3..cd176cc 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -262,7 +262,7 @@ index c05d6c3..7fae3ac 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,22 +463,2432 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,22 +463,2467 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -1796,7 +1796,41 @@ index c05d6c3..7fae3ac 100644
 +    stalk_dash = player_sprinting || off > 8 || (stalk_dash && off > 4);
 +    if ((lonk_kind == LONK_STALK || lonk_kind == LONK_BEHIND) && stalk_dash) speed = LONK_SPRINT;
 +    switch (lonk_kind) {
-+    case LONK_BLOCK: target[0] = p[0] + fx * 2.5f; target[2] = p[2] + fz * 2.5f; speed = LONK_SPRINT; stop = 0.2f; break;
++    case LONK_BLOCK: {   /* gets 2.5 m in front of you, facing you, and stays in your way */
++        static unsigned look_left;   /* 4 times a second: how much floor is there in front of you? */
++        static float room = 2.5f;
++        static int in_front;   /* 1.5 m ahead of you counts as in front, under 0.3 as not any more */
++        if (entering) { look_left = 0; room = 2.5f; in_front = 0; }
++#if defined(TOTK_GAME_V143)
++        /* at a cliff edge his spot was out over the drop: he sprinted back and forth along the edge (tested). So his spot
++           is inside the floor in front of you, and with no room there he stays where he is and watches you */
++        look_left = tick_down(look_left);
++        if (!look_left && isfinite(p[1])) {
++            look_left = 15;
++            float from[3] = {p[0] + fx * 0.5f, p[1], p[2] + fz * 0.5f};
++            room = 0.5f + path_free(from, fx, fz, 2.3f);
++        }
++#endif
++        float want = fminf(2.5f, room - 0.4f);
++        float rx = a[0] - p[0], rz = a[2] - p[2], ahead = rx * fx + rz * fz, lat = rx * -fz + rz * fx;
++        speed = LONK_SPRINT; stop = 0.2f;
++        in_front = in_front ? ahead > 0.3f : ahead > 1.5f;
++        if (want < 1.4f) { target[0] = a[0]; target[2] = a[2]; }
++        else if (!in_front) {
++            /* not in front of you yet: round you, 2.5 m out on his side, then in front. Straight at his spot, behind you
++               going away from him, he ran into you and sprinted along glued to your back (tested). Overtaking he goes
++               faster than you, even your sprint */
++            float side = lat >= 0 ? 1 : -1, by = fmaxf(ahead, 0) + 1.5f;
++            target[0] = p[0] - fz * 2.5f * side + fx * by; target[2] = p[2] + fx * 2.5f * side + fz * by;
++            speed = fmaxf(LONK_SPRINT, player_speed + 2.5f); stop = 0;
++        } else {
++            /* and the boost till he's on his spot: 1 m ahead of your sprint, he dropped to a sprint and headed in at a
++               slant, so he stayed level with you, flicking between the two (tested) */
++            target[0] = p[0] + fx * want; target[2] = p[2] + fz * want;
++            if (hypotf(target[0] - a[0], target[2] - a[2]) > 0.8f && player_speed > 1) speed = fmaxf(LONK_SPRINT, player_speed + 2.5f);
++        }
++        break;
++    }
 +    case LONK_BEHIND:
 +        if (entering && ((a[0] - p[0]) * fx + (a[2] - p[2]) * fz < 0 || hypotf(a[0] - p[0], a[2] - p[2]) < 3)) {   /* he was always there */
 +            /* (only while he's out of your sight already, behind you or right next to you: in front of you, the pop
@@ -2206,9 +2240,10 @@ index c05d6c3..7fae3ac 100644
 +            lonk_buddy_side = -lonk_buddy_side; lonk_buddy_round = 150;
 +            stuck = 0;
 +        }
-+        if (stuck && lonk_kind == LONK_BLOCK) {   /* can't get in front of you (a wall there): he just tags along instead */
++        if (stuck && lonk_kind == LONK_BLOCK) {   /* can't get in front of you (a wall there): he tags along for 5 s, then tries
++                                                     again (for the rest of the mood, it was the rest of the hour; tested) */
 +            fprintf(stderr, "[survey] lonk: can't get in front of you, follows instead\n");
-+            lonk_enter(LONK_STALK, lonk_phase_left);
++            lonk_enter(LONK_STALK, 300);
 +            stuck = 0;
 +        }
 +        stuck_seconds = stuck && lonk_kind != LONK_WANDER && lonk_kind != LONK_FLEE ? stuck_seconds + 1 : 0;
@@ -2698,7 +2733,7 @@ index c05d6c3..7fae3ac 100644
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,15 +2898,80 @@ void runtime_survey_cancel_user(void) {
+@@ -307,15 +2933,80 @@ void runtime_survey_cancel_user(void) {
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
@@ -2779,7 +2814,7 @@ index c05d6c3..7fae3ac 100644
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
      } else if (request.kind == 1) {
-@@ -340,8 +2996,152 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -340,8 +3031,152 @@ void runtime_survey_tick(uint64_t frame) {
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }

@@ -30,7 +30,7 @@ Runs on the [MacNativeGames](https://github.com/ly05010419/MacNativeGames) nativ
 |---|---|
 | stalk | walks up and stares at you from a step away |
 | buddy | walks beside you at your pace (your run or your sprint), looking where you look; gets bored when you stand still |
-| block | sprints into your path |
+| block | sprints into your path, overtaking round your side, and stays in front of you facing you |
 | gift | drops something at your feet (an apple, a fish, a monster part, a bomb barrel; a pepper if you're freezing, a hydromelon if you're too hot), celebrates, and runs |
 | behind | is suddenly standing right behind you, and startles if you turn around |
 | wander | wanders off somewhere he can actually get to, then looks around, looks at the sky or has a snack |

@@ -379,8 +379,14 @@ makes it look like he dove there).
   after 25 s he gives up and follows you again.
 - A wander, after its emote and a couple of seconds' rest, goes on somewhere else (with the brain off it used to be one
   trip, then standing there for the rest of the hour).
-- Block can't always get in front of you (a wall in the way): stuck for a second there, he follows you instead. Before,
-  he got "lost", popped behind you, and tried again, every 3 seconds.
+- Block: his spot is 2.5 m in front of you, inside the floor there (looked for 4 times a second); with less than about
+  1.4 m of floor in front of you (a cliff edge) he stays where he is and watches. At an edge his spot was out over the
+  drop and he sprinted back and forth along it. Not in front of you yet, he goes round you, 2.5 m out on his side, then
+  in: straight at his spot he ran into your back and sprinted along glued to it. Till he's on his spot he goes your
+  speed + 2.5 m/s (at least a sprint), and he only counts as in front 1.5 m ahead (not any more under 0.3): 1 m ahead of
+  your sprint he dropped to a sprint, headed in at a slant and stayed level with you, jittering. Stuck for a second (a
+  wall), he follows you for 5 s, then tries again (it used to be for the rest of the mood). Before that he got "lost",
+  popped behind you, and tried again, every 3 seconds.
 - Buddy mode, both standing still for 7 s: now and then he looks up, looks around or snacks.
 
 ## What he costs
