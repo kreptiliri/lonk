@@ -77,6 +77,7 @@ EQUIP_CLIPS = [(21, 321, 'Equip_Sword_On_Natural'), (22, 322, 'Equip_Lsword_On_N
 LOOP_BOOLS = ('IsAttachedWeapon', 'WeaponGuardEnhance', 'ShieldEquip', 'WeaponFire')
 LOOPS = [('Swim_Move_Slow_F', 'Swim_Wait'), ('Climb_Wall_Move_U', 'Float_Glide_N')]   # [WeaponGuardEnhance][not ShieldEquip] (cling: the climb held still)
 SWING = 'Sword_Attack_S1'   # and, instead of the glide when WeaponFire is set, a sword swing (fighting beside you)
+SWIM_DASH = 'Swim_Move_Dash'   # and instead of the swim, a fast swim (keeping up with yours)
 
 
 def reached(doc):
@@ -227,9 +228,9 @@ def main():
             not n['Body'].get('Events') and plain_loop(n)]
     pickers = [n for n in doc['Nodes'] if n['Node Type'] == 'BoolSelector' and n['Node Index'] not in taken]
     fall = entries[5]   # (keyed by the original cases: 5 is his fall, at 15 now)
-    if len(free) < 5 or len(pickers) < 5 or nodes[fall['Node Index']]['Node Type'] != 'SkeletalAnimation':
+    if len(free) < 6 or len(pickers) < 6 or nodes[fall['Node Index']]['Node Type'] != 'SkeletalAnimation':
         sys.exit('no free bool selectors and clips for swimming and climbing: not the 1.4.3 ASB?')
-    loop, guard, shield, shield2, fire = pickers[:5]
+    loop, guard, shield, shield2, fire, fire2 = pickers[:6]
     clips = iter(free)
 
     def pick(node, param, if_true, if_false):
@@ -241,13 +242,14 @@ def main():
         leaf['Body']['Animation'] = name
         print(f'{name}: node {leaf["Node Index"]}')
         return leaf['Node Index']
-    pick(shield, LOOP_BOOLS[2], clip(LOOPS[0][0]), clip(LOOPS[0][1]))
+    pick(fire2, LOOP_BOOLS[3], clip(SWIM_DASH), clip(LOOPS[0][0]))
+    pick(shield, LOOP_BOOLS[2], fire2['Node Index'], clip(LOOPS[0][1]))
     pick(fire, LOOP_BOOLS[3], clip(SWING), clip(LOOPS[1][1]))
     pick(shield2, LOOP_BOOLS[2], clip(LOOPS[1][0]), fire['Node Index'])
     pick(guard, LOOP_BOOLS[1], shield['Node Index'], shield2['Node Index'])
     pick(loop, LOOP_BOOLS[0], guard['Node Index'], fall['Node Index'])
     fall['Node Index'] = loop['Node Index']
-    if (taken & {n['Node Index'] for n in (loop, guard, shield, shield2, fire)}) or ROOT in reached({'Nodes': doc['Nodes'], 'Commands': [{'Node Index': loop['Node Index']}]}):
+    if (taken & {n['Node Index'] for n in (loop, guard, shield, shield2, fire, fire2)}) or ROOT in reached({'Nodes': doc['Nodes'], 'Commands': [{'Node Index': loop['Node Index']}]}):
         sys.exit('the loops would loop back into his tree')
     AsbFile.from_dict(doc).to_binary(str(work) + '/')
     edited = (work / 'PouchPlayer.root.asb').read_bytes()

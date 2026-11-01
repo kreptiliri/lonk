@@ -265,7 +265,7 @@ wasn't: the search for free nodes didn't follow bool selectors (their children a
 so his idle reached that selector too and the tree had a loop in it, and the "free" clips were his face's blinks. Now
 the search follows them, and the build stops if the new branch could reach back into his tree. Clinging to a wall is the
 climb held still (rate 0). A fifth loop, a sword swing (`Sword_Attack_S1`), sits where the glide was, behind one more
-bool selector on `WeaponFire`. `survey lonk pose <swim|tread|climb|cling|glide|swing|off>` plays one where he stands. The first use:
+bool selector on `WeaponFire`, and a sixth, `Swim_Move_Dash`, where the swim was, the same way. `survey lonk pose <swim|fastswim|tread|climb|cling|glide|swing|off>` plays one where he stands. The first use:
 when you glide and he's falling (he followed you off a ledge), he glides too, no paraglider of his own, sinking as fast
 as you do (your climb rate, between 1.5 and 6 m/s down) instead of dropping like a stone.
 
@@ -275,7 +275,8 @@ ADRP+ADD scan and its vtable): the same raycast as his, with the filter's layer 
 at `[[[[main+0x395dac0]]+0x18]+0x48] + 0x26*4` in the high half and 0x11 in the low (minus the usual 0xfffc bits), and
 a hit is water when its layer (`q+0x48`) is 0x26 to 0x2b. Every 4 frames he looks for it from 2.5 m over his feet;
 with more than 1.2 m of water over the floor he floats with his feet 1.4 m under the surface (as yours are), swims at
-2.5 m/s (a guess) or treads water standing still. Tested in a pond on the Great Sky Island: he ran in after me, swam,
+2.5 m/s (a guess), keeps up with your swim dash (your speed, up to 6 m/s, a fast swim over 3.5) or treads water
+standing still. Tested in a pond on the Great Sky Island: he ran in after me, swam,
 trod water beside me, and walked out on the other side. `survey peek water` lists the ponds within 200 m (water with a
 floor under it: at an island's edge there's water with nothing under it, and I fell off the island).
 

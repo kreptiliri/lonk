@@ -100,7 +100,7 @@ from his first frame.
 | `survey lonk <mood> <frames>` | force a mood: `stalk`, `buddy`, `block`, `behind`, `wander`, `gift`, `flee`, `party`, `fight`, `hide`, `race` |
 | `survey lonk hit [gift\|eat\|silly]` | as if you'd swung at him (any reaction, or that one) |
 | `survey lonk emote <name>` | `look`, `lookup`, `eat`, `meal` (the same as `eat` now), `yuck`, `jump`, `sulk`, `surprise` |
-| `survey lonk pose <swim\|tread\|climb\|cling\|glide\|swing\|off>` | play one of the new loops where he stands, to look at it (needs the mod rebuilt) |
+| `survey lonk pose <swim\|fastswim\|tread\|climb\|cling\|glide\|swing\|off>` | play one of the new loops where he stands, to look at it (needs the mod rebuilt) |
 | `survey lonk drawat\|putat <0..1>` | when, in his draw / put-away clip, the weapon reaches his hand / his back |
 | `survey lonk goto <right> <forward> [m/s]` | send him somewhere (metres from you) |
 | `survey lonk nobuddy` / `survey lonk buddyok` | he stops / starts picking buddy mode himself (your whistle still calls him) |
