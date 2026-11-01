@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..b308c44 100644
+index c05d6c3..9726ed1 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -40,7 +40,7 @@ index c05d6c3..b308c44 100644
  #include <limits.h>
  #include <mach/mach.h>
  #include "mach_vm_compat.h"
-@@ -181,24 +184,150 @@ void runtime_survey_init(Module *m) {
+@@ -181,24 +184,152 @@ void runtime_survey_init(Module *m) {
  int runtime_survey_command(const char *line) { (void)line; return 0; }
  #endif
  #else
@@ -151,6 +151,8 @@ index c05d6c3..b308c44 100644
 +static KEEP int lonk_emote, lonk_emoted;   /* a one-off emote (its gait: GAIT_LOOK, GAIT_EAT...) he's doing instead of moving, once per mood */
 +static KEEP unsigned lonk_emote_left, lonk_emote_late;   /* frames left; frames it's waited to start (those don't count, up to a second) */
 +static KEEP int lonk_air;   /* in the air */
++static int lonk_swim;   /* in deep water: he swims (or treads water) with the surface at his chest */
++#define LONK_SWIM 2.5f   /* m/s in the water (a guess: Link's swim is slow) */
 +/* The walk, run and dash clips carry Link forward by themselves (their Root bone, about 3 m a loop). The mod takes his
 +   Skl_Root and Root from a standing clip (a bone blender over all of PauseMenuWait), so his body stays where he's placed:
 +   undoing the drift in here never quite matched the game's blend, and he snapped at every stop. */
@@ -196,7 +198,7 @@ index c05d6c3..b308c44 100644
  
  static int read_mem(uintptr_t address, void *out, size_t size) {
      if (!address || address > UINTPTR_MAX - size) return 0;
-@@ -254,6 +383,45 @@ static uintptr_t player_actor(void) {
+@@ -254,6 +385,45 @@ static uintptr_t player_actor(void) {
      }
      return 0;
  }
@@ -242,7 +244,7 @@ index c05d6c3..b308c44 100644
  void runtime_survey_init(Module *m) {
      const char *enabled = getenv("TOTK_SURVEY");
      if (!enabled || strcmp(enabled, "1")) return;
-@@ -272,6 +440,21 @@ void runtime_survey_init(Module *m) {
+@@ -272,6 +442,21 @@ void runtime_survey_init(Module *m) {
          runtime_fail("survey requires verified game-version forceSetMatrix entry");
      survey_main = (uintptr_t)m->base;
      survey_force = (void (*)(void *, const float *, uint32_t))(m->base + FORCE_MATRIX);
@@ -264,7 +266,7 @@ index c05d6c3..b308c44 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,22 +465,2636 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,22 +467,2693 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -429,6 +431,29 @@ index c05d6c3..b308c44 100644
 +    memcpy(hit, q + 0x24, 12);
 +    if (normal) memcpy(normal, q + 0x30, 12);
 +    for (int k = 0; k < 3; k++) if (!isfinite(hit[k])) return 0;
++    return 1;
++}
++/* Water's surface straight down (x, z) from top to bottom, 0 if no water: the game's QueryPhysicsRaycastWaterSurfaceIn-
++   DownwardFromPosition (0x26f144c) is the same cast with the filter's layer word made by 0xb693dc for collision layer
++   0x26: the u32 at [[[[main+0x395dac0]]+0x18]+0x48] + 0x26*4 in the high half, 0x11 in the low, minus the 0xfffc bits as
++   ever; a hit is water when its layer (q+0x48) is 0x26 to 0x2b. */
++static uint32_t water_last_word;
++static int water_last_layer;   /* (what the last look hit: -1 nothing, else its layer) */
++static int water_surface(float x, float z, float top, float bottom, float *out) {
++    uintptr_t g = read_ptr(survey_main + 0x395dac0), t = g ? read_ptr(g) : 0;   /* (a GOT slot: twice) */
++    uintptr_t u = t ? read_ptr(t + 0x18) : 0, table = u ? read_ptr(u + 0x48) : 0;
++    uint32_t word = 0;
++    if (!table || !read_mem(table + 0x26 * 4, &word, 4)) return 0;
++    uint64_t keep = ray_layers;
++    ray_layers = ((uint64_t)word << 32 | 0x11) & 0xfffcffffffffffffull;
++    float start[3] = {x, top, z}, end[3] = {x, bottom, z}, hit[3];
++    int got = ray_cast(start, end, hit, NULL);
++    ray_layers = keep;
++    uint32_t layer = 0;
++    if (got && ray_last) read_mem((uintptr_t)(ray_last + 0x48), &layer, 4);
++    water_last_word = word; water_last_layer = got ? (int)layer : -1;
++    if (!got || layer - 0x26u >= 6) return 0;
++    *out = hit[1];
 +    return 1;
 +}
 +/* The actor a ray hit, if it hit one: the hit body is at q+0x170, its ActorLink at [body+0x110]+0x18 (a {?, object, id}
@@ -726,6 +751,24 @@ index c05d6c3..b308c44 100644
 +    }
 +    if (n == 1 && !strcmp(tok[0], "euread")) { weapon_scan_area(pouch ? pouch_eu(pouch) : 0, 0x4700, 0, "him", "eu"); weapon_scan_area(pouch_eu(player), 0x4700, 0, "you", "eu"); return; }
 +    if (n == 1 && !strcmp(tok[0], "wscan")) { weapon_scan(pouch_eu(player), "you"); weapon_scan(pouch ? pouch_eu(pouch) : 0, "him"); return; }
++    if (n == 1 && !strcmp(tok[0], "water")) {   /* water under you, and a 41x41 grid 10 m apart around you: where's the nearest? */
++        float pp[3], h, best = 1e9f, bx = 0, bz = 0, bh = 0;
++        if (!read_mem(player + ACTOR_POS, pp, sizeof pp)) return;
++        int here = water_surface(pp[0], pp[2], pp[1] + 5, pp[1] - 60, &h);
++        fprintf(stderr, "[survey] water: under you %s %.2f (you at %.2f; filter word %08x, hit layer %d)\n", here ? "yes" : "no", here ? h : 0.0f, pp[1],
++                water_last_word, water_last_layer);
++        unsigned found = 0;
++        for (int i = -20; i <= 20; i++) for (int j = -20; j <= 20; j++) {
++            float x = pp[0] + i * 10, z = pp[2] + j * 10;
++            float fl;   /* (a pond: a floor under the water within 10 m; at an island's edge there's water with nothing under it) */
++            if (!water_surface(x, z, pp[1] + 50, pp[1] - 300, &h) || !ray_floor(x, z, h, h - 10, &fl, NULL) || h - fl < 1.5f) continue;
++            found++;
++            fprintf(stderr, "[survey] water: %+d,%+d surface %.1f floor %.1f\n", i, j, h, fl);
++            if (hypotf(i, j) * 10 < best) { best = hypotf(i, j) * 10; bx = x; bz = z; bh = h; }
++        }
++        fprintf(stderr, "[survey] water: %u of 1681 spots, nearest %.0f m at %.1f,%.1f,%.1f\n", found, found ? best : 0.0f, bx, bh, bz);
++        return;
++    }
 +    if (n == 1 && !strcmp(tok[0], "watchcmds")) { lonk_watch_cmds = !lonk_watch_cmds; fprintf(stderr, "[survey] watchcmds %d\n", lonk_watch_cmds); return; }
 +    if (n == 1 && !strcmp(tok[0], "around")) {   /* what 24 chest-high rays from him hit within 15 m (characters too), by actor name */
 +        float at[3];
@@ -2298,6 +2341,7 @@ index c05d6c3..b308c44 100644
 +           his own run, so without a dish nothing changes; the smaller of your two speeds, so the tail of a sprint doesn't count */
 +        if ((lonk_kind == LONK_STALK || lonk_kind == LONK_BEHIND) && !player_sprinting && speed < LONK_SPRINT)
 +            speed = fmaxf(speed, fminf(fminf(player_pace, player_speed), LONK_RUN * 1.3f));
++        if (lonk_swim) speed = fminf(speed, LONK_SWIM);
 +        room = fmaxf(dist - stop, 0.0f);
 +        want_v = fminf(speed, sqrtf(2 * LONK_BRAKE * room));
 +        lonk_v = want_v > lonk_v ? fminf(want_v, lonk_v + LONK_ACCEL * lonk_dt) : fmaxf(want_v, lonk_v - LONK_BRAKE * lonk_dt);
@@ -2434,7 +2478,8 @@ index c05d6c3..b308c44 100644
 +    if (pushed_left) gait_v = fmaxf(gait_v, lonk_speed);
 +    int move_gait = lonk_move_gait(gait_v, stopping && !pushed_left, lonk_kind == LONK_BUDDY && lonk_v > 0.8f && player_pace > 1 && !pushed_left);
 +    int falls = lonk_falling > (lonk_air ? 0 : 12);
-+    pouch_gait(falls ? (lonk_you_glide ? GAIT_GLIDE : GAIT_FALL) : lonk_emote_left ? lonk_emote : lonk_pose >= 0 ? lonk_pose :
++    pouch_gait(falls ? (lonk_you_glide ? GAIT_GLIDE : GAIT_FALL) : lonk_swim ? (lonk_v > 0.3f ? GAIT_SWIM : GAIT_TREAD) :
++               lonk_emote_left ? lonk_emote : lonk_pose >= 0 ? lonk_pose :
 +               lonk_kind == LONK_PARTY ? GAIT_PARTY : move_gait,
 +               pushed_left ? fmaxf(lonk_v, lonk_speed) : lonk_v);   /* (his legs go at the speed he's at, getting up to it too) */
 +#endif
@@ -2472,7 +2517,21 @@ index c05d6c3..b308c44 100644
 +                lonk_air_vel[0] = jx / jl * LONK_RUN; lonk_air_vel[1] = jz / jl * LONK_RUN;
 +            }
 +        }
-+        if (ray_floor(a[0], a[2], feet + 0.7f, feet - 60, &h, &up)) {
++        /* deep water (the surface more than 1.2 m over the floor, looked for every 4 frames): he floats with the surface
++           at his chest, the way Link swims (his feet 1.4 m under it, as yours were) */
++        static float water_at;
++        static unsigned water_look;
++        if (!(water_look = tick_down(water_look))) {
++            float wh, fh;
++            water_look = 4;
++            int deep = water_surface(a[0], a[2], feet + 2.5f, feet - 4, &wh) &&
++                       (!ray_floor(a[0], a[2], wh, wh - 60, &fh, NULL) || wh - fh > 1.2f);
++            if (deep != lonk_swim) fprintf(stderr, "[survey] lonk: %s\n", deep ? "in the water, swims" : "out of the water");
++            lonk_swim = deep; water_at = deep ? wh : water_at;
++        }
++        if (lonk_swim && !(lonk_air && vy > 0)) {
++            feet += (water_at - 1.4f - feet) * ease(0.2f); vy = 0; lonk_air = 0; ground_src = "water"; h = feet; up = 1;
++        } else if (ray_floor(a[0], a[2], feet + 0.7f, feet - 60, &h, &up)) {
 +            ground_src = "ray";
 +            /* walking, he follows the floor's average over 80 cm along his way: up stairs, easing onto each step on its
 +               own, he went up in jerks (10 cm, then almost nothing, 7 times a second) and looked like he ran at a low
@@ -2904,7 +2963,7 @@ index c05d6c3..b308c44 100644
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,15 +3104,80 @@ void runtime_survey_cancel_user(void) {
+@@ -307,15 +3163,80 @@ void runtime_survey_cancel_user(void) {
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
@@ -2985,7 +3044,7 @@ index c05d6c3..b308c44 100644
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
      } else if (request.kind == 1) {
-@@ -340,8 +3202,152 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -340,8 +3261,152 @@ void runtime_survey_tick(uint64_t frame) {
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }

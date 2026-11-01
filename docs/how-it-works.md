@@ -262,8 +262,18 @@ nothing points at), whose 0 is the idle again; the clips sit on leaves nothing r
 faces) without frame controllers or events. Only four were left after the draw clips, so clinging to a wall is the climb
 held still (rate 0). `survey lonk pose <swim|tread|climb|cling|glide|off>` plays one where he stands. The first use:
 when you glide and he's falling (he followed you off a ledge), he glides too, no paraglider of his own, sinking as fast
-as you do (your climb rate, between 1.5 and 6 m/s down) instead of dropping like a stone. Swimming needs the water's
-surface first (his floor ray finds the bottom), and climbing a wall-following move; neither is there yet.
+as you do (your climb rate, between 1.5 and 6 m/s down) instead of dropping like a stone.
+
+Swimming: his floor ray goes through water to the bottom, so the water's surface comes from the game's own
+`QueryPhysicsRaycastWaterSurfaceInDownwardFromPosition` (its compute, 0x26f144c, found from its name string through an
+ADRP+ADD scan and its vtable): the same raycast as his, with the filter's layer word for collision layer 0x26, the u32
+at `[[[[main+0x395dac0]]+0x18]+0x48] + 0x26*4` in the high half and 0x11 in the low (minus the usual 0xfffc bits), and
+a hit is water when its layer (`q+0x48`) is 0x26 to 0x2b. Every 4 frames he looks for it from 2.5 m over his feet;
+with more than 1.2 m of water over the floor he floats with his feet 1.4 m under the surface (as yours are), swims at
+2.5 m/s (a guess) or treads water standing still. Tested in a pond on the Great Sky Island: he ran in after me, swam,
+trod water beside me, and walked out on the other side. `survey peek water` lists the ponds within 200 m (water with a
+floor under it: at an island's edge there's water with nothing under it, and I fell off the island). Climbing a wall
+is still to come.
 
 Standing, he reaches for them like Link: Link's own `Equip_Sword_On_Natural` / `Equip_Sword_Off_Natural` (and the
 `Lsword` and `Spear` ones) as an emote. The `UseItem` value `EatCookingDish` (his meal, which now eats like a snack)

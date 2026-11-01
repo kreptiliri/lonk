@@ -22,6 +22,7 @@ Runs on the [MacNativeGames](https://github.com/ly05010419/MacNativeGames) nativ
   sky islands, caves and bridges count), around walls, off ledges after you, and up onto them when you're up there.
 - **He sees.** A ring of rays tells him what's around him: enemies, you, things in the way. He also reads what you're
   doing from your own animation commands.
+- **He swims** (new): into the water after you, treading water when you stop; and glides down with you when you glide.
 - **He doesn't stay gone.** You die, he's back a couple of seconds after you are.
 - **He has a (small) brain.** Every few seconds he decides what to do, and what you're doing changes his dice: on the
   move he sticks with you, standing around he plays.
