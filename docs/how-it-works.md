@@ -285,10 +285,11 @@ Climbing (new): you're climbing (your body plays a `Climb` command), more than 1
 foot: if a chest-high ray towards you hits a wall (its normal less than 45 degrees off level), he climbs (before he'd
 try a ledge jump). He keeps 0.4 m off it (a ray 1.4 m up finds it every frame, and he turns with it), goes up at
 1.2 m/s with the climb loop, slides sideways towards you at up to 1 m/s, and faces the wall. When that ray finds no
-wall his chest is over the top: he steps 1 m in and onto the floor up there (from his feet, a floor ray found the
-wall's sloping face below the top, and he stood on it 2.4 m short). You stop climbing below him, or 15 s go by: he lets
+wall his chest is over the top: he pulls himself up the rest at the wall (3 m/s) to the floor 1 m in, then steps onto
+it (from his feet, a floor ray found the wall's sloping face below the top, and he stood on it 2.4 m short; then he
+popped up the last 1.5 m). You stop climbing below him, or 15 s go by: he lets
 go and falls. Tested on a 4 m ledge with `survey peek fakeclimb` (you count as climbing for 10 s; `survey peek ledges`
-lists ledges near you): up the wall at 1.15 m/s and onto the top beside me. The last 1.5 m is a pop, not a climb-over.
+lists ledges near you): up the wall at 1.15 m/s, a quick pull-up, and onto the top beside me.
 
 Standing, he reaches for them like Link: Link's own `Equip_Sword_On_Natural` / `Equip_Sword_Off_Natural` (and the
 `Lsword` and `Spear` ones) as an emote. The `UseItem` value `EatCookingDish` (his meal, which now eats like a snack)
