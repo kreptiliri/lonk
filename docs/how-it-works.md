@@ -237,16 +237,23 @@ weapon makes its part just after itself (your sword d86c, its rock d86d; his d86
 once the parts come after all three, so the patch takes the actors numbered up to 8 after his weapon, bow or shield,
 within 3 m of it (a spear's part sits 2.3 m from its grip), not his own pieces, still in the menu's scene, and moves
 them into the world each frame. Read only (the tree walk never calls the game). Tested: rock, horns, monster parts,
-on swords, spears, two-handers and shields.
+on swords, spears, two-handers and shields. The search is a few hundred small memory reads, so it isn't done every
+frame: one of the three every 5 frames, and at once when his weapon, bow or shield changes (done every frame it was
+3 of his 3.4 ms a frame).
 
 Fusing keeps a weapon's name, so the twins watcher also compares what's fused on yours: the parts numbered after your
 weapons (names sorted, "Weapon_" ones left out: mid-swap your new weapon looked like a part for a second), and your
 Link's own animation flags `IsAttachedWeapon` and `IsAttachedShield` (in Link's tree they mean "fused": they pick the
 `_Build` clips), which catch a fuse done in the field, where the part is made long after the weapon. They're read
 straight from the blackboard (the name table at `[[[bb+0xd0]+0x10]+0x20]`, the bytes at `[bb+0x28]+4`), only while that
-weapon is in your hand (put away they read 0), the first look counting as the baseline. A change that holds for two
-checks re-copies your weapon, bow and shield (the equip copies the fuse); after you put something on, it waits 3 s for
-the parts to settle (he used to re-copy everything a second time, I saw him unequip and equip).
+weapon is in your hand (put away they read 0), the first look counting as the baseline. A flag change that holds for
+two checks, or a part of yours he doesn't have for three, re-copies your weapon, bow and shield (the equip copies the
+fuse); his having more parts than you is fine (your list misses a part now and then, and a part fused in the field is
+on his list after a copy but never on yours). Nothing is checked while the game's paused, and after you put something
+on it waits 3 s for the parts to settle (he used to re-copy everything a second time, I saw him unequip and equip).
+Once a re-copy left his old shield's horn behind, a second one floating on him: now the parts on his old weapons are
+noted before a re-copy, and 1.5 s later any still alive (looked up in the tree by number), not on his new ones and
+still drawn in the world go back to the menu's scene, out of sight. `survey lonk recopy` forces a re-copy (a test).
 
 Standing, he reaches for them like Link: Link's own `Equip_Sword_On_Natural` / `Equip_Sword_Off_Natural` (and the
 `Lsword` and `Spear` ones) as an emote. The `UseItem` value `EatCookingDish` (his meal, which now eats like a snack)
@@ -391,9 +398,10 @@ makes it look like he dove there).
 
 ## What he costs
 
-The `lonk stats` line (every 10 s) also says how long the survey's frame tick took: about 0.2 ms a frame on average
-with the whole brain running (floor and wall rays, the enemy scan, dressing, the animation), 1 ms at worst, on an M4
-MacBook Air. A frame at 60 fps has 16.7 ms.
+The `lonk stats` line (every 10 s) also says how long the survey's frame tick took, and how much of it went to his
+step, the body check, the twins' draw and keeping his pieces in the world: about 0.3 ms a frame on average with the
+whole brain running (floor and wall rays, the enemy scan, dressing, fused parts, the animation), 3 ms at worst (the
+once-a-second twins check), on an M4 MacBook Air. A frame at 60 fps has 16.7 ms.
 
 ## Coming back
 
