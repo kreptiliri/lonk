@@ -417,6 +417,10 @@ makes it look like he dove there).
   he paced along a ledge, jumping made him copy the jump, and that got him over): upward speed sqrt(2 g (height +
   0.6 m)), the jump clip, and he keeps heading for you in the air (aiming 0.6 m from you, so he lands beside you, not at
   the foot). The knee-high wall check rises with his feet, so he moves on once he's above the edge. 4 s between tries.
+- Stay (new): you whistle, he comes (buddy, as before); whistle again within 5 s of the first (a whistle lasts 2.8 s)
+  and he stays where he is, watching you, till you whistle once more. Far away doesn't count as lost while he stays (a
+  teleport still brings him). One whistle shows up in two of your slots in the same frame: a second one under 10
+  frames later doesn't count. Tested with whistle keys: come, stay (he stayed while I went 15 m away), come.
 - Fighting beside you (new, a reaction, not tested in a real fight yet, but against a fake enemy): you swing (`CutS*`, `CutDash`, `ChargeAttack*`,
   `ChargeLSwordSpin`) not at him, and he's seen an enemy in the last 3 s: he sprints to 1.6 m short of it and swings
   his sword at it (the swing loop, facing it), till it's been out of his sight for 3 s or you haven't swung for 5 s.

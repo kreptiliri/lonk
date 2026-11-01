@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..62ab143 100644
+index c05d6c3..1ba7e01 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -100,8 +100,8 @@ index c05d6c3..62ab143 100644
 +   through forceSetMatrix, yaw only. "survey stalk <frames> [m/s [stop m]]" walks it to the player; "survey lonk ..." runs
 +   the behaviours or the dice brain. Survives your input (you're playing). */
 +enum { STALK_MAX = 16, TRAIL_MAX = 512 };
-+enum { LONK_STALK, LONK_BLOCK, LONK_BEHIND, LONK_WANDER, LONK_GIFT, LONK_FLEE, LONK_PARTY, LONK_BUDDY, LONK_FIGHT, LONK_HIDE, LONK_MAD, LONK_RACE, LONK_PHOTO, LONK_SPAR, LONK_KINDS };
-+static const char *const lonk_names[LONK_KINDS] = {"stalk", "block", "behind", "wander", "gift", "flee", "party", "buddy", "fight", "hide", "mad", "race", "photo", "spar"};
++enum { LONK_STALK, LONK_BLOCK, LONK_BEHIND, LONK_WANDER, LONK_GIFT, LONK_FLEE, LONK_PARTY, LONK_BUDDY, LONK_FIGHT, LONK_HIDE, LONK_MAD, LONK_RACE, LONK_PHOTO, LONK_SPAR, LONK_STAY, LONK_KINDS };
++static const char *const lonk_names[LONK_KINDS] = {"stalk", "block", "behind", "wander", "gift", "flee", "party", "buddy", "fight", "hide", "mad", "race", "photo", "spar", "stay"};
 +enum { GROUND_PLAYER, GROUND_PHYSICS, GROUND_TRAIL, GROUND_TERRAIN, GROUND_MODES };
 +static const char *const ground_names[GROUND_MODES] = {"player", "physics", "trail", "terrain"};
 +static KEEP int pouch_request, height_request;
@@ -274,7 +274,7 @@ index c05d6c3..62ab143 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,22 +475,2827 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,22 +475,2838 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -1963,7 +1963,7 @@ index c05d6c3..62ab143 100644
 +        }
 +    }
 +    if (lonk_brain && lonk_enemy_left && !lonk_fight_cooldown && lonk_kind != LONK_FIGHT && lonk_kind != LONK_GIFT &&
-+        lonk_kind != LONK_PARTY && lonk_kind != LONK_FLEE && lonk_kind != LONK_SPAR) {
++        lonk_kind != LONK_PARTY && lonk_kind != LONK_FLEE && lonk_kind != LONK_SPAR && lonk_kind != LONK_STAY) {
 +        if (arc4random_uniform(3) == 0) {   /* or not: sometimes he hides behind you instead */
 +            fprintf(stderr, "[survey] lonk: hides behind you\n");
 +            lonk_enter(LONK_BEHIND, 300); lonk_emote_start(GAIT_SURPRISE); lonk_fight_cooldown = 900;
@@ -2067,6 +2067,9 @@ index c05d6c3..62ab143 100644
 +        if (after > 120 && lonk_phase_left > 1) lonk_phase_left = 1;   /* (ends next frame) */
 +        break;
 +    }
++    case LONK_STAY:   /* you whistled twice: he stays where he is, watching you, till you whistle again */
++        target[0] = a[0]; target[2] = a[2];
++        break;
 +    case LONK_SPAR: {   /* you're fighting something he's seen: he runs up to it (1.6 m short, from where he is) and swings at it
 +                           (no damage yet), till it's out of his sight for 3 s or you haven't swung for 5 s */
 +        lonk_you_swung += lonk_ticks;
@@ -2341,9 +2344,17 @@ index c05d6c3..62ab143 100644
 +                   lonk_enemy_left && lonk_kind != LONK_MAD) {   /* you're fighting something he's seen: he joins in */
 +            lonk_you_swung = 0;
 +            if (lonk_kind != LONK_SPAR) { fprintf(stderr, "[survey] lonk: fights beside you\n"); lonk_enter(LONK_SPAR, 1800); }
-+        } else if ((!strcmp(cmd, "HorseCall") || !strcmp(cmd, "CallComeon")) && lonk_kind != LONK_BUDDY) {   /* you whistled: he comes */
-+            fprintf(stderr, "[survey] lonk: you whistled, he comes\n");
-+            lonk_enter(LONK_BUDDY, 900);
++        } else if (!strcmp(cmd, "HorseCall") || !strcmp(cmd, "CallComeon")) {   /* you whistled: he comes; whistle again right after: he stays */
++            static uint64_t last_whistle;
++            if (frame - last_whistle < 10) { last_whistle = frame; continue; }   /* (one whistle, seen in two of your slots) */
++            if (lonk_kind == LONK_BUDDY && frame - last_whistle < 300) {   /* (a whistle lasts nearly 3 s: again within 5 s) */
++                fprintf(stderr, "[survey] lonk: you whistled twice, he stays\n");
++                lonk_enter(LONK_STAY, 216000000);
++            } else if (lonk_kind != LONK_BUDDY) {
++                fprintf(stderr, "[survey] lonk: you whistled, he comes\n");
++                lonk_enter(LONK_BUDDY, 900);
++            }
++            last_whistle = frame;
 +        } else if (!strcmp(cmd, "UltraHandStart") || !strncmp(cmd, "LookAround", 10) || !strcmp(cmd, "Talk") || !strcmp(cmd, "TalkHello")) react = GAIT_LOOK;
 +        else if (!strncmp(cmd, "OpenTreasureBox", 15) || !strcmp(cmd, "Get") || !strcmp(cmd, "GetCookingVeryGood") || !strcmp(cmd, "GetCookingGood")) react = GAIT_PARTY;
 +        else if (!strcmp(cmd, "GetCookingBad")) react = GAIT_YUCK;
@@ -2719,7 +2730,7 @@ index c05d6c3..62ab143 100644
 +           nothing under him): he's back behind you. Up a staircase or off on a run of his own is fine. */
 +        static unsigned lost;
 +        float far = hypotf(p[0] - a[0], p[2] - a[2]);
-+        const char *why = fabsf(feet - p[1]) > 5 && lonk_blocked > 30 ? "height" : (far > 30 && lonk_blocked > 30) || far > 60 ? "far" : lonk_no_gain > 240 ? "no way to you" : !strcmp(ground_src, "none") ? "no floor" :
++        const char *why = fabsf(feet - p[1]) > 5 && lonk_blocked > 30 ? "height" : (far > 30 && lonk_blocked > 30) || (far > 60 && lonk_kind != LONK_STAY) ? "far" : lonk_no_gain > 240 ? "no way to you" : !strcmp(ground_src, "none") ? "no floor" :
 +                          stuck_seconds ? "stuck" : NULL;
 +        lost = why ? lost + lonk_ticks : 0;
 +        if (lonk_you_moved && far > 10) { lost = 999; why = "you teleported"; }
@@ -3105,7 +3116,7 @@ index c05d6c3..62ab143 100644
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,15 +3305,80 @@ void runtime_survey_cancel_user(void) {
+@@ -307,15 +3316,80 @@ void runtime_survey_cancel_user(void) {
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
@@ -3186,7 +3197,7 @@ index c05d6c3..62ab143 100644
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
      } else if (request.kind == 1) {
-@@ -340,8 +3403,152 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -340,8 +3414,152 @@ void runtime_survey_tick(uint64_t frame) {
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }
