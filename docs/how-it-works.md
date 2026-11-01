@@ -255,6 +255,16 @@ Once a re-copy left his old shield's horn behind, a second one floating on him: 
 noted before a re-copy, and 1.5 s later any still alive (looked up in the tree by number), not on his new ones and
 still drawn in the world go back to the menu's scene, out of sight. `survey lonk recopy` forces a re-copy (a test).
 
+Swimming, climbing and gliding (new, a first step): the mod adds four whole-body loops at HoldAnimationType 16 to 19,
+`Swim_Move_Slow_F`, `Swim_Wait`, `Climb_Wall_Move_U` and `Float_Glide_N`. All of PauseMenuWait's cases were taken, so the
+root's default case (his idle) now goes to a free int selector on the same int (218, an idle branch's weapon cases that
+nothing points at), whose 0 is the idle again; the clips sit on leaves nothing reaches (an orphaned set of the menu's
+faces) without frame controllers or events. Only four were left after the draw clips, so clinging to a wall is the climb
+held still (rate 0). `survey lonk pose <swim|tread|climb|cling|glide|off>` plays one where he stands. The first use:
+when you glide and he's falling (he followed you off a ledge), he glides too, no paraglider of his own, sinking as fast
+as you do (your climb rate, between 1.5 and 6 m/s down) instead of dropping like a stone. Swimming needs the water's
+surface first (his floor ray finds the bottom), and climbing a wall-following move; neither is there yet.
+
 Standing, he reaches for them like Link: Link's own `Equip_Sword_On_Natural` / `Equip_Sword_Off_Natural` (and the
 `Lsword` and `Spear` ones) as an emote. The `UseItem` value `EatCookingDish` (his meal, which now eats like a snack)
 goes to a free int selector (an idle branch's weapon cases) on `HoldAnimationType`, which nothing reads during an emote;

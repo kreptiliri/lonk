@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..42ca5c8 100644
+index c05d6c3..b308c44 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -264,7 +264,7 @@ index c05d6c3..42ca5c8 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,22 +465,2617 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,22 +465,2636 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -876,10 +876,12 @@ index c05d6c3..42ca5c8 100644
 +   the cold and hot idles at Nml_Move_Walk and Nml_Move_Run, so the temperature becomes his gait. The blackboard is
 +   [as+0x40]; its vtable+0x38 sets a float by name, the way ExecutePouchPlayerSetASBBParameter (0x241cc08) does. */
 +enum { GAIT_IDLE, GAIT_WALK, GAIT_RUN, GAIT_DASH, GAIT_PARTY, GAIT_LOOK, GAIT_SURPRISE, GAIT_EAT, GAIT_MEAL, GAIT_YUCK, GAIT_JUMP,
-+       GAIT_FALL, GAIT_SULK, GAIT_LOOKUP, GAIT_EQUIP, GAITS };
++       GAIT_FALL, GAIT_SULK, GAIT_LOOKUP, GAIT_EQUIP, GAIT_SWIM, GAIT_TREAD, GAIT_CLIMB, GAIT_GLIDE, GAITS };
 +static const char *const gait_names[GAITS] = {"idle", "walk", "run", "dash", "party", "look around", "surprise", "eat", "meal", "yuck",
-+                                              "jump", "fall", "sulk", "look up", "draw"};
++                                              "jump", "fall", "sulk", "look up", "draw", "swim", "tread water", "climb", "glide"};
 +static int lonk_body_emote;   /* his body slot is playing the UseItem command (an emote, his take-off) */
++static KEEP int lonk_pose = -1, lonk_cling;   /* "survey lonk pose <swim|tread|climb|cling|glide|off>": play that loop where he stands (to look at them) */
++static int lonk_you_glide;   /* your body plays a glide (the paraglider) */
 +static int lonk_equip_clip;   /* the mod's draw/put away clip: 21 sword, 22 two-hander, 23 spear out; 24 two-hander, 25 spear, else sword away */
 +static int lonk_armed;   /* his weapons are out (twin_draw), and what kind: the mod's walk and run carry them (arms) */
 +static char lonk_arm_kind[8] = "Sword";
@@ -896,7 +898,8 @@ index c05d6c3..42ca5c8 100644
 +       Each move clip plays at Link's own rate for it, scaled by his speed. Blackboard setters by name: string +0x28,
 +       int +0x30, float +0x38, bool +0x40. */
 +    /* (the mod's cases sit at 11 to 15: at 1 to 5 the menu's AI took them for a weapon in his hands and drew his sword) */
-+    static int hold[GAITS] = {0, 11, 12, 13, 14, 0, 0, 0, 0, 0, 15, 15, 0, 0, 0};   /* (an emote: what's under it, the idle; the take-off: the fall after it) */
++    static int hold[GAITS] = {0, 11, 12, 13, 14, 0, 0, 0, 0, 0, 15, 15, 0, 0, 0, 16, 17, 18, 19};   /* (an emote: what's under it, the idle; the take-off: the fall after it) */
++    /* (16 to 19: the mod's swim, treading water, climb and glide loops, behind the idle's case; with an older mod, the idle) */
 +    hold[GAIT_EQUIP] = lonk_equip_clip;   /* drawing or putting away: which clip (the mod's selector under UseItem, 21 to 25) */
 +    /* The emotes and his take-off are the UseItem command, played in his body slot, its string picking the clip (the mod
 +       renamed some: look around, the take-off, a startle, a sulk, look up). They used to go through PauseMenuWait's case
@@ -970,7 +973,7 @@ index c05d6c3..42ca5c8 100644
 +           slow. Everything else at 1, as in the Player's tree (the take-off too: Nml_Wait_Jump has no frame controller) */
 +        int moving = !emote_cmd && (waiting ? lonk_gait : gait) >= GAIT_WALK && (waiting ? lonk_gait : gait) <= GAIT_DASH;
 +        int shown = waiting ? lonk_gait : gait;
-+        float rate = !moving ? 1.0f : shown == GAIT_WALK ? fminf(fmaxf(0.9f * speed / LONK_WALK, 0.5f), 2.0f) :
++        float rate = !moving ? (shown == GAIT_CLIMB && lonk_cling ? 0.0f : 1.0f) : shown == GAIT_WALK ? fminf(fmaxf(0.9f * speed / LONK_WALK, 0.5f), 2.0f) :
 +                     fminf(fmaxf(shown == GAIT_DASH ? 1.75f * speed / LONK_SPRINT : 1.5f * speed / LONK_RUN, 1.0f), 2.5f);   /* never slow motion */
 +        memcpy((void *)(body + 0xd0), &rate, sizeof rate);
 +        lonk_rate = rate;
@@ -2184,6 +2187,7 @@ index c05d6c3..42ca5c8 100644
 +    static char your_cmds[4][48];   /* body slots 0 to 3 (lower, upper, ...); 4 on is the face, skin, arm */
 +    char all[256], *cur = all;
 +    anim_cmds(player, all, sizeof all);
++    lonk_you_glide = strstr(all, "Glide") != NULL;
 +    for (int slot = 0; slot < 4 && cur; slot++) {
 +        char *bar = strchr(cur, '|'), cmd[48];
 +        snprintf(cmd, sizeof cmd, "%.*s", bar ? (int)(bar - cur) : (int)strlen(cur), cur);
@@ -2429,7 +2433,9 @@ index c05d6c3..42ca5c8 100644
 +                   stopping ? lonk_v : fmaxf(lonk_v, want_v);   /* (getting up to a sprint: the sprint, not 12 frames of a run at rate 2.4) */
 +    if (pushed_left) gait_v = fmaxf(gait_v, lonk_speed);
 +    int move_gait = lonk_move_gait(gait_v, stopping && !pushed_left, lonk_kind == LONK_BUDDY && lonk_v > 0.8f && player_pace > 1 && !pushed_left);
-+    pouch_gait(lonk_falling > (lonk_air ? 0 : 12) ? GAIT_FALL : lonk_emote_left ? lonk_emote : lonk_kind == LONK_PARTY ? GAIT_PARTY : move_gait,
++    int falls = lonk_falling > (lonk_air ? 0 : 12);
++    pouch_gait(falls ? (lonk_you_glide ? GAIT_GLIDE : GAIT_FALL) : lonk_emote_left ? lonk_emote : lonk_pose >= 0 ? lonk_pose :
++               lonk_kind == LONK_PARTY ? GAIT_PARTY : move_gait,
 +               pushed_left ? fmaxf(lonk_v, lonk_speed) : lonk_v);   /* (his legs go at the speed he's at, getting up to it too) */
 +#endif
 +    if (buddy_face && lonk_speed < 0.8f) { dx = fx; dz = fz; }   /* standing beside you: same way you face */
@@ -2491,7 +2497,11 @@ index c05d6c3..42ca5c8 100644
 +                glide = ok && (rises || falls) && fabsf(hs - feet) < 0.5f && fabsf(h - feet) < 0.5f;
 +            }
 +            if (glide) { feet += (hs - feet) * ease(0.3f); vy = 0; ground_src = "stairs"; }
-+            else if (h < feet - 0.05f || (lonk_air && vy > 0)) {   /* (going up, uphill, his feet are near the ground but he's flying) */ vy -= LONK_GRAVITY * lonk_dt; feet = fmaxf(feet + vy * lonk_dt, h); ground_src = "falling"; if (feet == h) { vy = 0; ground_src = "ray"; } }
++            else if (h < feet - 0.05f || (lonk_air && vy > 0)) {   /* (going up, uphill, his feet are near the ground but he's flying) */
++                vy -= LONK_GRAVITY * lonk_dt;
++                /* you're gliding: so is he (no paraglider of his own, his arms up anyway), sinking as fast as you do */
++                if (lonk_you_glide && vy < 0) vy = fmaxf(vy, fminf(fmaxf(player_climb, -6.0f), -1.5f));
++                feet = fmaxf(feet + vy * lonk_dt, h); ground_src = "falling"; if (feet == h) { vy = 0; ground_src = "ray"; } }
 +            else if (up < 0.6f) { ground_src = "steep"; vy = 0; }   /* a wall's face isn't a step: he doesn't climb it */
 +            else { feet += (h - feet) * ease(0.3f); vy = 0; }
 +        } else if (ray_floor(a[0], a[2], feet + 3, feet - 0.5f, &h, &up) && up > 0.6f) { feet = h; vy = 0; ground_src = "step up"; }   /* feet just under a mound */
@@ -2754,6 +2764,15 @@ index c05d6c3..42ca5c8 100644
 +        pthread_mutex_unlock(&survey_lock);
 +        return 1;
 +    }
++    if ((used = 0, sscanf(line, "survey lonk pose %15s %n", word, &used)) == 1 && used && !line[used]) {
++        static const struct { const char *name; int gait, cling; } poses[] = {
++            {"swim", GAIT_SWIM, 0}, {"tread", GAIT_TREAD, 0}, {"climb", GAIT_CLIMB, 0}, {"cling", GAIT_CLIMB, 1}, {"glide", GAIT_GLIDE, 0}, {"off", -1, 0}};
++        int found = 0;
++        for (unsigned k = 0; k < sizeof poses / sizeof *poses; k++)
++            if (!strcmp(word, poses[k].name)) { lonk_pose = poses[k].gait; lonk_cling = poses[k].cling; found = 1; }
++        fprintf(stderr, found ? "[survey] lonk: pose %s\n" : "[survey] rejected: lonk pose <swim|tread|climb|cling|glide|off> (%s)\n", word);
++        return 1;
++    }
 +    if ((used = 0, sscanf(line, "survey lonk recopy %n", &used)) == 0 && used && !line[used]) {
 +        lonk_recopy = 1;
 +        fprintf(stderr, "[survey] lonk: re-copying your weapons at the next check\n");
@@ -2885,7 +2904,7 @@ index c05d6c3..42ca5c8 100644
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,15 +3085,80 @@ void runtime_survey_cancel_user(void) {
+@@ -307,15 +3104,80 @@ void runtime_survey_cancel_user(void) {
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
@@ -2966,7 +2985,7 @@ index c05d6c3..42ca5c8 100644
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
      } else if (request.kind == 1) {
-@@ -340,8 +3183,152 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -340,8 +3202,152 @@ void runtime_survey_tick(uint64_t frame) {
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }

@@ -68,6 +68,34 @@ USES = {'EatCookingSkewer': 'DemoLookAround', 'EatTooHard': 'Nml_Wait_Jump', 'Dr
 EQUIP_USE, EQUIP = 'EatCookingDish', 239
 EQUIP_CLIPS = [(21, 321, 'Equip_Sword_On_Natural'), (22, 322, 'Equip_Lsword_On_Natural'), (23, 324, 'Equip_Spear_On_Natural'),
                (24, 325, 'Equip_Lsword_Off_Natural'), (25, 333, 'Equip_Spear_Off_Natural'), (None, 334, 'Equip_Sword_Off_Natural')]
+# Swimming, climbing and gliding: whole-body loops at HoldAnimationType 16 to 19 (PauseMenuWait, so the root's bone blender
+# keeps them in place too). The root's default case (his idle, 0) goes to a free int selector on the same int (218, an idle
+# branch's weapon cases: nothing points at it), whose 0 is the idle again, and the rest to clip leaves nothing reaches any
+# more, with no frame controllers or events.
+LOOPS_AT = 218
+LOOPS = [(16, 'Swim_Move_Slow_F'), (17, 'Swim_Wait'), (18, 'Climb_Wall_Move_U'), (19, 'Float_Glide_N')]   # (four free clips were left: the patch holds
+                                                                                                         # the climb still to cling)
+
+
+def reached(doc):
+    """The nodes his commands can get to."""
+    nodes = {node['Node Index']: node for node in doc['Nodes']}
+    seen, todo = set(), [c['Node Index'] for c in doc['Commands']]
+    while todo:
+        i = todo.pop()
+        if i in seen or i not in nodes:
+            continue
+        seen.add(i)
+        body = nodes[i].get('Body', {})
+        for child in body.get('Child Nodes', []):
+            if isinstance(child, int):
+                todo.append(child)
+            elif isinstance(child, dict) and 'Node Index' in child:
+                todo.append(child['Node Index'])
+        for control in body.get('Frame Controls', []) or []:
+            if isinstance(control, int):
+                todo.append(control)
+    return seen
 
 
 def romfs_reader(folder):
@@ -188,6 +216,24 @@ def main():
         if value is not None:
             entry['Condition'] = value
     next(c for c in use['Body']['Child Nodes'] if c.get('Condition') == EQUIP_USE)['Node Index'] = EQUIP
+    loops = nodes.get(LOOPS_AT, {})
+    cases = loops.get('Body', {}).get('Child Nodes', [])
+    idle = next((c for c in root['Body']['Child Nodes'] if 'Default' in c), None)
+    taken = reached(doc)
+    free = [n for n in doc['Nodes'] if n['Node Type'] == 'SkeletalAnimation' and n['Node Index'] not in taken and
+            not n['Body'].get('Frame Controls') and not n['Body'].get('Events')]   # (an orphaned set of the menu's faces, as it happens)
+    if loops.get('Node Type') != 'IntSelector' or LOOPS_AT in taken or len(cases) < len(LOOPS) + 1 or 'Default' not in cases[-1] or \
+            idle is None or len(free) < len(LOOPS):
+        sys.exit('no free selector and clips for swimming and climbing: not the 1.4.3 ASB?')
+    for entry, (value, clip), leaf in zip(cases, LOOPS, free):
+        leaf['Body']['Animation'] = clip
+        entry['Condition'] = value
+        entry['Node Index'] = leaf['Node Index']
+    for entry in cases[len(LOOPS):]:   # (the spare case and the default: the idle)
+        entry['Node Index'] = idle['Node Index']
+        if 'Condition' in entry:
+            entry['Condition'] = 0
+    idle['Node Index'] = LOOPS_AT
     AsbFile.from_dict(doc).to_binary(str(work) + '/')
     edited = (work / 'PouchPlayer.root.asb').read_bytes()
 
