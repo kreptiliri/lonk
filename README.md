@@ -47,7 +47,8 @@ sulks.
 
 ## Where he's going
 
-- Doing things, not just reacting: climbing, swimming, actually fighting, using items, breaking stuff
+- Doing things, not just reacting: real hits when he fights beside you (he only swings so far), better climbing and
+  gliding (first versions are in), using items, breaking stuff
 - Never dying, whatever you do to him
 - A smarter brain (maybe one that talks)
 - Couple outfits of his own (any armor set already works: `survey lonk outfit froggy`)
