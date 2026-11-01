@@ -267,7 +267,8 @@ the search follows them, and the build stops if the new branch could reach back 
 climb held still (rate 0). A fifth loop, a sword swing (`Sword_Attack_S1`), sits where the glide was, behind one more
 bool selector on `WeaponFire`, and a sixth, `Swim_Move_Dash`, where the swim was, the same way. `survey lonk pose <swim|fastswim|tread|climb|cling|glide|swing|off>` plays one where he stands. The first use:
 when you glide and he's falling (he followed you off a ledge), he glides too, no paraglider of his own, sinking as fast
-as you do (your climb rate, between 1.5 and 6 m/s down) instead of dropping like a stone.
+as you do (your climb rate, between 1.5 and 6 m/s down) instead of dropping like a stone. Tested off a 4 m ledge with
+`survey peek fakeglide` (you count as gliding for 10 s): the glide loop, down at 1.6 m/s, then he landed.
 
 Swimming: his floor ray goes through water to the bottom, so the water's surface comes from the game's own
 `QueryPhysicsRaycastWaterSurfaceInDownwardFromPosition` (its compute, 0x26f144c, found from its name string through an
