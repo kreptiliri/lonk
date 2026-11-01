@@ -408,6 +408,11 @@ makes it look like he dove there).
   he paced along a ledge, jumping made him copy the jump, and that got him over): upward speed sqrt(2 g (height +
   0.6 m)), the jump clip, and he keeps heading for you in the air (aiming 0.6 m from you, so he lands beside you, not at
   the foot). The knee-high wall check rises with his feet, so he moves on once he's above the edge. 4 s between tries.
+- Photobomb (new, a reaction in any mood): your camera comes out (your body plays `LookPad`, or `SelfCameraPose` for a
+  selfie) and he's within 30 m: he sprints to 3.5 m in front of you, 0.8 m to one side (a selfie: 1 m behind you, to
+  one side), faces you and dances, till 2 s after you put the camera away. `survey lonk photo <frames>` does one (then
+  he follows you). Tested with the command; with the real camera, not yet (which way the camera looks is a guess: your
+  facing).
 - Race (new, weight 12 while your pace is over 5 m/s, never twice in a row): the finish is 25 m ahead of you along your
   facing, or less if `path_free` finds a wall or a drop first (under 12 m of clear run: no race, he follows). He sprints
   for it with block's overtaking boost (your speed + 2.5 m/s, so he can just about beat your sprint). He gets within
