@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..2acf052 100644
+index c05d6c3..92620f0 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -270,7 +270,7 @@ index c05d6c3..2acf052 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,22 +471,2767 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,22 +471,2778 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -945,8 +945,9 @@ index c05d6c3..2acf052 100644
 +       Each move clip plays at Link's own rate for it, scaled by his speed. Blackboard setters by name: string +0x28,
 +       int +0x30, float +0x38, bool +0x40. */
 +    /* (the mod's cases sit at 11 to 15: at 1 to 5 the menu's AI took them for a weapon in his hands and drew his sword) */
-+    static int hold[GAITS] = {0, 11, 12, 13, 14, 0, 0, 0, 0, 0, 15, 15, 0, 0, 0, 16, 17, 18, 19};   /* (an emote: what's under it, the idle; the take-off: the fall after it) */
-+    /* (16 to 19: the mod's swim, treading water, climb and glide loops, behind the idle's case; with an older mod, the idle) */
++    static int hold[GAITS] = {0, 11, 12, 13, 14, 0, 0, 0, 0, 0, 15, 15, 0, 0, 0, 15, 15, 15, 15};   /* (an emote: what's under it, the idle; the take-off: the fall after it) */
++    /* (swimming, treading water, climbing and gliding sit under his fall in the mod, picked by three bools, below; with
++       an older mod they're his fall) */
 +    hold[GAIT_EQUIP] = lonk_equip_clip;   /* drawing or putting away: which clip (the mod's selector under UseItem, 21 to 25) */
 +    /* The emotes and his take-off are the UseItem command, played in his body slot, its string picking the clip (the mod
 +       renamed some: look around, the take-off, a startle, a sulk, look up). They used to go through PauseMenuWait's case
@@ -1012,7 +1013,17 @@ index c05d6c3..2acf052 100644
 +        /* weapons out: the mod's walk and run play the weapon's arms (a bool selector on IsAttachedWeapon, then its kind in
 +           the string "Arrow", which the menu only uses for the bow) */
 +        struct { const char *name; uint64_t zero; } a_key = {"IsAttachedWeapon", 0}, k_key = {"Arrow", 0};
-+        ((void (*)(uintptr_t, const void *, bool))set_bool)(bb, &a_key, lonk_armed != 0);
++        /* (under his fall, IsAttachedWeapon is "a loop, not the fall", then WeaponGuardEnhance and ShieldEquip pick swim,
++           tread water, climb or glide; written only while one's on, and put back once after) */
++        int loop = gait >= GAIT_SWIM && gait <= GAIT_GLIDE;
++        static int was_loop;
++        ((void (*)(uintptr_t, const void *, bool))set_bool)(bb, &a_key, loop || (lonk_armed != 0 && hold[gait] != 15));
++        if (loop || was_loop) {
++            struct { const char *name; uint64_t zero; } g_key = {"WeaponGuardEnhance", 0}, s_key = {"ShieldEquip", 0};
++            ((void (*)(uintptr_t, const void *, bool))set_bool)(bb, &g_key, gait == GAIT_SWIM || gait == GAIT_TREAD);
++            ((void (*)(uintptr_t, const void *, bool))set_bool)(bb, &s_key, gait == GAIT_SWIM || gait == GAIT_CLIMB);
++        }
++        was_loop = loop;
 +        ((void (*)(uintptr_t, const void *, const char *))set_string)(bb, &k_key, lonk_arm_kind);
 +        if (gait != lonk_gait && !waiting) fprintf(stderr, "[survey] gait: %s\n", gait_names[gait]);
 +        /* the rate Link's own tree plays them at (its frame controllers: walk 0.9, run 1.5, sprint 1.75), scaled by how fast he goes
@@ -3041,7 +3052,7 @@ index c05d6c3..2acf052 100644
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,15 +3241,80 @@ void runtime_survey_cancel_user(void) {
+@@ -307,15 +3252,80 @@ void runtime_survey_cancel_user(void) {
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
@@ -3122,7 +3133,7 @@ index c05d6c3..2acf052 100644
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
      } else if (request.kind == 1) {
-@@ -340,8 +3339,152 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -340,8 +3350,152 @@ void runtime_survey_tick(uint64_t frame) {
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }

@@ -68,13 +68,14 @@ USES = {'EatCookingSkewer': 'DemoLookAround', 'EatTooHard': 'Nml_Wait_Jump', 'Dr
 EQUIP_USE, EQUIP = 'EatCookingDish', 239
 EQUIP_CLIPS = [(21, 321, 'Equip_Sword_On_Natural'), (22, 322, 'Equip_Lsword_On_Natural'), (23, 324, 'Equip_Spear_On_Natural'),
                (24, 325, 'Equip_Lsword_Off_Natural'), (25, 333, 'Equip_Spear_Off_Natural'), (None, 334, 'Equip_Sword_Off_Natural')]
-# Swimming, climbing and gliding: whole-body loops at HoldAnimationType 16 to 19 (PauseMenuWait, so the root's bone blender
-# keeps them in place too). The root's default case (his idle, 0) goes to a free int selector on the same int (218, an idle
-# branch's weapon cases: nothing points at it), whose 0 is the idle again, and the rest to clip leaves nothing reaches any
-# more, with no frame controllers or events.
-LOOPS_AT = 218
-LOOPS = [(16, 'Swim_Move_Slow_F'), (17, 'Swim_Wait'), (18, 'Climb_Wall_Move_U'), (19, 'Float_Glide_N')]   # (four free clips were left: the patch holds
-                                                                                                         # the climb still to cling)
+# Swimming, climbing and gliding: whole-body loops under his fall (HoldAnimationType 15, so the root's bone blender keeps
+# them in place too), picked by three bools the patch writes while one is on: IsAttachedWeapon (a loop, or the fall), then
+# WeaponGuardEnhance and ShieldEquip (swim, tread water, climb, glide). Four bool selectors nothing reaches and four free
+# clips (no events, no frame controls but a plain loop: the menu's bow poses, as it happens). A first try hung them on
+# an int selector behind his idle, which wasn't free: the idle reaches it (through bool selectors, which the search
+# didn't follow), so his tree had a loop in it, and the clips it took were his face's blinks.
+LOOP_BOOLS = ('IsAttachedWeapon', 'WeaponGuardEnhance', 'ShieldEquip')
+LOOPS = [('Swim_Move_Slow_F', 'Swim_Wait'), ('Climb_Wall_Move_U', 'Float_Glide_N')]   # [WeaponGuardEnhance][not ShieldEquip] (cling: the climb held still)
 
 
 def reached(doc):
@@ -90,8 +91,8 @@ def reached(doc):
         for child in body.get('Child Nodes', []):
             if isinstance(child, int):
                 todo.append(child)
-            elif isinstance(child, dict) and 'Node Index' in child:
-                todo.append(child['Node Index'])
+            elif isinstance(child, dict):   # (a bool selector's are {'Condition True': n}, {'Condition False': n})
+                todo += [v for k, v in child.items() if k in ('Node Index', 'Condition True', 'Condition False') and isinstance(v, int)]
         for control in body.get('Frame Controls', []) or []:
             if isinstance(control, int):
                 todo.append(control)
@@ -216,24 +217,36 @@ def main():
         if value is not None:
             entry['Condition'] = value
     next(c for c in use['Body']['Child Nodes'] if c.get('Condition') == EQUIP_USE)['Node Index'] = EQUIP
-    loops = nodes.get(LOOPS_AT, {})
-    cases = loops.get('Body', {}).get('Child Nodes', [])
-    idle = next((c for c in root['Body']['Child Nodes'] if 'Default' in c), None)
     taken = reached(doc)
+
+    def plain_loop(leaf):   # no frame controls, or only a frame controller that loops the whole clip at rate 1
+        return all(nodes[c]['Node Type'] == 'FrameController' and nodes[c]['Body'].get('Loop Num') == -1 and
+                   nodes[c]['Body'].get('Animation Rate') == 1.0 for c in leaf['Body'].get('Frame Controls') or [])
     free = [n for n in doc['Nodes'] if n['Node Type'] == 'SkeletalAnimation' and n['Node Index'] not in taken and
-            not n['Body'].get('Frame Controls') and not n['Body'].get('Events')]   # (an orphaned set of the menu's faces, as it happens)
-    if loops.get('Node Type') != 'IntSelector' or LOOPS_AT in taken or len(cases) < len(LOOPS) + 1 or 'Default' not in cases[-1] or \
-            idle is None or len(free) < len(LOOPS):
-        sys.exit('no free selector and clips for swimming and climbing: not the 1.4.3 ASB?')
-    for entry, (value, clip), leaf in zip(cases, LOOPS, free):
-        leaf['Body']['Animation'] = clip
-        entry['Condition'] = value
-        entry['Node Index'] = leaf['Node Index']
-    for entry in cases[len(LOOPS):]:   # (the spare case and the default: the idle)
-        entry['Node Index'] = idle['Node Index']
-        if 'Condition' in entry:
-            entry['Condition'] = 0
-    idle['Node Index'] = LOOPS_AT
+            not n['Body'].get('Events') and plain_loop(n)]
+    pickers = [n for n in doc['Nodes'] if n['Node Type'] == 'BoolSelector' and n['Node Index'] not in taken]
+    fall = entries[5]   # (keyed by the original cases: 5 is his fall, at 15 now)
+    if len(free) < 4 or len(pickers) < 4 or nodes[fall['Node Index']]['Node Type'] != 'SkeletalAnimation':
+        sys.exit('no free bool selectors and clips for swimming and climbing: not the 1.4.3 ASB?')
+    loop, guard, shield, shield2 = pickers[:4]
+    clips = iter(free)
+
+    def pick(node, param, if_true, if_false):
+        node['Body']['Parameter'] = {'Blackboard Index': bools.index(param), 'Type': 'bool', 'Select Flag': 'SelectOnUpdate'}
+        node['Body']['Child Nodes'] = [{'Condition True': if_true}, {'Condition False': if_false}]
+
+    def clip(name):
+        leaf = next(clips)
+        leaf['Body']['Animation'] = name
+        print(f'{name}: node {leaf["Node Index"]}')
+        return leaf['Node Index']
+    pick(shield, LOOP_BOOLS[2], clip(LOOPS[0][0]), clip(LOOPS[0][1]))
+    pick(shield2, LOOP_BOOLS[2], clip(LOOPS[1][0]), clip(LOOPS[1][1]))
+    pick(guard, LOOP_BOOLS[1], shield['Node Index'], shield2['Node Index'])
+    pick(loop, LOOP_BOOLS[0], guard['Node Index'], fall['Node Index'])
+    fall['Node Index'] = loop['Node Index']
+    if (taken & {n['Node Index'] for n in (loop, guard, shield, shield2)}) or ROOT in reached({'Nodes': doc['Nodes'], 'Commands': [{'Node Index': loop['Node Index']}]}):
+        sys.exit('the loops would loop back into his tree')
     AsbFile.from_dict(doc).to_binary(str(work) + '/')
     edited = (work / 'PouchPlayer.root.asb').read_bytes()
 
