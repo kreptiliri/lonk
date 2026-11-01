@@ -417,10 +417,12 @@ makes it look like he dove there).
   he paced along a ledge, jumping made him copy the jump, and that got him over): upward speed sqrt(2 g (height +
   0.6 m)), the jump clip, and he keeps heading for you in the air (aiming 0.6 m from you, so he lands beside you, not at
   the foot). The knee-high wall check rises with his feet, so he moves on once he's above the edge. 4 s between tries.
-- Fighting beside you (new, a reaction, not tested in a real fight yet): you swing (`CutS*`, `CutDash`, `ChargeAttack*`,
+- Fighting beside you (new, a reaction, not tested in a real fight yet, but against a fake enemy): you swing (`CutS*`, `CutDash`, `ChargeAttack*`,
   `ChargeLSwordSpin`) not at him, and he's seen an enemy in the last 3 s: he sprints to 1.6 m short of it and swings
   his sword at it (the swing loop, facing it), till it's been out of his sight for 3 s or you haven't swung for 5 s.
   It does no damage yet (that needs the game's attack code). He doesn't go off planting a bomb barrel meanwhile.
+  Tested against `survey peek fakeenemy` (an "enemy" 6 m east of you for 10 s) with `survey lonk spar`: he sprinted to
+  1.7 m short of it, turned to face it and swung, and stopped 5 s after (no swings of mine).
 - Photobomb (new, a reaction in any mood): your camera comes out (your body plays `LookPad`, or `SelfCameraPose` for a
   selfie) and he's within 30 m: he sprints to 3.5 m in front of you, 0.8 m to one side (a selfie: 1 m behind you, to
   one side), faces you and dances, till 2 s after you put the camera away. `survey lonk photo <frames>` does one (then

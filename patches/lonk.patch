@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..85b3fed 100644
+index c05d6c3..62ab143 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -40,7 +40,7 @@ index c05d6c3..85b3fed 100644
  #include <limits.h>
  #include <mach/mach.h>
  #include "mach_vm_compat.h"
-@@ -181,24 +184,159 @@ void runtime_survey_init(Module *m) {
+@@ -181,24 +184,160 @@ void runtime_survey_init(Module *m) {
  int runtime_survey_command(const char *line) { (void)line; return 0; }
  #endif
  #else
@@ -155,7 +155,8 @@ index c05d6c3..85b3fed 100644
 +static unsigned lonk_you_swung;   /* frames since your last swing */
 +static int lonk_you_camera, lonk_photo_there;   /* your camera is up (1, 2 = a selfie); he's in your shot, dancing */
 +static int lonk_climb, lonk_you_climb;   /* he's climbing a wall (you were, above him); your body plays a climb */
-+static unsigned lonk_fake_climb, lonk_fake_glide;   /* "survey peek fakeclimb|fakeglide": you count as climbing / gliding for 10 s (tests) */
++static unsigned lonk_fake_climb, lonk_fake_glide, lonk_fake_enemy;   /* (fakeenemy: an "enemy" 6 m east of you for 10 s) */
++static float lonk_fake_at[3];   /* "survey peek fakeclimb|fakeglide": you count as climbing / gliding for 10 s (tests) */
 +static float climb_n[2];   /* the wall's way out (horizontal) */
 +static unsigned climb_left;   /* 15 s at most up one wall */
 +static int lonk_swim;   /* in deep water: he swims (or treads water) with the surface at his chest */
@@ -205,7 +206,7 @@ index c05d6c3..85b3fed 100644
  
  static int read_mem(uintptr_t address, void *out, size_t size) {
      if (!address || address > UINTPTR_MAX - size) return 0;
-@@ -254,6 +392,45 @@ static uintptr_t player_actor(void) {
+@@ -254,6 +393,45 @@ static uintptr_t player_actor(void) {
      }
      return 0;
  }
@@ -251,7 +252,7 @@ index c05d6c3..85b3fed 100644
  void runtime_survey_init(Module *m) {
      const char *enabled = getenv("TOTK_SURVEY");
      if (!enabled || strcmp(enabled, "1")) return;
-@@ -272,6 +449,21 @@ void runtime_survey_init(Module *m) {
+@@ -272,6 +450,21 @@ void runtime_survey_init(Module *m) {
          runtime_fail("survey requires verified game-version forceSetMatrix entry");
      survey_main = (uintptr_t)m->base;
      survey_force = (void (*)(void *, const float *, uint32_t))(m->base + FORCE_MATRIX);
@@ -273,7 +274,7 @@ index c05d6c3..85b3fed 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,22 +474,2820 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,22 +475,2827 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -758,6 +759,12 @@ index c05d6c3..85b3fed 100644
 +    }
 +    if (n == 1 && !strcmp(tok[0], "euread")) { weapon_scan_area(pouch ? pouch_eu(pouch) : 0, 0x4700, 0, "him", "eu"); weapon_scan_area(pouch_eu(player), 0x4700, 0, "you", "eu"); return; }
 +    if (n == 1 && !strcmp(tok[0], "wscan")) { weapon_scan(pouch_eu(player), "you"); weapon_scan(pouch ? pouch_eu(pouch) : 0, "him"); return; }
++    if (n == 1 && !strcmp(tok[0], "fakeenemy")) {
++        if (!read_mem(player + ACTOR_POS, lonk_fake_at, sizeof lonk_fake_at)) return;
++        lonk_fake_at[0] += 6; lonk_fake_enemy = 600;
++        fprintf(stderr, "[survey] fakeenemy: an enemy at %.1f,%.1f,%.1f for 10 s\n", lonk_fake_at[0], lonk_fake_at[1], lonk_fake_at[2]);
++        return;
++    }
 +    if (n == 1 && !strcmp(tok[0], "fakeglide")) { lonk_fake_glide = 600; fprintf(stderr, "[survey] fakeglide: you count as gliding for 10 s\n"); return; }
 +    if (n == 1 && !strcmp(tok[0], "fakeclimb")) { lonk_fake_climb = 600; fprintf(stderr, "[survey] fakeclimb: you count as climbing for 10 s\n"); return; }
 +    if (n == 1 && !strcmp(tok[0], "ledges")) {   /* walls 2.5 to 6 m high within 30 m: a floor 2 m on from another that much lower */
@@ -1946,6 +1953,7 @@ index c05d6c3..85b3fed 100644
 +       one time in three hides behind you */
 +    lonk_fight_cooldown = tick_down(lonk_fight_cooldown);
 +    lonk_enemy_left = tick_down(lonk_enemy_left);
++    if (lonk_fake_enemy) { lonk_fake_enemy = tick_down(lonk_fake_enemy); memcpy(lonk_enemy, lonk_fake_at, sizeof lonk_enemy); lonk_enemy_left = 180; }
 +    if (frame % 15 == 0 && ground_mode == GROUND_TERRAIN && isfinite(lonk_anchor[1])) {
 +        char seen[64];
 +        float e[3];
@@ -3097,7 +3105,7 @@ index c05d6c3..85b3fed 100644
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,15 +3297,80 @@ void runtime_survey_cancel_user(void) {
+@@ -307,15 +3305,80 @@ void runtime_survey_cancel_user(void) {
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
@@ -3178,7 +3186,7 @@ index c05d6c3..85b3fed 100644
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
      } else if (request.kind == 1) {
-@@ -340,8 +3395,152 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -340,8 +3403,152 @@ void runtime_survey_tick(uint64_t frame) {
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }
