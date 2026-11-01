@@ -42,7 +42,7 @@ Runs on the [MacNativeGames](https://github.com/ly05010419/MacNativeGames) nativ
 And whatever the mood, he watches you: you jump (or flip, or roll), he jumps a beat later; you get hit, he startles;
 you swing your sword at him, he walks off a couple of metres, turns round and gets back at you (drops something gross
 at your feet, sometimes a bomb barrel; has a snack; or makes a face or does a victory dance), then comes back; you whistle, he comes running; you open a chest or cook something great, he
-celebrates; you cook something bad, he's grossed out; you climb or glide, he looks up at you; you take out your camera, he photobombs it (runs into the shot and dances; in a selfie, he's behind your shoulder). Shove him enough and he
+celebrates; you cook something bad, he's grossed out; you climb or glide, he looks up at you; you fight something he's seen, he runs up to it and swings his sword too (no damage yet); you take out your camera, he photobombs it (runs into the shot and dances; in a selfie, he's behind your shoulder). Shove him enough and he
 sulks.
 
 ## Where he's going
@@ -99,7 +99,7 @@ from his first frame.
 | `survey lonk <mood> <frames>` | force a mood: `stalk`, `buddy`, `block`, `behind`, `wander`, `gift`, `flee`, `party`, `fight`, `hide`, `race` |
 | `survey lonk hit [gift\|eat\|silly]` | as if you'd swung at him (any reaction, or that one) |
 | `survey lonk emote <name>` | `look`, `lookup`, `eat`, `meal` (the same as `eat` now), `yuck`, `jump`, `sulk`, `surprise` |
-| `survey lonk pose <swim\|tread\|climb\|cling\|glide\|off>` | play one of the new loops where he stands, to look at it (needs the mod rebuilt) |
+| `survey lonk pose <swim\|tread\|climb\|cling\|glide\|swing\|off>` | play one of the new loops where he stands, to look at it (needs the mod rebuilt) |
 | `survey lonk drawat\|putat <0..1>` | when, in his draw / put-away clip, the weapon reaches his hand / his back |
 | `survey lonk goto <right> <forward> [m/s]` | send him somewhere (metres from you) |
 | `survey lonk nobuddy` / `survey lonk buddyok` | he stops / starts picking buddy mode himself (your whistle still calls him) |

@@ -264,7 +264,8 @@ controller (the menu's bow poses). A first try hung them on an int selector behi
 wasn't: the search for free nodes didn't follow bool selectors (their children are `Condition True`/`Condition False`),
 so his idle reached that selector too and the tree had a loop in it, and the "free" clips were his face's blinks. Now
 the search follows them, and the build stops if the new branch could reach back into his tree. Clinging to a wall is the
-climb held still (rate 0). `survey lonk pose <swim|tread|climb|cling|glide|off>` plays one where he stands. The first use:
+climb held still (rate 0). A fifth loop, a sword swing (`Sword_Attack_S1`), sits where the glide was, behind one more
+bool selector on `WeaponFire`. `survey lonk pose <swim|tread|climb|cling|glide|swing|off>` plays one where he stands. The first use:
 when you glide and he's falling (he followed you off a ledge), he glides too, no paraglider of his own, sinking as fast
 as you do (your climb rate, between 1.5 and 6 m/s down) instead of dropping like a stone.
 
@@ -412,6 +413,10 @@ makes it look like he dove there).
   he paced along a ledge, jumping made him copy the jump, and that got him over): upward speed sqrt(2 g (height +
   0.6 m)), the jump clip, and he keeps heading for you in the air (aiming 0.6 m from you, so he lands beside you, not at
   the foot). The knee-high wall check rises with his feet, so he moves on once he's above the edge. 4 s between tries.
+- Fighting beside you (new, a reaction, not tested in a real fight yet): you swing (`CutS*`, `CutDash`, `ChargeAttack*`,
+  `ChargeLSwordSpin`) not at him, and he's seen an enemy in the last 3 s: he sprints to 1.6 m short of it and swings
+  his sword at it (the swing loop, facing it), till it's been out of his sight for 3 s or you haven't swung for 5 s.
+  It does no damage yet (that needs the game's attack code). He doesn't go off planting a bomb barrel meanwhile.
 - Photobomb (new, a reaction in any mood): your camera comes out (your body plays `LookPad`, or `SelfCameraPose` for a
   selfie) and he's within 30 m: he sprints to 3.5 m in front of you, 0.8 m to one side (a selfie: 1 m behind you, to
   one side), faces you and dances, till 2 s after you put the camera away. `survey lonk photo <frames>` does one (then
