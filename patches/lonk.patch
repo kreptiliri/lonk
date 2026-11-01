@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..e37caac 100644
+index c05d6c3..80a2b05 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -155,7 +155,7 @@ index c05d6c3..e37caac 100644
 +static unsigned lonk_you_swung;   /* frames since your last swing */
 +static int lonk_you_camera, lonk_photo_there;   /* your camera is up (1, 2 = a selfie); he's in your shot, dancing */
 +static int lonk_climb, lonk_you_climb;   /* he's climbing a wall (you were, above him); your body plays a climb */
-+static unsigned lonk_fake_climb, lonk_fake_glide, lonk_fake_enemy;   /* "survey peek fakeclimb|fakeglide|fakeenemy": tests, 10 s */
++static unsigned lonk_fake_climb, lonk_fake_glide, lonk_fake_enemy, lonk_fake_run;   /* "survey peek fakeclimb|fakeglide|fakeenemy|fakerun": tests, 10 s */
 +static float lonk_fake_at[3];   /* (fakeenemy: where the "enemy" is: 6 m east of you, or "fakeenemy x y z") */
 +static float climb_n[2];   /* the wall's way out (horizontal) */
 +static unsigned climb_left;   /* 15 s at most up one wall */
@@ -274,7 +274,7 @@ index c05d6c3..e37caac 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,22 +475,2853 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,22 +475,2855 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -767,6 +767,7 @@ index c05d6c3..e37caac 100644
 +        fprintf(stderr, "[survey] fakeenemy: an enemy at %.1f,%.1f,%.1f for 10 s\n", lonk_fake_at[0], lonk_fake_at[1], lonk_fake_at[2]);
 +        return;
 +    }
++    if (n == 1 && !strcmp(tok[0], "fakerun")) { lonk_fake_run = 600; fprintf(stderr, "[survey] fakerun: you count as running for 10 s\n"); return; }
 +    if (n == 1 && !strcmp(tok[0], "fakeglide")) { lonk_fake_glide = 600; fprintf(stderr, "[survey] fakeglide: you count as gliding for 10 s\n"); return; }
 +    if (n == 1 && !strcmp(tok[0], "fakeclimb")) { lonk_fake_climb = 600; fprintf(stderr, "[survey] fakeclimb: you count as climbing for 10 s\n"); return; }
 +    if (n == 1 && !strcmp(tok[0], "ledges")) {   /* walls 2.5 to 6 m high within 30 m: a floor 2 m on from another that much lower */
@@ -1901,6 +1902,7 @@ index c05d6c3..e37caac 100644
 +       where you died (tested: pop next to me) */
 +    if (moved_p > 15) lonk_you_moved = 30;
 +    player_speed += ((moved_p > 2 ? 0 : moved_p / lonk_dt) - player_speed) * ease(0.2f);
++    if (lonk_fake_run) { lonk_fake_run = tick_down(lonk_fake_run); player_speed = fmaxf(player_speed, 8.0f); }   /* (a test: you count as running) */
 +    /* for copying your run or sprint beside you: your speed over about half a second, and a wide gap between the two,
 +       or every dip in your sprint flipped his clip (and each flip restarts it) */
 +    static float player_pace;
@@ -3131,7 +3133,7 @@ index c05d6c3..e37caac 100644
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,15 +3331,80 @@ void runtime_survey_cancel_user(void) {
+@@ -307,15 +3333,80 @@ void runtime_survey_cancel_user(void) {
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
@@ -3212,7 +3214,7 @@ index c05d6c3..e37caac 100644
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
      } else if (request.kind == 1) {
-@@ -340,8 +3429,152 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -340,8 +3431,152 @@ void runtime_survey_tick(uint64_t frame) {
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }
