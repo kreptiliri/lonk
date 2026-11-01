@@ -426,7 +426,7 @@ makes it look like he dove there).
   `ChargeLSwordSpin`) not at him, and he's seen an enemy in the last 3 s: he sprints to 1.6 m short of it and swings
   his sword at it (the swing loop, facing it), till it's been out of his sight for 3 s or you haven't swung for 5 s.
   It does no damage yet (that needs the game's attack code). He doesn't go off planting a bomb barrel meanwhile.
-  Tested against `survey peek fakeenemy` (an "enemy" 6 m east of you for 10 s) with `survey lonk spar`: he sprinted to
+  Tested against `survey peek fakeenemy [x y z]` (an "enemy" 6 m east of you, or there, for 10 s) with `survey lonk spar`: he sprinted to
   1.7 m short of it, turned to face it and swung, and stopped 5 s after (no swings of mine).
 - Photobomb (new, a reaction in any mood): your camera comes out (your body plays `LookPad`, or `SelfCameraPose` for a
   selfie) and he's within 30 m: he sprints to 3.5 m in front of you, 0.8 m to one side (a selfie: 1 m behind you, to

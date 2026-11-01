@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..86c32ae 100644
+index c05d6c3..e37caac 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -155,8 +155,8 @@ index c05d6c3..86c32ae 100644
 +static unsigned lonk_you_swung;   /* frames since your last swing */
 +static int lonk_you_camera, lonk_photo_there;   /* your camera is up (1, 2 = a selfie); he's in your shot, dancing */
 +static int lonk_climb, lonk_you_climb;   /* he's climbing a wall (you were, above him); your body plays a climb */
-+static unsigned lonk_fake_climb, lonk_fake_glide, lonk_fake_enemy;   /* (fakeenemy: an "enemy" 6 m east of you for 10 s) */
-+static float lonk_fake_at[3];   /* "survey peek fakeclimb|fakeglide": you count as climbing / gliding for 10 s (tests) */
++static unsigned lonk_fake_climb, lonk_fake_glide, lonk_fake_enemy;   /* "survey peek fakeclimb|fakeglide|fakeenemy": tests, 10 s */
++static float lonk_fake_at[3];   /* (fakeenemy: where the "enemy" is: 6 m east of you, or "fakeenemy x y z") */
 +static float climb_n[2];   /* the wall's way out (horizontal) */
 +static unsigned climb_left;   /* 15 s at most up one wall */
 +static int lonk_swim;   /* in deep water: he swims (or treads water) with the surface at his chest */
@@ -274,7 +274,7 @@ index c05d6c3..86c32ae 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,22 +475,2849 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,22 +475,2853 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -759,9 +759,11 @@ index c05d6c3..86c32ae 100644
 +    }
 +    if (n == 1 && !strcmp(tok[0], "euread")) { weapon_scan_area(pouch ? pouch_eu(pouch) : 0, 0x4700, 0, "him", "eu"); weapon_scan_area(pouch_eu(player), 0x4700, 0, "you", "eu"); return; }
 +    if (n == 1 && !strcmp(tok[0], "wscan")) { weapon_scan(pouch_eu(player), "you"); weapon_scan(pouch ? pouch_eu(pouch) : 0, "him"); return; }
-+    if (n == 1 && !strcmp(tok[0], "fakeenemy")) {
-+        if (!read_mem(player + ACTOR_POS, lonk_fake_at, sizeof lonk_fake_at)) return;
-+        lonk_fake_at[0] += 6; lonk_fake_enemy = 600;
++    if ((n == 1 || n == 4) && !strcmp(tok[0], "fakeenemy")) {   /* (or "fakeenemy x y z": there) */
++        if (n == 4) for (int k = 0; k < 3; k++) lonk_fake_at[k] = strtof(tok[1 + k], NULL);
++        else if (!read_mem(player + ACTOR_POS, lonk_fake_at, sizeof lonk_fake_at)) return;
++        else lonk_fake_at[0] += 6;
++        lonk_fake_enemy = 600;
 +        fprintf(stderr, "[survey] fakeenemy: an enemy at %.1f,%.1f,%.1f for 10 s\n", lonk_fake_at[0], lonk_fake_at[1], lonk_fake_at[2]);
 +        return;
 +    }
@@ -957,7 +959,7 @@ index c05d6c3..86c32ae 100644
 +static const char *const gait_names[GAITS] = {"idle", "walk", "run", "dash", "party", "look around", "surprise", "eat", "meal", "yuck",
 +                                              "jump", "fall", "sulk", "look up", "draw", "swim", "tread water", "climb", "glide", "swing", "fast swim"};
 +static int lonk_body_emote;   /* his body slot is playing the UseItem command (an emote, his take-off) */
-+static KEEP int lonk_pose = -1, lonk_cling;   /* "survey lonk pose <swim|tread|climb|cling|glide|off>": play that loop where he stands (to look at them) */
++static KEEP int lonk_pose = -1, lonk_cling;   /* "survey lonk pose <swim|fastswim|tread|climb|cling|glide|swing|off>": play that loop where he stands */
 +static int lonk_you_glide;   /* your body plays a glide (the paraglider) */
 +static int lonk_equip_clip;   /* the mod's draw/put away clip: 21 sword, 22 two-hander, 23 spear out; 24 two-hander, 25 spear, else sword away */
 +static int lonk_armed;   /* his weapons are out (twin_draw), and what kind: the mod's walk and run carry them (arms) */
@@ -976,8 +978,8 @@ index c05d6c3..86c32ae 100644
 +       int +0x30, float +0x38, bool +0x40. */
 +    /* (the mod's cases sit at 11 to 15: at 1 to 5 the menu's AI took them for a weapon in his hands and drew his sword) */
 +    static int hold[GAITS] = {0, 11, 12, 13, 14, 0, 0, 0, 0, 0, 15, 15, 0, 0, 0, 15, 15, 15, 15, 15, 15};   /* (an emote: what's under it, the idle; the take-off: the fall after it) */
-+    /* (swimming, treading water, climbing and gliding sit under his fall in the mod, picked by three bools, below; with
-+       an older mod they're his fall) */
++    /* (swimming, a fast swim, treading water, climbing, gliding and a sword swing sit under his fall in the mod, picked
++       by four bools, below; with an older mod they're his fall) */
 +    hold[GAIT_EQUIP] = lonk_equip_clip;   /* drawing or putting away: which clip (the mod's selector under UseItem, 21 to 25) */
 +    /* The emotes and his take-off are the UseItem command, played in his body slot, its string picking the clip (the mod
 +       renamed some: look around, the take-off, a startle, a sulk, look up). They used to go through PauseMenuWait's case
@@ -1044,7 +1046,8 @@ index c05d6c3..86c32ae 100644
 +           the string "Arrow", which the menu only uses for the bow) */
 +        struct { const char *name; uint64_t zero; } a_key = {"IsAttachedWeapon", 0}, k_key = {"Arrow", 0};
 +        /* (under his fall, IsAttachedWeapon is "a loop, not the fall", then WeaponGuardEnhance and ShieldEquip pick swim,
-+           tread water, climb or glide; written only while one's on, and put back once after) */
++           tread water, climb or glide, and WeaponFire turns the swim fast and the glide into a swing; written only while
++           one's on, and put back once after) */
 +        int loop = gait >= GAIT_SWIM && gait <= GAIT_SWIMDASH;
 +        static int was_loop;
 +        ((void (*)(uintptr_t, const void *, bool))set_bool)(bb, &a_key, loop || (lonk_armed != 0 && hold[gait] != 15));
@@ -2316,6 +2319,7 @@ index c05d6c3..86c32ae 100644
 +    {   /* your camera comes out (the pad up, or a selfie): he photobombs it */
 +        int camera = strstr(all, "SelfCamera") ? 2 : strstr(all, "LookPad") ? 1 : 0;
 +        if (camera && !lonk_you_camera && hypotf(p[0] - a[0], p[2] - a[2]) < 30 && lonk_kind != LONK_FIGHT && lonk_kind != LONK_MAD &&
++            lonk_kind != LONK_STAY && lonk_kind != LONK_SPAR &&   /* (staying means staying) */
 +            !lonk_air && !lonk_swim && !lonk_climb) {
 +            fprintf(stderr, "[survey] lonk: your camera! photobombs it\n");
 +            lonk_you_camera = camera;
@@ -3127,7 +3131,7 @@ index c05d6c3..86c32ae 100644
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,15 +3327,80 @@ void runtime_survey_cancel_user(void) {
+@@ -307,15 +3331,80 @@ void runtime_survey_cancel_user(void) {
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
@@ -3208,7 +3212,7 @@ index c05d6c3..86c32ae 100644
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
      } else if (request.kind == 1) {
-@@ -340,8 +3425,152 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -340,8 +3429,152 @@ void runtime_survey_tick(uint64_t frame) {
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }
