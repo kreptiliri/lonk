@@ -382,6 +382,11 @@ makes it look like he dove there).
   he paced along a ledge, jumping made him copy the jump, and that got him over): upward speed sqrt(2 g (height +
   0.6 m)), the jump clip, and he keeps heading for you in the air (aiming 0.6 m from you, so he lands beside you, not at
   the foot). The knee-high wall check rises with his feet, so he moves on once he's above the edge. 4 s between tries.
+- Race (new, weight 12 while your pace is over 5 m/s, never twice in a row): the finish is 25 m ahead of you along your
+  facing, or less if `path_free` finds a wall or a drop first (under 12 m of clear run: no race, he follows). He sprints
+  for it with block's overtaking boost (your speed + 2.5 m/s, so he can just about beat your sprint). He gets within
+  0.8 m first: he dances (party). You're within 1.5 m of it first, him still 2 m off: he sulks and follows. Not tested
+  in a real race yet (the island I tested on had a drop every few metres: "no clear run ahead of you").
 - Hide and seek (a mood of its own, weight 10): 24 directions, 6 to 14 m, each walkable in a straight line
   (`path_free`, at least 6 m), with floor at the end within 0.8 m of his height (a spot below a ledge: he won't step
   off, and ran up and down its edge), and hidden: a ray from your eyes (1.6 m up) to his chest there

@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..0148681 100644
+index c05d6c3..42ca5c8 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -100,8 +100,8 @@ index c05d6c3..0148681 100644
 +   through forceSetMatrix, yaw only. "survey stalk <frames> [m/s [stop m]]" walks it to the player; "survey lonk ..." runs
 +   the behaviours or the dice brain. Survives your input (you're playing). */
 +enum { STALK_MAX = 16, TRAIL_MAX = 512 };
-+enum { LONK_STALK, LONK_BLOCK, LONK_BEHIND, LONK_WANDER, LONK_GIFT, LONK_FLEE, LONK_PARTY, LONK_BUDDY, LONK_FIGHT, LONK_HIDE, LONK_MAD, LONK_KINDS };
-+static const char *const lonk_names[LONK_KINDS] = {"stalk", "block", "behind", "wander", "gift", "flee", "party", "buddy", "fight", "hide", "mad"};
++enum { LONK_STALK, LONK_BLOCK, LONK_BEHIND, LONK_WANDER, LONK_GIFT, LONK_FLEE, LONK_PARTY, LONK_BUDDY, LONK_FIGHT, LONK_HIDE, LONK_MAD, LONK_RACE, LONK_KINDS };
++static const char *const lonk_names[LONK_KINDS] = {"stalk", "block", "behind", "wander", "gift", "flee", "party", "buddy", "fight", "hide", "mad", "race"};
 +enum { GROUND_PLAYER, GROUND_PHYSICS, GROUND_TRAIL, GROUND_TERRAIN, GROUND_MODES };
 +static const char *const ground_names[GROUND_MODES] = {"player", "physics", "trail", "terrain"};
 +static KEEP int pouch_request, height_request;
@@ -264,7 +264,7 @@ index c05d6c3..0148681 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,22 +465,2584 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,22 +465,2617 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -343,12 +343,14 @@ index c05d6c3..0148681 100644
 +    /* what you're doing changes the dice: on the move he sticks with you, standing about he plays, cold or hot he brings
 +       you something */
 +    if (lonk_pace > 3) { weight[LONK_BUDDY] = 35; weight[LONK_STALK] = 30; weight[LONK_WANDER] = 3; weight[LONK_HIDE] = 0; weight[LONK_GIFT] = 8; }
++    if (lonk_pace > 5) weight[LONK_RACE] = 12;   /* you're running about: he challenges you to a race */
 +    else if (lonk_still > 600) { weight[LONK_WANDER] = 22; weight[LONK_HIDE] = 18; weight[LONK_GIFT] = 20; weight[LONK_BEHIND] = 20; weight[LONK_BUDDY] = 8; }
 +    if (lonk_climate) weight[LONK_GIFT] += 25;
 +    if (lonk_no_buddy) weight[LONK_BUDDY] = 0;   /* "survey lonk nobuddy": he never picks buddy himself (your whistle still works) */
 +    if (lonk_no_stalk) weight[LONK_STALK] = 0;   /* "survey lonk nostalk": nor stalking */
 +    static int last_kind = -1;
 +    if (last_kind == LONK_GIFT) weight[LONK_GIFT] = 0;   /* no two gifts in a row */
++    if (last_kind == LONK_RACE) weight[LONK_RACE] = 0;
 +    unsigned total = 0, pick;
 +    for (int k = 0; k < LONK_KINDS; k++) total += weight[k];
 +    pick = arc4random_uniform(total);
@@ -1922,6 +1924,37 @@ index c05d6c3..0148681 100644
 +        }
 +        break;
 +    }
++    case LONK_RACE: {   /* "race you!": a finish 25 m ahead of you, he sprints past you to it; first there, he dances, beaten, he sulks */
++        static float finish[2];
++        static int done;
++        if (entering) {
++            done = 0;
++            float d = 0;
++#if defined(TOTK_GAME_V143)
++            if (isfinite(p[1])) d = path_free(p, fx, fz, 25);   /* a clear run (no wall, no drop on the way) */
++#endif
++            if (player_speed < 3 || d < 12) {
++                fprintf(stderr, "[survey] lonk: no race (%s)\n", player_speed < 3 ? "you're not running" : "no clear run ahead of you");
++                lonk_enter(LONK_STALK, 300); target[0] = a[0]; target[2] = a[2]; break;
++            }
++            d -= 1;
++            finish[0] = p[0] + fx * d; finish[1] = p[2] + fz * d;
++            fprintf(stderr, "[survey] lonk: race you! (to %.0f m ahead)\n", d);
++        }
++        float him = hypotf(finish[0] - a[0], finish[1] - a[2]), you = hypotf(finish[0] - p[0], finish[1] - p[2]);
++        target[0] = finish[0]; target[2] = finish[1]; stop = 0.3f; face_player = 0;
++        speed = fmaxf(LONK_SPRINT, player_speed + 2.5f);   /* the overtaking boost block uses: he can just about beat your sprint */
++        if (!done && him < 0.8f) {
++            done = 1;
++            fprintf(stderr, "[survey] lonk: wins the race\n");
++            lonk_enter(LONK_PARTY, 150);
++        } else if (!done && you < 1.5f && him > 2) {   /* you got there first */
++            done = 1;
++            fprintf(stderr, "[survey] lonk: you won the race\n");
++            lonk_enter(LONK_STALK, 300); lonk_emote_start(GAIT_SULK);
++        } else if (lonk_phase_left <= 1 || (!done && lonk_ticks && you > 40)) lonk_enter(LONK_STALK, 300);   /* (you ran off elsewhere) */
++        break;
++    }
 +    case LONK_BEHIND:
 +        if (entering && ((a[0] - p[0]) * fx + (a[2] - p[2]) * fz < 0 || hypotf(a[0] - p[0], a[2] - p[2]) < 3)) {   /* he was always there */
 +            /* (only while he's out of your sight already, behind you or right next to you: in front of you, the pop
@@ -2852,7 +2885,7 @@ index c05d6c3..0148681 100644
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,15 +3052,80 @@ void runtime_survey_cancel_user(void) {
+@@ -307,15 +3085,80 @@ void runtime_survey_cancel_user(void) {
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
@@ -2933,7 +2966,7 @@ index c05d6c3..0148681 100644
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
      } else if (request.kind == 1) {
-@@ -340,8 +3150,152 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -340,8 +3183,152 @@ void runtime_survey_tick(uint64_t frame) {
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }

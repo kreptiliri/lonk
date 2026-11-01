@@ -33,8 +33,9 @@ Runs on the [MacNativeGames](https://github.com/ly05010419/MacNativeGames) nativ
 | block | sprints into your path, overtaking round your side, and stays in front of you facing you |
 | gift | drops something at your feet (an apple, a fish, a monster part, a bomb barrel; a pepper if you're freezing, a hydromelon if you're too hot), celebrates, and runs |
 | behind | is suddenly standing right behind you, and startles if you turn around |
-| wander | wanders off somewhere he can actually get to, then looks around, looks at the sky or has a snack |
+| wander | strolls off somewhere he can actually get to, then looks around, looks at the sky or has a snack |
 | hide | runs off to a spot you can't see; find him and he bolts, give up and so does he |
+| race | (new, while you're running) "race you!": a finish 25 m ahead on a clear run, he sprints past you to it; first there he dances, beaten he sulks |
 | fight | (when he sees an enemy) sprints at it, plants a bomb barrel next to it, panics and runs; lighting it is your job |
 
 And whatever the mood, he watches you: you jump (or flip, or roll), he jumps a beat later; you get hit, he startles;
@@ -94,7 +95,7 @@ from his first frame.
 | `survey lonk start [mood]` | spawn him and start his brain, or spawn him straight into one mood (brain off) |
 | `survey lonk twin` / `survey lonk naked` | dress him like you (and follow your changes, fused weapons included) / back to his underwear |
 | `survey lonk outfit <set\|random>` | a whole armor set: `hylian`, `wild`, `zora`, `desert`, `snowquill`, `flamebreaker`, `stealth`, `climbing`, `radiant`, `soldier`, `rubber`, `barbarian`, `royal`, `glide`, `froggy`, `miner`, `ember`, `charged`, `frostbite`, `mystic`, `zonaite`, `awakening`, `depths`, `yiga` |
-| `survey lonk <mood> <frames>` | force a mood: `stalk`, `buddy`, `block`, `behind`, `wander`, `gift`, `flee`, `party`, `fight`, `hide` |
+| `survey lonk <mood> <frames>` | force a mood: `stalk`, `buddy`, `block`, `behind`, `wander`, `gift`, `flee`, `party`, `fight`, `hide`, `race` |
 | `survey lonk hit [gift\|eat\|silly]` | as if you'd swung at him (any reaction, or that one) |
 | `survey lonk emote <name>` | `look`, `lookup`, `eat`, `meal` (the same as `eat` now), `yuck`, `jump`, `sulk`, `surprise` |
 | `survey lonk drawat\|putat <0..1>` | when, in his draw / put-away clip, the weapon reaches his hand / his back |
