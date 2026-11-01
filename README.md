@@ -106,6 +106,18 @@ from his first frame.
 | `survey spawn prop <Name> [forward [sideways [up]]]` | spawn something on its own (an enemy, to watch him pick a fight) |
 | `survey lonk trace` | log his and your positions (and a binary trace next to the log) |
 
+### A control panel instead of the commands file
+
+`tools/lonk_panel.swift` is a small floating panel with buttons for all of that: spawn, brain on, stop, every mood,
+the emotes, "hit him", twin / naked / an outfit, and his dice (no buddy, no stalk). It writes the same lines to the
+commands file and shows his newest log lines. It stays on top of the game, even in full screen, and doesn't take the
+keyboard: release the mouse from the camera (the `` ` `` key), click, and play on.
+
+```
+swiftc -O tools/lonk_panel.swift -o lonk_panel
+./lonk_panel <commands.txt>
+```
+
 ### Changing him without rebuilding the app
 
 Rebuilding the app takes minutes. Start the test session with `TOTK_LONK_PLUGIN=<path>/lonk.dylib` as well, then after
