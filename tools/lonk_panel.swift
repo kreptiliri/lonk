@@ -28,6 +28,7 @@ func send(_ lines: [String]) {
 let forever = "216000000"   // the longest a mood can be set for (1000 hours of frames)
 let moods = ["stalk", "buddy", "block", "behind", "wander", "gift", "hide", "race", "fight", "party", "flee"]
 let emotes = ["look", "lookup", "eat", "yuck", "jump", "sulk", "surprise"]
+let poses = ["swim", "tread", "climb", "cling", "glide", "swing", "off"]   // the mod's new loops, where he stands
 let outfits = ["hylian", "wild", "zora", "desert", "snowquill", "flamebreaker", "stealth", "climbing", "radiant",
                "soldier", "rubber", "barbarian", "royal", "glide", "froggy", "miner", "ember", "charged", "frostbite",
                "mystic", "zonaite", "awakening", "depths", "yiga"]
@@ -98,6 +99,7 @@ final class Panel: NSObject, NSApplicationDelegate {
         let mood = rows("Mood (brain off, he stays in it)", moods.map { m in button(m) { send(["survey lonk \(m) \(forever)"]) } }, per: 6)
         let emote = rows("Emote", emotes.map { e in button(e) { send(["survey lonk emote \(e)"]) } } +
                          [button("hit him") { send(["survey lonk hit"]) }], per: 4)
+        let pose = rows("Loops (to look at them)", poses.map { p in button(p) { send(["survey lonk pose \(p)"]) } }, per: 7)
         let look = row("Looks", [
             button("twin") { send(["survey lonk twin"]) },
             button("naked") { send(["survey lonk naked"]) },
@@ -114,7 +116,7 @@ final class Panel: NSObject, NSApplicationDelegate {
         status.preferredMaxLayoutWidth = 300
         status.stringValue = "watching \(logPath)"
 
-        let stack = NSStackView(views: [spawn, mood, emote, look, dice, status])
+        let stack = NSStackView(views: [spawn, mood, emote, pose, look, dice, status])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 10

@@ -111,7 +111,7 @@ from his first frame.
 
 ### A control panel instead of the commands file
 
-`tools/lonk_panel.swift` is a small floating panel with buttons for all of that: spawn, brain on, stop, every mood,
+`tools/lonk_panel.swift` is a small floating panel with buttons for all of that: spawn, brain on, stop, every mood, the new loops,
 the emotes, "hit him", twin / naked / an outfit, and his dice (no buddy, no stalk). It writes the same lines to the
 commands file and shows his newest log lines. It stays on top of the game, even in full screen, and doesn't take the
 keyboard: release the mouse from the camera (the `` ` `` key), click, and play on.
