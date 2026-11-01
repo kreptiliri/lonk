@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..9726ed1 100644
+index c05d6c3..f3c235f 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -40,7 +40,7 @@ index c05d6c3..9726ed1 100644
  #include <limits.h>
  #include <mach/mach.h>
  #include "mach_vm_compat.h"
-@@ -181,24 +184,152 @@ void runtime_survey_init(Module *m) {
+@@ -181,24 +184,155 @@ void runtime_survey_init(Module *m) {
  int runtime_survey_command(const char *line) { (void)line; return 0; }
  #endif
  #else
@@ -151,6 +151,9 @@ index c05d6c3..9726ed1 100644
 +static KEEP int lonk_emote, lonk_emoted;   /* a one-off emote (its gait: GAIT_LOOK, GAIT_EAT...) he's doing instead of moving, once per mood */
 +static KEEP unsigned lonk_emote_left, lonk_emote_late;   /* frames left; frames it's waited to start (those don't count, up to a second) */
 +static KEEP int lonk_air;   /* in the air */
++static int lonk_climb, lonk_you_climb;   /* he's climbing a wall (you were, above him); your body plays a climb */
++static float climb_n[2];   /* the wall's way out (horizontal) */
++static unsigned climb_left;   /* 15 s at most up one wall */
 +static int lonk_swim;   /* in deep water: he swims (or treads water) with the surface at his chest */
 +#define LONK_SWIM 2.5f   /* m/s in the water (a guess: Link's swim is slow) */
 +/* The walk, run and dash clips carry Link forward by themselves (their Root bone, about 3 m a loop). The mod takes his
@@ -198,7 +201,7 @@ index c05d6c3..9726ed1 100644
  
  static int read_mem(uintptr_t address, void *out, size_t size) {
      if (!address || address > UINTPTR_MAX - size) return 0;
-@@ -254,6 +385,45 @@ static uintptr_t player_actor(void) {
+@@ -254,6 +388,45 @@ static uintptr_t player_actor(void) {
      }
      return 0;
  }
@@ -244,7 +247,7 @@ index c05d6c3..9726ed1 100644
  void runtime_survey_init(Module *m) {
      const char *enabled = getenv("TOTK_SURVEY");
      if (!enabled || strcmp(enabled, "1")) return;
-@@ -272,6 +442,21 @@ void runtime_survey_init(Module *m) {
+@@ -272,6 +445,21 @@ void runtime_survey_init(Module *m) {
          runtime_fail("survey requires verified game-version forceSetMatrix entry");
      survey_main = (uintptr_t)m->base;
      survey_force = (void (*)(void *, const float *, uint32_t))(m->base + FORCE_MATRIX);
@@ -266,7 +269,7 @@ index c05d6c3..9726ed1 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,22 +467,2693 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,22 +470,2738 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -2231,6 +2234,7 @@ index c05d6c3..9726ed1 100644
 +    char all[256], *cur = all;
 +    anim_cmds(player, all, sizeof all);
 +    lonk_you_glide = strstr(all, "Glide") != NULL;
++    lonk_you_climb = strstr(all, "Climb") != NULL;
 +    for (int slot = 0; slot < 4 && cur; slot++) {
 +        char *bar = strchr(cur, '|'), cmd[48];
 +        snprintf(cmd, sizeof cmd, "%.*s", bar ? (int)(bar - cur) : (int)strlen(cur), cur);
@@ -2390,7 +2394,22 @@ index c05d6c3..9726ed1 100644
 +    if (gap < closest - 0.3f || gap > closest + 3 || gap < stop + 0.5f) { closest = gap; no_gain = 0; } else no_gain += lonk_ticks;
 +    lonk_no_gain = follows ? no_gain : 0;
 +    jump_rest = tick_down(jump_rest);
-+    if (follows && (lonk_blocked > 8 || no_gain > 10) && rise > 0.6f && rise < 7 && hypotf(p[0] - a[0], p[2] - a[2]) < 20 &&
++#if defined(TOTK_GAME_V143)
++    /* you're climbing, more than 1.5 m above him, and he's stuck at the foot of it: he climbs too (a wall in front of his
++       chest, towards you) */
++    if (follows && !lonk_climb && !lonk_air && !lonk_swim && lonk_you_climb && (lonk_blocked > 8 || no_gain > 10) && rise > 1.5f &&
++        hypotf(p[0] - a[0], p[2] - a[2]) < 12 && !lonk_emote_left && isfinite(a[1])) {
++        float gx = p[0] - a[0], gz = p[2] - a[2], gl = fmaxf(hypotf(gx, gz), 0.01f), hit[3], n[3];
++        float from[3] = {a[0], a[1] + 1.0f, a[2]}, to[3] = {a[0] + gx / gl * 1.2f, a[1] + 1.0f, a[2] + gz / gl * 1.2f};
++        if (ray_cast(from, to, hit, n) && fabsf(n[1]) < 0.7f && hypotf(n[0], n[2]) > 0.1f) {
++            float nl = hypotf(n[0], n[2]);
++            climb_n[0] = n[0] / nl; climb_n[1] = n[2] / nl; lonk_climb = 1; climb_left = 900; lonk_v = 0;
++            a[0] = hit[0] + climb_n[0] * 0.4f; a[2] = hit[2] + climb_n[1] * 0.4f;
++            fprintf(stderr, "[survey] lonk: climbs after you (%.1f m up)\n", rise);
++        }
++    }
++#endif
++    if (follows && !lonk_climb && (lonk_blocked > 8 || no_gain > 10) && rise > 0.6f && rise < 7 && hypotf(p[0] - a[0], p[2] - a[2]) < 20 &&
 +        !lonk_emote_left && lonk_jump == 0 && !jump_rest && lonk_at_edge(a, p) && !lonk_walk_up(a, p)) {
 +        lonk_no_gain = 0; jump_rest = 90; lonk_jump_aimed = 1;
 +        lonk_jump = sqrtf(2 * LONK_GRAVITY * (rise + 0.6f));
@@ -2411,14 +2430,14 @@ index c05d6c3..9726ed1 100644
 +    static unsigned watch_frames, watch_wanted, stuck_seconds;
 +    if (wanted) watch_wanted += lonk_ticks;
 +    if ((watch_frames += lonk_ticks) >= 60) {
-+        int stuck = watch_wanted > 40 && hypotf(a[0] - watch_from[0], a[2] - watch_from[1]) < 0.4f;
++        int stuck = watch_wanted > 40 && hypotf(a[0] - watch_from[0], a[2] - watch_from[1]) < 0.4f && !lonk_climb;
 +        /* or pacing: 3 s of running somewhere still far off and ending up within 1.5 m of where he was (he ran up and down
 +           a ledge's edge at full speed for 15 s, getting 0.4 m further every second, tested) */
 +        static float was_at[3][2];
 +        static unsigned busy_seconds;
 +        int busy = watch_wanted > 40 && hypotf(target[0] - a[0], target[2] - a[2]) > stop + 2;
 +        busy_seconds = busy ? busy_seconds + 1 : 0;
-+        if (!stuck && busy_seconds >= 3 && hypotf(a[0] - was_at[1][0], a[2] - was_at[1][1]) < 1.5f) {
++        if (!stuck && !lonk_climb && busy_seconds >= 3 && hypotf(a[0] - was_at[1][0], a[2] - was_at[1][1]) < 1.5f) {
 +            stuck = 1; busy_seconds = 0;
 +            fprintf(stderr, "[survey] lonk: pacing up and down, counts as stuck\n");
 +        }
@@ -2478,7 +2497,7 @@ index c05d6c3..9726ed1 100644
 +    if (pushed_left) gait_v = fmaxf(gait_v, lonk_speed);
 +    int move_gait = lonk_move_gait(gait_v, stopping && !pushed_left, lonk_kind == LONK_BUDDY && lonk_v > 0.8f && player_pace > 1 && !pushed_left);
 +    int falls = lonk_falling > (lonk_air ? 0 : 12);
-+    pouch_gait(falls ? (lonk_you_glide ? GAIT_GLIDE : GAIT_FALL) : lonk_swim ? (lonk_v > 0.3f ? GAIT_SWIM : GAIT_TREAD) :
++    pouch_gait(lonk_climb ? GAIT_CLIMB : falls ? (lonk_you_glide ? GAIT_GLIDE : GAIT_FALL) : lonk_swim ? (lonk_v > 0.3f ? GAIT_SWIM : GAIT_TREAD) :
 +               lonk_emote_left ? lonk_emote : lonk_pose >= 0 ? lonk_pose :
 +               lonk_kind == LONK_PARTY ? GAIT_PARTY : move_gait,
 +               pushed_left ? fmaxf(lonk_v, lonk_speed) : lonk_v);   /* (his legs go at the speed he's at, getting up to it too) */
@@ -2495,6 +2514,34 @@ index c05d6c3..9726ed1 100644
 +        hx = cosf(now + turn); hz = sinf(now + turn);
 +    }
 +    face[0] = hx; face[1] = hz;
++#if defined(TOTK_GAME_V143)
++    /* on the wall: 0.4 m off it (a chest-high ray finds it each frame and follows its turns), sliding sideways towards
++       you at up to 1 m/s, facing it; going up is in the feet, below. The ray finds no wall: his chest is over the top,
++       he steps onto it. You stop climbing below him, or 15 s: he lets go. */
++    if (lonk_climb) {
++        float sx = -climb_n[1], sz = climb_n[0], side = (p[0] - a[0]) * sx + (p[2] - a[2]) * sz;
++        float slide = fminf(fmaxf(side, -1.0f), 1.0f) * lonk_dt;
++        a[0] += sx * slide; a[2] += sz * slide;
++        float from[3] = {a[0], a[1] + 1.0f, a[2]}, to[3] = {a[0] - climb_n[0] * 1.2f, a[1] + 1.0f, a[2] - climb_n[1] * 1.2f}, hit[3], n[3];
++        int wall = ray_cast(from, to, hit, n);
++        if (wall && fabsf(n[1]) < 0.85f && hypotf(n[0], n[2]) > 0.1f) {
++            float nl = hypotf(n[0], n[2]);
++            climb_n[0] += (n[0] / nl - climb_n[0]) * ease(0.2f); climb_n[1] += (n[2] / nl - climb_n[1]) * ease(0.2f);
++            nl = fmaxf(hypotf(climb_n[0], climb_n[1]), 0.01f); climb_n[0] /= nl; climb_n[1] /= nl;
++            a[0] = hit[0] + climb_n[0] * 0.4f; a[2] = hit[2] + climb_n[1] * 0.4f;
++        }
++        face[0] = -climb_n[0]; face[1] = -climb_n[1];
++        lonk_v = 0; lonk_blocked = 0;
++        climb_left = tick_down(climb_left);
++        if (!wall) {
++            a[0] -= climb_n[0] * 0.8f; a[2] -= climb_n[1] * 0.8f; lonk_climb = 0;
++            fprintf(stderr, "[survey] lonk: climbs over the top\n");
++        } else if (!climb_left || (!lonk_you_climb && p[1] < a[1] + 0.5f)) {
++            lonk_climb = 0;
++            fprintf(stderr, "[survey] lonk: lets go of the wall\n");
++        }
++    }
++#endif
 +    float ground = ground_mode == GROUND_TRAIL || ground_mode == GROUND_TERRAIN ? trail_height(a[0], a[2], p[1]) : p[1];
 +    static const char *ground_src;
 +    ground_src = "footsteps";
@@ -2529,7 +2576,8 @@ index c05d6c3..9726ed1 100644
 +            if (deep != lonk_swim) fprintf(stderr, "[survey] lonk: %s\n", deep ? "in the water, swims" : "out of the water");
 +            lonk_swim = deep; water_at = deep ? wh : water_at;
 +        }
-+        if (lonk_swim && !(lonk_air && vy > 0)) {
++        if (lonk_climb) { feet += 1.2f * lonk_dt; vy = 0; lonk_air = 0; ground_src = "climbing"; h = feet; up = 1; }   /* (Link's climb, about) */
++        else if (lonk_swim && !(lonk_air && vy > 0)) {
 +            feet += (water_at - 1.4f - feet) * ease(0.2f); vy = 0; lonk_air = 0; ground_src = "water"; h = feet; up = 1;
 +        } else if (ray_floor(a[0], a[2], feet + 0.7f, feet - 60, &h, &up)) {
 +            ground_src = "ray";
@@ -2963,7 +3011,7 @@ index c05d6c3..9726ed1 100644
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,15 +3163,80 @@ void runtime_survey_cancel_user(void) {
+@@ -307,15 +3211,80 @@ void runtime_survey_cancel_user(void) {
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
@@ -3044,7 +3092,7 @@ index c05d6c3..9726ed1 100644
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
      } else if (request.kind == 1) {
-@@ -340,8 +3261,152 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -340,8 +3309,152 @@ void runtime_survey_tick(uint64_t frame) {
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }

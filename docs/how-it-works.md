@@ -272,8 +272,14 @@ a hit is water when its layer (`q+0x48`) is 0x26 to 0x2b. Every 4 frames he look
 with more than 1.2 m of water over the floor he floats with his feet 1.4 m under the surface (as yours are), swims at
 2.5 m/s (a guess) or treads water standing still. Tested in a pond on the Great Sky Island: he ran in after me, swam,
 trod water beside me, and walked out on the other side. `survey peek water` lists the ponds within 200 m (water with a
-floor under it: at an island's edge there's water with nothing under it, and I fell off the island). Climbing a wall
-is still to come.
+floor under it: at an island's edge there's water with nothing under it, and I fell off the island).
+
+Climbing (new, not tested yet): you're climbing (your body plays a `Climb` command), more than 1.5 m above him, and he's
+stuck at the foot: if a chest-high ray towards you hits a wall (its normal less than 45 degrees off level), he climbs.
+He keeps 0.4 m off it (the ray finds it every frame, and he turns with it), goes up at 1.2 m/s with the climb loop,
+slides sideways towards you at up to 1 m/s, and faces the wall. When the ray finds no wall his chest is over the top:
+he steps 0.8 m in and the floor takes him (a step up of up to 3 m). You stop climbing below him, or 15 s go by: he lets
+go and falls.
 
 Standing, he reaches for them like Link: Link's own `Equip_Sword_On_Natural` / `Equip_Sword_Off_Natural` (and the
 `Lsword` and `Spear` ones) as an emote. The `UseItem` value `EatCookingDish` (his meal, which now eats like a snack)
