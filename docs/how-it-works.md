@@ -342,6 +342,9 @@ Stranded for 3 seconds (5 m above or below Link or 30 m away while getting nowhe
 or no floor), he pops back next to Link: behind him, else to a side, else in front, wherever a ray finds flat floor at
 Link's height. Up a staircase or off on a run of his own is fine. Following you for 4 s without getting any closer
 (pacing along a ledge he can't get over) counts as lost too. The "behind" mood's teleport uses the same spot.
+Pacing counts as stuck too: 3 s of heading somewhere still more than 2 m off and ending up within 1.5 m of where he was
+(fleeing on a sky island he ran up and down an edge at full speed for 15 s, getting 0.4 m further every second, so the
+one-second check never fired). A wander then picks somewhere else and a flee turns.
 
 Walking through Link puts the mannequin's collision above Link's head, which the game reads as a low ceiling, and
 forces a crouch. Lonk keeps 1.1 m away and slides around instead, unless that would put him in a wall or off a ledge
@@ -380,12 +383,15 @@ makes it look like he dove there).
   0.6 m)), the jump clip, and he keeps heading for you in the air (aiming 0.6 m from you, so he lands beside you, not at
   the foot). The knee-high wall check rises with his feet, so he moves on once he's above the edge. 4 s between tries.
 - Hide and seek (a mood of its own, weight 10): 24 directions, 6 to 14 m, each walkable in a straight line
-  (`path_free`, at least 6 m), with floor at the end, and hidden: a ray from your eyes (1.6 m up) to his chest there
+  (`path_free`, at least 6 m), with floor at the end within 0.8 m of his height (a spot below a ledge: he won't step
+  off, and ran up and down its edge), and hidden: a ray from your eyes (1.6 m up) to his chest there
   hits something at least 0.8 m before it. He runs there and faces you; within 3 m once he's there, you've found him
   (startle, flee; counted from the start, he was found on the spot every time, since he starts right beside you);
-  after 25 s he gives up and follows you again.
+  after 25 s he gives up and follows you again (his own 25 s: with the brain off the mood's count is an hour, and he
+  hid forever). No closer to his spot for 2 s, he hides somewhere else, three tries.
 - A wander, after its emote and a couple of seconds' rest, goes on somewhere else (with the brain off it used to be one
-  trip, then standing there for the rest of the hour).
+  trip, then standing there for the rest of the hour). He strolls there at his walk (2 m/s), one trip in three at a
+  jog: always running there looked like an errand.
 - Block: his spot is 2.5 m in front of you, inside the floor there (looked for 4 times a second); with less than about
   1.4 m of floor in front of you (a cliff edge) he stays where he is and watches. At an edge his spot was out over the
   drop and he sprinted back and forth along it. Not in front of you yet, he goes round you, 2.5 m out on his side, then
@@ -436,7 +442,9 @@ I left him jogging). Turn round with him within 4 m and in front of you and he s
 for 3 s again, you can catch him again (once per mood meant once in a long behind and never again). A gift spawns an apple
 (`Item_Fruit_A`), a fish (`Item_FishGet_A`), a monster part (`Item_Enemy_01`) or a `BarrelBomb` next to Link through the
 same spawn call,
-then Lonk celebrates for two and a half seconds and flees for four.
+then Lonk celebrates for two and a half seconds and flees for four. With gift as your mood (brain off) he follows you
+for 20 s between gifts (one every 9 s piled up at your feet), and a fight as your mood waits out the same 25 s between
+barrels as the brain does (he planted one every 5 s).
 
 
 What you're doing changes his dice: moving (your speed averaged over a few seconds above 3 m/s) he mostly buddies up or
