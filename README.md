@@ -22,7 +22,8 @@ Runs on the [MacNativeGames](https://github.com/ly05010419/MacNativeGames) nativ
   sky islands, caves and bridges count), around walls, off ledges after you, and up onto them when you're up there.
 - **He sees.** A ring of rays tells him what's around him: enemies, you, things in the way. He also reads what you're
   doing from your own animation commands.
-- **He swims** (new): into the water after you, treading water when you stop; and glides down with you when you glide.
+- **He swims, climbs and glides** (new): into the water after you (treading water when you stop), up a wall after you,
+  and down with you when you glide.
 - **He doesn't stay gone.** You die, he's back a couple of seconds after you are.
 - **He has a (small) brain.** Every few seconds he decides what to do, and what you're doing changes his dice: on the
   move he sticks with you, standing around he plays.
@@ -39,11 +40,18 @@ Runs on the [MacNativeGames](https://github.com/ly05010419/MacNativeGames) nativ
 | race | (new, while you're running) "race you!": a finish 25 m ahead on a clear run, he sprints past you to it; first there he dances, beaten he sulks |
 | fight | (when he sees an enemy) sprints at it, plants a bomb barrel next to it, panics and runs; lighting it is your job |
 
-And whatever the mood, he watches you: you jump (or flip, or roll), he jumps a beat later; you get hit, he startles;
-you swing your sword at him, he walks off a couple of metres, turns round and gets back at you (drops something gross
-at your feet, sometimes a bomb barrel; has a snack; or makes a face or does a victory dance), then comes back; you whistle, he comes running (whistle again right after and he stays put till your next whistle); you open a chest or cook something great, he
-celebrates; you cook something bad, he's grossed out; you climb or glide, he looks up at you; you fight something he's seen, he runs up to it and swings his sword too (no damage yet); you take out your camera, he photobombs it (runs into the shot and dances; in a selfie, he's behind your shoulder). Shove him enough and he
-sulks.
+And whatever the mood, he watches you:
+
+- you jump (or flip, or roll): he jumps a beat later
+- you get hit: he startles
+- you swing your sword at him: he walks off a couple of metres, turns round and gets back at you (drops something
+  gross at your feet, sometimes a bomb barrel; has a snack; or makes a face or does a victory dance), then comes back
+- you fight something he's seen: he runs up to it and swings his sword too (no damage yet)
+- you whistle: he comes running; whistle again right after and he stays put till your next whistle
+- you take out your camera: he photobombs it (runs into the shot and dances; in a selfie, he's behind your shoulder)
+- you open a chest or cook something great: he celebrates; you cook something bad: he's grossed out
+- you climb: he climbs the wall after you; you glide: he glides down after you
+- shove him enough and he sulks
 
 ## Where he's going
 
@@ -66,6 +74,7 @@ data. You need your own legally dumped copy of the game, like the port itself do
 - `apply.sh`: applies the patch to a MacNativeGames checkout.
 - `mod/make_mod.py`: builds his animation mod from your own game files (nothing from the game is in this repo).
 - `tools/plugin.sh`: builds his code as a hot-reload plugin (see below).
+- `tools/lonk_panel.swift`: a floating control panel (see below).
 - `docs/how-it-works.md`: the reverse-engineering notes. How I found the spawn function in 1.4.3, how he gets dressed,
   how an inventory Link learned to run, how he finds the ground and sees enemies.
 
