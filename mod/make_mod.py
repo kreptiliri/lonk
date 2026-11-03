@@ -69,15 +69,15 @@ EQUIP_USE, EQUIP = 'EatCookingDish', 239
 EQUIP_CLIPS = [(21, 321, 'Equip_Sword_On_Natural'), (22, 322, 'Equip_Lsword_On_Natural'), (23, 324, 'Equip_Spear_On_Natural'),
                (24, 325, 'Equip_Lsword_Off_Natural'), (25, 333, 'Equip_Spear_Off_Natural'), (None, 334, 'Equip_Sword_Off_Natural')]
 # Swimming, climbing and gliding: whole-body loops under his fall (HoldAnimationType 15, so the root's bone blender keeps
-# them in place too), picked by three bools the patch writes while one is on: IsAttachedWeapon (a loop, or the fall), then
-# WeaponGuardEnhance and ShieldEquip (swim, tread water, climb, glide). Four bool selectors nothing reaches and four free
+# them in place too), picked by three bools the patch writes while one is on (all three off is the fall): WeaponGuardEnhance,
+# ShieldEquip and WeaponFire. (IsAttachedWeapon was the "a loop, not the fall" switch at first, but it's also what puts the
+# weapon arms on his walk: every loop came with his arms holding a bow, and the loop barely showed, seen.) Four bool selectors nothing reaches and four free
 # clips (no events, no frame controls but a plain loop: the menu's bow poses, as it happens). A first try hung them on
 # an int selector behind his idle, which wasn't free: the idle reaches it (through bool selectors, which the search
 # didn't follow), so his tree had a loop in it, and the clips it took were his face's blinks.
-LOOP_BOOLS = ('IsAttachedWeapon', 'WeaponGuardEnhance', 'ShieldEquip', 'WeaponFire')
-LOOPS = [('Swim_Move_Slow_F', 'Swim_Wait'), ('Climb_Wall_Move_U', 'Float_Glide_N')]   # [WeaponGuardEnhance][not ShieldEquip] (cling: the climb held still)
-SWING = 'Sword_Attack_S1'   # and, instead of the glide when WeaponFire is set, a sword swing (fighting beside you)
-SWIM_DASH = 'Swim_Move_Dash'   # and instead of the swim, a fast swim (keeping up with yours)
+LOOP_BOOLS = ('WeaponGuardEnhance', 'ShieldEquip', 'WeaponFire')
+# fire alone: swim; fire and guard: glide (those two lie flat: they skip the bone blender, below); guard alone: tread
+# water; shield alone: climb; guard and shield: a sword swing, fighting beside you (cling: the climb held still)
 
 
 def reached(doc):
@@ -228,9 +228,9 @@ def main():
             not n['Body'].get('Events') and plain_loop(n)]
     pickers = [n for n in doc['Nodes'] if n['Node Type'] == 'BoolSelector' and n['Node Index'] not in taken]
     fall = entries[5]   # (keyed by the original cases: 5 is his fall, at 15 now)
-    if len(free) < 6 or len(pickers) < 6 or nodes[fall['Node Index']]['Node Type'] != 'SkeletalAnimation':
+    if len(free) < 6 or len(pickers) < 7 or nodes[fall['Node Index']]['Node Type'] != 'SkeletalAnimation':
         sys.exit('no free bool selectors and clips for swimming and climbing: not the 1.4.3 ASB?')
-    loop, guard, shield, shield2, fire, fire2 = pickers[:6]
+    guard, shield, shield2, fire, fire2, fire3 = pickers[:6]
     clips = iter(free)
 
     def pick(node, param, if_true, if_false):
@@ -240,16 +240,25 @@ def main():
     def clip(name):
         leaf = next(clips)
         leaf['Body']['Animation'] = name
+        # (a menu pose's frame controller plays it once and holds it: his swim froze, its clock at 1.0, seen, also with the
+        # end moved to the clip's end. None, as his walk has: then it loops)
+        leaf['Body'].pop('Frame Controls', None)
         print(f'{name}: node {leaf["Node Index"]}')
         return leaf['Node Index']
-    pick(fire2, LOOP_BOOLS[3], clip(SWIM_DASH), clip(LOOPS[0][0]))
-    pick(shield, LOOP_BOOLS[2], fire2['Node Index'], clip(LOOPS[0][1]))
-    pick(fire, LOOP_BOOLS[3], clip(SWING), clip(LOOPS[1][1]))
-    pick(shield2, LOOP_BOOLS[2], clip(LOOPS[1][0]), fire['Node Index'])
-    pick(guard, LOOP_BOOLS[1], shield['Node Index'], shield2['Node Index'])
-    pick(loop, LOOP_BOOLS[0], guard['Node Index'], fall['Node Index'])
-    fall['Node Index'] = loop['Node Index']
-    if (taken & {n['Node Index'] for n in (loop, guard, shield, shield2, fire, fire2)}) or ROOT in reached({'Nodes': doc['Nodes'], 'Commands': [{'Node Index': loop['Node Index']}]}):
+    G, S, F = LOOP_BOOLS
+    pick(fire, F, clip('Float_Glide_N'), clip('Swim_Wait'))
+    pick(shield, S, clip('Sword_Attack_S1'), fire['Node Index'])
+    pick(fire3, F, clip('Swim_Move_Slow_F'), fall['Node Index'])
+    pick(shield2, S, clip('Climb_Wall_Move_U'), fire3['Node Index'])
+    pick(guard, G, shield['Node Index'], shield2['Node Index'])
+    fall['Node Index'] = guard['Node Index']
+    # Swimming and gliding (WeaponFire) his whole tree plays without the bone blender over it: the blender's standing root
+    # bones took the swim clip's tilt away, and he swam upright, arms and face up (seen). Treading water stays under it
+    # (without, its own root bones sank him, seen)
+    water = pickers[6]
+    pick(water, F, ROOT, STILL)
+    next(c for c in doc['Commands'] if c['Name'] == 'PauseMenuWait')['Node Index'] = water['Node Index']
+    if (taken & {n['Node Index'] for n in (guard, shield, shield2, fire, fire3, water)}) or ROOT in reached({'Nodes': doc['Nodes'], 'Commands': [{'Node Index': guard['Node Index']}]}):
         sys.exit('the loops would loop back into his tree')
     AsbFile.from_dict(doc).to_binary(str(work) + '/')
     edited = (work / 'PouchPlayer.root.asb').read_bytes()

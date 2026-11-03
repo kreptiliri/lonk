@@ -26,7 +26,7 @@ func send(_ lines: [String]) {
 }
 
 let forever = "216000000"   // the longest a mood can be set for (1000 hours of frames)
-let moods = ["stalk", "buddy", "block", "behind", "wander", "gift", "hide", "race", "fight", "party", "flee"]
+let moods = ["stalk", "buddy", "block", "behind", "wander", "gift", "hide", "race", "fight", "flee"]
 let emotes = ["look", "lookup", "eat", "yuck", "jump", "sulk", "surprise"]
 let poses = ["swim", "fastswim", "tread", "climb", "cling", "glide", "swing", "off"]   // the mod's new loops, where he stands
 let outfits = ["hylian", "wild", "zora", "desert", "snowquill", "flamebreaker", "stealth", "climbing", "radiant",

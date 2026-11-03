@@ -47,7 +47,8 @@ him your sword): I only found out because skipping our write for a few frames ma
 
 - the RomFS mod (`mod/make_mod.py`, built with [dt-12345/asb](https://github.com/dt-12345/asb)) points the selector's
   cases 1 to 5 (renumbered 11 to 15, below) straight at five of the menu's weapon-equip clips (only reachable from those cases), renamed to
-  `Nml_Move_Walk`, `Nml_Move_Run`, `Nml_Move_Dash`, `Demo_Get_Cooking_VeryGood` (his party after a gift) and
+  `Nml_Move_Walk`, `Nml_Move_Run`, `Nml_Move_Dash`, `Demo_Get_Cooking_VeryGood` (a dance, no longer used: it looked
+  broken; he hops instead) and
   `Fall_Loop`.
   PouchPlayer already loads all of Link's animations.
 - the patch plays `PauseMenuWait` once (in his body's slot, 1: slot 0 is his face, and starting it there took his
@@ -68,7 +69,9 @@ him your sword): I only found out because skipping our write for a few frames ma
   20 frames, held another 12, and he ran on the spot for half a second after every stop. Braking to a stop, he goes to
   the idle at once (Link's brake starts as soon as you let go), and its fade ends about when he stops. Between run and
   sprint a new gait still holds for 12 frames; to start or stop, 2.
-- your sprint counts after a tenth of a second at sprint speed (over 7.6 m/s). Waiting for your half-second average
+- your sprint counts after a tenth of a second at sprint speed (over 6.7 m/s: on the Great Sky Island it measures
+  7.0 to 7.4, and at the old line, 7.6, he ran his run clip at sprint speed beside you; your run is 5.7, 6.1 with a
+  speed dish). Waiting for your half-second average
   left him a second in his run clip at nearly double speed. Up stairs everyone is slower along the ground (in my trace
   your run went 4.3 m/s and your sprint 6.5, under the line), so your speed is scaled up by how fast you climb, averaged
   over half a second so a jump doesn't count: both come out about as on the flat. Beside you (buddy) his gait follows
@@ -117,7 +120,7 @@ with it on, every switch keeps the loop phase (normalized), and the trace shows 
 -> sprint -> run. Only a command's first node can do it (those are the only selectors with Sync Controls), and it
 reaches through everything below, so anything else under it starts wherever his loop was. (It still works with the
 bone blender over it: in the trace a sprint -> run switch carries on from the sprint's loop position.) (That's why the emotes are
-a command of their own now, below. The party is still under it and waits for his loop to come round.)
+a command of their own now, below.)
 
 More emotes than slots: the selector only has cases 1 to 5, and adding cases crashes. But PouchPlayer has a second
 full-body command, `UseItem`: a selector on the blackboard *string* `UseItem` (eat food, eat a meal, eat a skewer, eat
@@ -153,7 +156,7 @@ Slots 0 to 3 are the body (the lower body, the upper body and two more; an actio
 whistle, `HorseCall`, only plays in slot 1). When one of them changes he reacts: `Jump`, `BackFlip`, `SideStep`,
 `FrontRoll` (copycat jump), `Damage*`, `Freeze`, `Eaten` (startle), `CutS1`..`CutS4`, `CutSF`, `CutDash`, `ChargeAttack*`
 within 3 m and facing him (he's mad, below), `HorseCall` (he comes: buddy mode), `OpenTreasureBox*`, `Get`,
-`GetCookingGood/VeryGood` (party), `GetCookingBad` (yuck), `Climb*`, `Glide`, `ParasailGlide` (looks up),
+`GetCookingGood/VeryGood` (a hop), `GetCookingBad` (yuck), `Climb*`, `Glide`, `ParasailGlide` (looks up),
 `UltraHandStart`, `LookAround*`, `Talk`, `TalkHello` (looks around). The names come from the Player's ASB command list (532 of them). Tested: jump, a
 spawned Bokoblin hitting the player (`DamageL`, `DamageS`), the whistle, and a sword swing at him (`CutS1`).
 
@@ -205,7 +208,9 @@ own pieces (your EquipmentUser has the same layout), and a slot that changed is 
 
 Outfits: every armor set uses one number for its three pieces (`Armor_1046_Head/Upper/Lower` is the froggy set), and the
 names come from the game's own text (`Mals/USen.Product.142.sarc.zs`, `ActorMsg/PouchContent.msbt`, `Armor_*_Name`).
-Some names appear under several numbers (upgraded copies), so `survey lonk outfit` uses the lowest one of each.
+Some names appear under several numbers (upgraded copies), so `survey lonk outfit` uses the lowest one of each. An
+outfit is only his clothes: he keeps copying your weapons (out of twins his weapons hid and their fused parts floated on
+alone). `survey lonk naked` hides the fused parts with his weapons.
 
 Weapons work the same way: slots 0 (weapon), 7 (bow) and 8 (shield), and the empty name copies yours. The game adds the
 sheath and the quiver by itself. All of an equipment user's pieces sit in one array of ActorLinks from `eu+0x20`, 0x18
@@ -255,35 +260,60 @@ Once a re-copy left his old shield's horn behind, a second one floating on him: 
 noted before a re-copy, and 1.5 s later any still alive (looked up in the tree by number), not on his new ones and
 still drawn in the world go back to the menu's scene, out of sight. `survey lonk recopy` forces a re-copy (a test).
 
-Swimming, climbing and gliding (new, a first step): the mod adds four whole-body loops, `Swim_Move_Slow_F`,
-`Swim_Wait`, `Climb_Wall_Move_U` and `Float_Glide_N`. All of PauseMenuWait's cases were taken, so they hang under his fall
-(case 15, whose leaf has nothing under it), through four bool selectors nothing reaches: `IsAttachedWeapon` (a loop, or
-the plain fall), then `WeaponGuardEnhance` and `ShieldEquip` pick the clip. The patch writes them only while a loop is
-on, and puts them back once after. The clips sit on leaves nothing reaches with no events and only a plain-loop frame
-controller (the menu's bow poses). A first try hung them on an int selector behind his idle that looked free but
-wasn't: the search for free nodes didn't follow bool selectors (their children are `Condition True`/`Condition False`),
-so his idle reached that selector too and the tree had a loop in it, and the "free" clips were his face's blinks. Now
-the search follows them, and the build stops if the new branch could reach back into his tree. Clinging to a wall is the
-climb held still (rate 0). A fifth loop, a sword swing (`Sword_Attack_S1`), sits where the glide was, behind one more
-bool selector on `WeaponFire`, and a sixth, `Swim_Move_Dash`, where the swim was, the same way. `survey lonk pose <swim|fastswim|tread|climb|cling|glide|swing|off>` plays one where he stands. The first use:
-when you glide and he's falling (he followed you off a ledge), he glides too, no paraglider of his own, sinking as fast
-as you do (your climb rate, between 1.5 and 6 m/s down) instead of dropping like a stone. Tested off a 4 m ledge with
-`survey peek fakeglide` (you count as gliding for 10 s): the glide loop, down at 1.6 m/s, then he landed.
+Swimming, climbing and gliding (new): the mod adds five whole-body loops, `Swim_Move_Slow_F`, `Swim_Wait`,
+`Climb_Wall_Move_U`, `Float_Glide_N` and a sword swing, `Sword_Attack_S1`. All of PauseMenuWait's cases were taken, so
+they hang under his fall (case 15, whose leaf has nothing under it), through five bool selectors nothing reaches, on
+three of Link's bools the menu's tree only reads in branches that aren't playing then: `WeaponFire` alone swims, with
+`WeaponGuardEnhance` glides; `WeaponGuardEnhance` alone treads water, `ShieldEquip` alone climbs, both swing; none is
+the plain fall. The patch writes them only while a loop is on, and puts them back once after. Getting there:
+- the first switch was `IsAttachedWeapon` ("a loop, not the fall"), but that's also what puts the weapon arms on his
+  walk: every loop came with his arms holding a bow, and the loop barely showed;
+- the clips sit on leaves nothing reaches with no events (the menu's bow poses), and a menu pose's frame controller
+  plays its clip once and holds it: he swam frozen in one pose (his clock stuck at 1.0 in the trace). The leaves lose
+  their frame controllers, as his walk has none, and loop;
+- the bone blender over his tree (above) takes `Skl_Root` and `Root` from a standing clip, and in the swim clip those
+  are what tilt the body flat into the water: he swam upright, arms and face up, over the surface. So the command's
+  first node is now the last free bool selector, on `WeaponFire`: swimming and gliding his tree plays without the
+  blender. Treading water stays under it (without, its own root bones sank him);
+- a first try hung them on an int selector behind his idle that looked free but wasn't: the search for free nodes
+  didn't follow bool selectors (their children are `Condition True`/`Condition False`), so his idle reached it, the
+  tree had a loop in it, and the "free" clips were his face's blinks. Now the search follows them, and the build stops
+  if the new branch could reach back into his tree.
+
+Clinging to a wall is the climb held still (rate 0). `survey lonk pose <swim|tread|climb|cling|glide|swing|off>` plays
+one where he stands for 5 s. When you glide and he's falling (he followed you off a ledge), he glides too, no paraglider
+of his own, sinking as fast as you do (your climb rate, between 1.5 and 6 m/s down) instead of dropping like a stone.
+Tested off a 4 m ledge with `survey peek fakeglide` (you count as gliding for 10 s): the glide loop, down at 1.6 m/s,
+then he landed. Not yet in real play.
 
 Swimming: his floor ray goes through water to the bottom, so the water's surface comes from the game's own
 `QueryPhysicsRaycastWaterSurfaceInDownwardFromPosition` (its compute, 0x26f144c, found from its name string through an
 ADRP+ADD scan and its vtable): the same raycast as his, with the filter's layer word for collision layer 0x26, the u32
 at `[[[[main+0x395dac0]]+0x18]+0x48] + 0x26*4` in the high half and 0x11 in the low (minus the usual 0xfffc bits), and
-a hit is water when its layer (`q+0x48`) is 0x26 to 0x2b. Every 4 frames he looks for it from 2.5 m over his feet;
-with more than 1.2 m of water over the floor he floats with his feet 1.4 m under the surface (as yours are), swims at
-2.5 m/s (a guess), keeps up with your swim dash (your speed, up to 6 m/s, a fast swim over 3.5) or treads water
-standing still. Tested in a pond on the Great Sky Island: he ran in after me, swam,
-trod water beside me, and walked out on the other side. `survey peek water` lists the ponds within 200 m (water with a
-floor under it: at an island's edge there's water with nothing under it, and I fell off the island).
+a hit is water when its layer (`q+0x48`) is 0x26 to 0x2b. Every 4 frames he looks for it from 2.5 m over his feet down
+to 4 m under them. He swims when:
+- the surface is at his feet (from 4 m down, a river under a bridge would have counted), and
+- the floor, looked for from half a metre over the surface, is at least 1.6 m under it, or there's none within 60 m
+  (in ankle-deep water he floated 1.4 m under the surface, inside the ground with his head out).
+
+Treading water his feet are 1.4 m under the surface, as yours are. Swimming he's 1.5 m higher, since the swim clip's
+own root bones put his body down in the water; the height jumps one frame after the clip switches (the game shows a new
+clip one update later), or he snapped between the two. He swims at 2.5 m/s, at your speed when you swim faster (up to
+6 m/s, the stroke up to twice as fast), with a surge on each stroke; he treads water after 3/4 s of stopping, and swims
+while you swim (beside you he slowed and caught up, flipped between the two, and bobbed up and down). No fast-swim clip:
+its built-in lunge, with its own root bones, shot him ahead and snapped him back. No emotes in the water (a snack
+treading water stood him still, and he stopped following), and a drop ahead doesn't count as blocked (the pond floor
+looked like a cliff every way). Out of the water: his ledge jump wins over the swim clip (it only takes off once his
+gait is the jump), and he flies till he comes down in the water again (from the jump's top the swim pulled him back,
+and on the way up his feet start under the surface). Tested in a pond on the Great Sky Island, with the user watching:
+the stroke at your height, treading water, swimming out onto the bank. `survey peek water` lists the ponds within 200 m
+(water with a floor under it: at an island's edge there's water with nothing under it, and I fell off the island).
 
 Climbing (new): you're climbing (your body plays a `Climb` command), more than 1.5 m above him, and he's stuck at the
-foot: if a chest-high ray towards you hits a wall (its normal less than 45 degrees off level), he climbs (before he'd
-try a ledge jump). He keeps 0.4 m off it (a ray 1.4 m up finds it every frame, and he turns with it), goes up at
+foot: if a chest-high ray towards you hits a wall within 2 m (its normal less than 45 degrees off level), he climbs
+(within 1.2 m he was often stopped further back, and jumped 7 m up the wall instead: while you climb, his ledge jump
+goes no higher than 2.5 m). He keeps 0.45 m off it at his chest and his knees (on a wall leaning back his feet were
+in it; a ray 1.4 m up finds it every frame, and he turns with it), goes up at
 1.2 m/s with the climb loop, slides sideways towards you at up to 1 m/s, and faces the wall. When that ray finds no
 wall his chest is over the top: he pulls himself up the rest at the wall (3 m/s) to the floor 1 m in, then steps onto
 it (from his feet, a floor ray found the wall's sloping face below the top, and he stood on it 2.4 m short; then he
@@ -370,7 +400,9 @@ and back every few frames.
 He also looks before he picks where to go. A wander tries 8 random directions and measures how far each one is really
 walkable (the knee-high ray for walls, then a floor ray every metre, following the floor up and down), and goes to the
 best one, stopping short of the wall or ledge. More than 15 m from Link, the directions are all roughly towards him. A
-flee takes the clearest way near "straight away from Link", and when he gets stuck the sides come first. Tested in the
+flee takes the clearest way near "straight away from Link", and when he gets stuck the sides come first; 25 m off he
+stops and watches you, and runs again if you come within 12 m (set as a mood he ran till he was lost, popped back next
+to you, and ran again). Tested in the
 Temple of Time's hall (walls, pillars, stairs): wanders and flees back to back for 100 s, 99-100% of the frames he
 tried to move he got somewhere (`lonk stats` in the log every 10 s).
 
@@ -421,7 +453,9 @@ makes it look like he dove there).
 - Stay (new): you whistle, he comes (buddy, as before); whistle again within 5 s of the first (a whistle lasts 2.8 s)
   and he stays where he is, watching you, till you whistle once more. Far away doesn't count as lost while he stays (a
   teleport still brings him). One whistle shows up in two of your slots in the same frame: a second one under 10
-  frames later doesn't count. Tested with whistle keys: come, stay (he stayed while I went 15 m away), come.
+  frames later doesn't count. Tested with whistle keys: come, stay (he stayed while I went 15 m away), come. Coming from
+  over 6 m away he heads straight for you, not for his spot beside you (that spot swings round as you turn, and so did
+  he, copying your turns instead of coming), and doesn't stop to turn with you.
 - Fighting beside you (new, a reaction, not tested in a real fight yet, but against a fake enemy): you swing (`CutS*`, `CutDash`, `ChargeAttack*`,
   `ChargeLSwordSpin`) not at him, and he's seen an enemy in the last 3 s: he sprints to 1.6 m short of it and swings
   his sword at it (the swing loop, facing it), till it's been out of his sight for 3 s or you haven't swung for 5 s.
@@ -430,15 +464,15 @@ makes it look like he dove there).
   1.7 m short of it, turned to face it and swung, and stopped 5 s after (no swings of mine).
 - Photobomb (new, a reaction in any mood): your camera comes out (your body plays `LookPad`, or `SelfCameraPose` for a
   selfie) and he's within 30 m: he sprints to 3.5 m in front of you, 0.8 m to one side (a selfie: 1 m behind you, to
-  one side), faces you and dances, till 2 s after you put the camera away. `survey lonk photo <frames>` does one (then
+  one side), faces you and stands in the shot, till 2 s after you put the camera away. `survey lonk photo <frames>` does one (then
   he follows you). Tested with the command; with the real camera, not yet (which way the camera looks is a guess: your
   facing).
-- Race (new, weight 12 while your pace is over 5 m/s, never twice in a row): the finish is 25 m ahead of you along your
-  facing, or less if `path_free` finds a wall or a drop first (under 12 m of clear run: no race, he follows). He sprints
-  for it with block's overtaking boost (your speed + 2.5 m/s, so he can just about beat your sprint). He gets within
-  0.8 m first: he dances (party). You're within 1.5 m of it first, him still 2 m off: he sulks and follows. Tested
-  with `survey peek fakerun` (you count as running for 10 s) and `survey lonk race`: "race you! (to 17 m ahead)",
-  he sprinted there and danced; two other spots near a ledge said "no clear run ahead of you". Not yet in a real race.
+- Race (new, weight 12 while your pace is over 5 m/s, never twice in a row): the finish is 45 m ahead of you along your
+  facing, or less if `path_free` finds a wall or a drop first (under 20 m of clear run: no race, he follows). He runs
+  for it at your speed + 0.6 m/s (at block's overtaking boost, + 2.5, he won every time). He gets within 0.8 m first:
+  he hops for joy. You're within 1.5 m of it first, him still 2 m off: he sulks and follows. From the panel (you're
+  standing at your mouse) he waits beside you up to 10 s and the race starts when you set off; set as a mood it's one
+  race, then he follows you.
 - Hide and seek (a mood of its own, weight 10): 24 directions, 6 to 14 m, each walkable in a straight line
   (`path_free`, at least 6 m), with floor at the end within 0.8 m of his height (a spot below a ledge: he won't step
   off, and ran up and down its edge), and hidden: a ray from your eyes (1.6 m up) to his chest there
@@ -541,7 +575,7 @@ He used to sprint straight away from you for 3 s. On TotK's terrain that ran him
 (`LONK_MAD`) he only steps back: after his startle he walks 2.5 m away from you at a brisk 2.8 m/s (the clearest of five
 directions near "away", checked for walls and floor; with less than 0.8 m of room he stays put), turns round, and then,
 one time in three each: drops something at your feet (a monster part, or one time in five a bomb barrel), eats (and
-sometimes pulls the yuck face after), or pulls the yuck face or does the victory dance. Then back to his mood.
+sometimes pulls the yuck face after), or pulls the yuck face or hops for joy. Then back to his mood.
 `survey lonk hit [gift|eat|silly]` sets one off without a sword.
 
 What didn't make it: dubious and rock-hard food (`Item_Cook_O_01`/`02`) never spawned (the request goes through, no

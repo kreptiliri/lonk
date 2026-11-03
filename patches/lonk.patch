@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..80a2b05 100644
+index c05d6c3..a421ef2 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -40,7 +40,7 @@ index c05d6c3..80a2b05 100644
  #include <limits.h>
  #include <mach/mach.h>
  #include "mach_vm_compat.h"
-@@ -181,24 +184,160 @@ void runtime_survey_init(Module *m) {
+@@ -181,24 +184,166 @@ void runtime_survey_init(Module *m) {
  int runtime_survey_command(const char *line) { (void)line; return 0; }
  #endif
  #else
@@ -153,13 +153,19 @@ index c05d6c3..80a2b05 100644
 +static KEEP int lonk_air;   /* in the air */
 +static int lonk_sparring;   /* fighting beside you: at the enemy, swinging */
 +static unsigned lonk_you_swung;   /* frames since your last swing */
-+static int lonk_you_camera, lonk_photo_there;   /* your camera is up (1, 2 = a selfie); he's in your shot, dancing */
++static int lonk_you_camera, lonk_photo_there;   /* your camera is up (1, 2 = a selfie); he's in your shot */
 +static int lonk_climb, lonk_you_climb;   /* he's climbing a wall (you were, above him); your body plays a climb */
 +static unsigned lonk_fake_climb, lonk_fake_glide, lonk_fake_enemy, lonk_fake_run;   /* "survey peek fakeclimb|fakeglide|fakeenemy|fakerun": tests, 10 s */
 +static float lonk_fake_at[3];   /* (fakeenemy: where the "enemy" is: 6 m east of you, or "fakeenemy x y z") */
 +static float climb_n[2];   /* the wall's way out (horizontal) */
 +static unsigned climb_left;   /* 15 s at most up one wall */
 +static int lonk_swim;   /* in deep water: he swims (or treads water) with the surface at his chest */
++static float lonk_swim_lift = 1.5f;   /* "survey lonk swim <lift> <tread lift> <pitch> <push>": swimming, how much higher */
++static float lonk_tread_lift = 0;   /* treading water, how much higher (both: his own root bones put him low in the water) */
++static float lonk_swim_pitch = 0;      /* swimming, degrees head up (20 put his arms and face up out of the water, seen) */
++static unsigned lonk_swim_delay = 1;   /* "survey lonk swimdelay <frames>": the game shows a new clip that many frames after the switch */
++static float lonk_swim_push = 0.35f;   /* swimming, how much his speed surges with each stroke (yours does, his was smooth) */
++static int lonk_swim_gait = -1;   /* (GAIT_TREAD, GAIT_SWIM or GAIT_SWIMDASH: which of them he's in; -1 not yet) */
 +#define LONK_SWIM 2.5f   /* m/s in the water (a guess: Link's swim is slow) */
 +/* The walk, run and dash clips carry Link forward by themselves (their Root bone, about 3 m a loop). The mod takes his
 +   Skl_Root and Root from a standing clip (a bone blender over all of PauseMenuWait), so his body stays where he's placed:
@@ -206,7 +212,7 @@ index c05d6c3..80a2b05 100644
  
  static int read_mem(uintptr_t address, void *out, size_t size) {
      if (!address || address > UINTPTR_MAX - size) return 0;
-@@ -254,6 +393,45 @@ static uintptr_t player_actor(void) {
+@@ -254,6 +399,45 @@ static uintptr_t player_actor(void) {
      }
      return 0;
  }
@@ -252,7 +258,7 @@ index c05d6c3..80a2b05 100644
  void runtime_survey_init(Module *m) {
      const char *enabled = getenv("TOTK_SURVEY");
      if (!enabled || strcmp(enabled, "1")) return;
-@@ -272,6 +450,21 @@ void runtime_survey_init(Module *m) {
+@@ -272,6 +456,21 @@ void runtime_survey_init(Module *m) {
          runtime_fail("survey requires verified game-version forceSetMatrix entry");
      survey_main = (uintptr_t)m->base;
      survey_force = (void (*)(void *, const float *, uint32_t))(m->base + FORCE_MATRIX);
@@ -274,7 +280,7 @@ index c05d6c3..80a2b05 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,22 +475,2855 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,22 +481,2984 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -508,7 +514,9 @@ index c05d6c3..80a2b05 100644
 +    return !ray_height(at[0] + dx * 0.8f, at[2] + dz * 0.8f, at[1] + 0.7f, at[1] - 2.5f, &h);
 +}
 +static int lonk_drop_ok;   /* following you down: ledges don't stop him (he falls off them), walls still do */
-+static int way_blocked(const float at[3], float dx, float dz) { return ray_blocked(at, dx, dz, 1.0f) || (!lonk_drop_ok && ray_ledge(at, dx, dz)); }
++/* (swimming, a drop doesn't count: raised to tread water at the surface, the pond floor was a cliff every way, and he was
++   boxed in, seen) */
++static int way_blocked(const float at[3], float dx, float dz) { return ray_blocked(at, dx, dz, 1.0f) || (!lonk_drop_ok && !lonk_swim && ray_ledge(at, dx, dz)); }
 +/* How far he can go from <at> along (dx, dz), up to <reach> m: until something knee high is in the way (a walkable slope
 +   doesn't count) or there's no floor within a step above to 2.5 m below, checked every metre. */
 +static float path_free(const float at[3], float dx, float dz, float reach) {
@@ -961,6 +969,7 @@ index c05d6c3..80a2b05 100644
 +                                              "jump", "fall", "sulk", "look up", "draw", "swim", "tread water", "climb", "glide", "swing", "fast swim"};
 +static int lonk_body_emote;   /* his body slot is playing the UseItem command (an emote, his take-off) */
 +static KEEP int lonk_pose = -1, lonk_cling;   /* "survey lonk pose <swim|fastswim|tread|climb|cling|glide|swing|off>": play that loop where he stands */
++static int lonk_pose_left;   /* (frames the pose has left) */
 +static int lonk_you_glide;   /* your body plays a glide (the paraglider) */
 +static int lonk_equip_clip;   /* the mod's draw/put away clip: 21 sword, 22 two-hander, 23 spear out; 24 two-hander, 25 spear, else sword away */
 +static int lonk_armed;   /* his weapons are out (twin_draw), and what kind: the mod's walk and run carry them (arms) */
@@ -1046,18 +1055,21 @@ index c05d6c3..80a2b05 100644
 +        /* weapons out: the mod's walk and run play the weapon's arms (a bool selector on IsAttachedWeapon, then its kind in
 +           the string "Arrow", which the menu only uses for the bow) */
 +        struct { const char *name; uint64_t zero; } a_key = {"IsAttachedWeapon", 0}, k_key = {"Arrow", 0};
-+        /* (under his fall, IsAttachedWeapon is "a loop, not the fall", then WeaponGuardEnhance and ShieldEquip pick swim,
-+           tread water, climb or glide, and WeaponFire turns the swim fast and the glide into a swing; written only while
-+           one's on, and put back once after) */
-+        int loop = gait >= GAIT_SWIM && gait <= GAIT_SWIMDASH;
++        /* (under his fall, the mod's loops: WeaponFire alone swims, with WeaponGuardEnhance glides (those two without the
++           mod's root blender); WeaponGuardEnhance alone treads water, ShieldEquip alone climbs, both a sword swing; written
++           only while one's on, and put back once after. IsAttachedWeapon was "a loop" too, but it also puts the weapon arms
++           on him: every loop came with his arms holding a bow, seen) */
++        /* (the gait that's showing: while the switch waits for his loop to wrap, his idle branch is still on, and it reads
++           the same three bools for the menu's weapon and shield poses) */
++        int on = waiting && lonk_gait >= 0 ? lonk_gait : gait, loop = on >= GAIT_SWIM && on <= GAIT_SWIMDASH;
 +        static int was_loop;
-+        ((void (*)(uintptr_t, const void *, bool))set_bool)(bb, &a_key, loop || (lonk_armed != 0 && hold[gait] != 15));
++        ((void (*)(uintptr_t, const void *, bool))set_bool)(bb, &a_key, !loop && lonk_armed != 0 && hold[on] != 15);
 +        if (loop || was_loop) {
 +            struct { const char *name; uint64_t zero; } g_key = {"WeaponGuardEnhance", 0}, s_key = {"ShieldEquip", 0}, f_key = {"WeaponFire", 0};
-+            int swims = gait == GAIT_SWIM || gait == GAIT_SWIMDASH;
-+            ((void (*)(uintptr_t, const void *, bool))set_bool)(bb, &g_key, swims || gait == GAIT_TREAD);
-+            ((void (*)(uintptr_t, const void *, bool))set_bool)(bb, &s_key, swims || gait == GAIT_CLIMB);
-+            ((void (*)(uintptr_t, const void *, bool))set_bool)(bb, &f_key, gait == GAIT_SWING || gait == GAIT_SWIMDASH);   /* (instead of the glide; of the swim) */
++            int swims = loop && (on == GAIT_SWIM || on == GAIT_SWIMDASH);
++            ((void (*)(uintptr_t, const void *, bool))set_bool)(bb, &g_key, loop && (on == GAIT_TREAD || on == GAIT_GLIDE || on == GAIT_SWING));
++            ((void (*)(uintptr_t, const void *, bool))set_bool)(bb, &s_key, loop && (on == GAIT_CLIMB || on == GAIT_SWING));
++            ((void (*)(uintptr_t, const void *, bool))set_bool)(bb, &f_key, swims || (loop && on == GAIT_GLIDE));
 +        }
 +        was_loop = loop;
 +        ((void (*)(uintptr_t, const void *, const char *))set_string)(bb, &k_key, lonk_arm_kind);
@@ -1067,7 +1079,7 @@ index c05d6c3..80a2b05 100644
 +           slow. Everything else at 1, as in the Player's tree (the take-off too: Nml_Wait_Jump has no frame controller) */
 +        int moving = !emote_cmd && (waiting ? lonk_gait : gait) >= GAIT_WALK && (waiting ? lonk_gait : gait) <= GAIT_DASH;
 +        int shown = waiting ? lonk_gait : gait;
-+        float rate = !moving ? (shown == GAIT_CLIMB && lonk_cling ? 0.0f : 1.0f) : shown == GAIT_WALK ? fminf(fmaxf(0.9f * speed / LONK_WALK, 0.5f), 2.0f) :
++        float rate = shown == GAIT_SWIM ? fminf(fmaxf(speed / 2.5f, 0.8f), 2.0f) : !moving ? (shown == GAIT_CLIMB && lonk_cling ? 0.0f : 1.0f) : shown == GAIT_WALK ? fminf(fmaxf(0.9f * speed / LONK_WALK, 0.5f), 2.0f) :
 +                     fminf(fmaxf(shown == GAIT_DASH ? 1.75f * speed / LONK_SPRINT : 1.5f * speed / LONK_RUN, 1.0f), 2.5f);   /* never slow motion */
 +        memcpy((void *)(body + 0xd0), &rate, sizeof rate);
 +        lonk_rate = rate;
@@ -1208,6 +1220,25 @@ index c05d6c3..80a2b05 100644
 +   go back to the world scene each frame. Logs how often that was needed every 10 s. */
 +static unsigned fuse_show(uintptr_t eu, uintptr_t world, bool quiet);
 +static void fuse_orphans_hide(uintptr_t eu, uintptr_t world);
++static unsigned fuse_parts(uintptr_t eu, uintptr_t out[4], unsigned only);
++static unsigned fuse_hide_left;   /* out of twins: his weapons hide, so their fused parts go to the menu's scene too, a few times over 2 s */
++static void fuse_hide_all(uintptr_t eu, uintptr_t world) {
++    static const uint32_t w_model[] = {0xf9411408, 0xb4000168, 0xf9400500, 0xb4000100, 0xf9400008};
++    static const uint32_t w_bind[] = {0xaa0003e8, 0xf9403000, 0xf100001f, 0xfa411004, 0x54000081};
++    uintptr_t (*get_model)(uintptr_t) = (uintptr_t (*)(uintptr_t))game_fn(0xba8854, w_model, 5);
++    void (*bind)(uintptr_t, uintptr_t) = (void (*)(uintptr_t, uintptr_t))game_fn(0x585d58, w_bind, 5);
++    uintptr_t parts[4];
++    unsigned n = fuse_parts(eu, parts, 3);
++    if (!get_model || !bind || !fuse_menu_scene) return;
++    for (unsigned i = 0; i < n; i++) {
++        uintptr_t model = get_model(parts[i]);
++        if (!model || read_ptr(model + 0x60) != world) continue;
++        char text[64] = "?";
++        actor_name_at(parts[i], text);
++        bind(model, fuse_menu_scene);
++        fprintf(stderr, "[survey] fuse: %s hidden with his weapons\n", text);
++    }
++}
 +static void dress_keep(uintptr_t player) {
 +    static const uint32_t w_done[] = {0x52887508, 0x8b080008, 0xb9400109, 0x7100053f, 0x54000500, 0xb9400909};
 +    static const uint32_t w_model[] = {0xf9411408, 0xb4000168, 0xf9400500, 0xb4000100, 0xf9400008};
@@ -1222,6 +1253,7 @@ index c05d6c3..80a2b05 100644
 +        if (eu && world && all_created(eu)) moved += dress_show(eu, world, true);
 +        if (eu && world && lonk_twin) moved += fuse_show(eu, world, true);   /* (each new part logged once) */
 +        if (eu && world) fuse_orphans_hide(eu, world);
++        if (eu && world && !lonk_twin && fuse_hide_left && (fuse_hide_left = tick_down(fuse_hide_left)) % 30 == 0) fuse_hide_all(eu, world);
 +    }
 +    if (++frames == 600) { fprintf(stderr, "[survey] dress keep: %u pieces moved back to the world in 600 frames\n", moved); frames = moved = 0; }
 +}
@@ -1372,14 +1404,15 @@ index c05d6c3..80a2b05 100644
 +                snprintf(set[k], sizeof set[k], "Armor_%03d_%s", lonk_outfit, k == 0 ? "Head" : k == 1 ? "Upper" : "Lower");
 +                set_ptr[k] = set[k];
 +            }
-+            equip(eu, 9, lonk_twin ? &empty : lonk_outfit ? &set_ptr[0] : &hair, -1, 0, 0);
-+            equip(eu, 10, lonk_twin ? &empty : lonk_outfit ? &set_ptr[1] : &upper, -1, 0, 0);
-+            equip(eu, 11, lonk_twin ? &empty : lonk_outfit ? &set_ptr[2] : &lower, -1, 0, 0);
-+            if (lonk_outfit && !lonk_twin) fprintf(stderr, "[survey] dress: %s, %s, %s\n", set[0], set[1], set[2]);
++            equip(eu, 9, lonk_outfit ? &set_ptr[0] : lonk_twin ? &empty : &hair, -1, 0, 0);
++            equip(eu, 10, lonk_outfit ? &set_ptr[1] : lonk_twin ? &empty : &upper, -1, 0, 0);
++            equip(eu, 11, lonk_outfit ? &set_ptr[2] : lonk_twin ? &empty : &lower, -1, 0, 0);
++            if (lonk_outfit) fprintf(stderr, "[survey] dress: %s, %s, %s (and your weapons)\n", set[0], set[1], set[2]);
 +            equip(eu, 19, &hand, -1, 0, 0);
 +            if (lonk_twin) for (unsigned w = 0; w < 3; w++) equip(eu, (uint32_t[]){0, 7, 8}[w], &empty, -1, 0, 0);   /* and your sword, bow, shield */
-+            if (lonk_twin) fprintf(stderr, "[survey] dress: twins (your outfit and weapons), arm %s\n", hand);
-+            else fprintf(stderr, "[survey] dress: %s, %s, %s, arm %s\n", hair, upper, lower, hand);
++            if (lonk_twin && !lonk_outfit) fprintf(stderr, "[survey] dress: twins (your outfit and weapons), arm %s\n", hand);
++            else if (!lonk_twin) fuse_hide_left = 120;   /* (his weapons hide: their fused parts too) */
++            if (!lonk_twin) fprintf(stderr, "[survey] dress: %s, %s, %s, arm %s\n", hair, upper, lower, hand);
 +        }
 +        dress_watch = 600;
 +    }
@@ -1599,6 +1632,7 @@ index c05d6c3..80a2b05 100644
 +        int first = !seen[k][0];
 +        snprintf(seen[k], sizeof seen[0], "%s", now);
 +        if (first) continue;   /* just started watching: dress_run already copied it */
++        if (k >= 3 && lonk_outfit) continue;   /* (in an outfit of his own: only your weapons) */
 +        for (unsigned i = 0; i < stalker_count; i++) {
 +            if (strcmp(stalkers[i].name, "PouchPlayer")) continue;
 +            uintptr_t eu = pouch_eu(stalkers[i].actor);
@@ -1772,6 +1806,7 @@ index c05d6c3..80a2b05 100644
 +    static const unsigned frames[GAITS] = {[GAIT_LOOK] = 480, [GAIT_SURPRISE] = 480, [GAIT_EAT] = 480, [GAIT_MEAL] = 480, [GAIT_YUCK] = 480,
 +                                           [GAIT_JUMP] = 120, [GAIT_SULK] = 600, [GAIT_LOOKUP] = 480, [GAIT_PARTY] = 150, [GAIT_EQUIP] = 90};
 +    if (lonk_air && gait != GAIT_JUMP) return;   /* in the air he's busy (a mood change used to start one mid-jump) */
++    if ((lonk_swim || lonk_climb) && gait != GAIT_JUMP) return;   /* (and swimming, climbing: a snack treading water stood him still, and he stopped following, seen) */
 +    lonk_emote = gait; lonk_emote_left = frames[gait] ? frames[gait] : 120; lonk_emote_late = 0;
 +    fprintf(stderr, "[survey] lonk: emote %s\n", gait_names[gait]);
 +}
@@ -1926,9 +1961,11 @@ index c05d6c3..80a2b05 100644
 +    /* your sprint counts from a tenth of a second of sprint speed, not from your half-second pace (that left him a second
 +       in his run clip at nearly double speed, tested); a dip in your sprint still needs your pace down too */
 +    static unsigned fast_for;
-+    fast_for = sprint_speed > 7.6f ? fast_for + lonk_ticks : 0;
-+    if (player_pace > 7.6f || fast_for >= 6) player_sprinting = 1;
-+    else if (player_pace < 6.6f && sprint_speed < 7.0f) player_sprinting = 0;
++    /* (your sprint here was 7.0 to 7.4, under the old 7.6 line: beside you he ran his run clip at sprint speed, seen. Your
++       run is 5.7, 6.1 with a speed dish) */
++    fast_for = sprint_speed > 6.7f ? fast_for + lonk_ticks : 0;
++    if (player_pace > 6.7f || fast_for >= 6) player_sprinting = 1;
++    else if (player_pace < 6.2f && sprint_speed < 6.4f) player_sprinting = 0;
 +    memcpy(last_p, p, sizeof last_p);
 +    /* footsteps: a new one every 25 cm the player moves */
 +    unsigned last = (trail_head + TRAIL_MAX - 1) % TRAIL_MAX;
@@ -2023,16 +2060,33 @@ index c05d6c3..80a2b05 100644
 +        }
 +        break;
 +    }
-+    case LONK_RACE: {   /* "race you!": a finish 25 m ahead of you, he sprints past you to it; first there, he dances, beaten, he sulks */
++    case LONK_RACE: {   /* "race you!": a finish 45 m ahead of you, he sprints past you to it; first there, he hops for joy, beaten, he sulks */
 +        static float finish[2];
-+        static int done;
++        static int done, ready;
++        static unsigned wait_left;
++        /* set from the panel you're standing at your mouse, not running ("no race" every time, seen): he waits beside you,
++           up to 10 s, and the race starts when you set off */
++        if (entering) {
++            ready = player_speed < 3; wait_left = 600;
++            if (ready) fprintf(stderr, "[survey] lonk: race you! run when you're ready\n");
++            if (!lonk_brain && lonk_home == LONK_RACE) lonk_home = LONK_STALK;   /* (set as a mood: one race, then he follows you; it started over after every finish) */
++        }
++        if (ready) {
++            wait_left = tick_down(wait_left);
++            if (player_speed < 3) {
++                target[0] = p[0] - fz * 1.6f; target[2] = p[2] + fx * 1.6f; stop = 0.2f;
++                if (!wait_left) { fprintf(stderr, "[survey] lonk: no race (you never ran)\n"); lonk_enter(LONK_STALK, 300); }
++                break;
++            }
++            ready = 0; entering = 1;
++        }
 +        if (entering) {
 +            done = 0;
 +            float d = 0;
 +#if defined(TOTK_GAME_V143)
-+            if (isfinite(p[1])) d = path_free(p, fx, fz, 25);   /* a clear run (no wall, no drop on the way) */
++            if (isfinite(p[1])) d = path_free(p, fx, fz, 45);   /* a clear run (no wall, no drop on the way) */
 +#endif
-+            if (player_speed < 3 || d < 12) {
++            if (player_speed < 3 || d < 20) {
 +                fprintf(stderr, "[survey] lonk: no race (%s)\n", player_speed < 3 ? "you're not running" : "no clear run ahead of you");
 +                lonk_enter(LONK_STALK, 300); target[0] = a[0]; target[2] = a[2]; break;
 +            }
@@ -2042,11 +2096,11 @@ index c05d6c3..80a2b05 100644
 +        }
 +        float him = hypotf(finish[0] - a[0], finish[1] - a[2]), you = hypotf(finish[0] - p[0], finish[1] - p[2]);
 +        target[0] = finish[0]; target[2] = finish[1]; stop = 0.3f; face_player = 0;
-+        speed = fmaxf(LONK_SPRINT, player_speed + 2.5f);   /* the overtaking boost block uses: he can just about beat your sprint */
++        speed = fmaxf(LONK_RUN, player_speed + 0.6f);   /* about your pace: at block's overtaking boost (+2.5) he won every time (seen) */
 +        if (!done && him < 0.8f) {
 +            done = 1;
 +            fprintf(stderr, "[survey] lonk: wins the race\n");
-+            lonk_enter(LONK_PARTY, 150);
++            lonk_enter(LONK_STALK, 300); lonk_emote_start(GAIT_JUMP);
 +        } else if (!done && you < 1.5f && him > 2) {   /* you got there first */
 +            done = 1;
 +            fprintf(stderr, "[survey] lonk: you won the race\n");
@@ -2055,7 +2109,7 @@ index c05d6c3..80a2b05 100644
 +        break;
 +    }
 +    case LONK_PHOTO: {   /* your camera's out: into the shot (3.5 m in front of you, a little to one side; a selfie: just behind your
-+                            shoulder), facing you, and he dances till 2 s after you put it away */
++                            shoulder), facing you, and he stays in it till 2 s after you put it away */
 +        static float spot[2];
 +        static unsigned after;
 +        if (entering) {
@@ -2133,7 +2187,7 @@ index c05d6c3..80a2b05 100644
 +            }
 +#endif
 +            spawn_request("gift", gift, off, frame, player);
-+            lonk_enter(LONK_PARTY, 150);   /* a little celebration first, then he runs */
++            lonk_enter(LONK_FLEE, 240); lonk_emote_start(GAIT_JUMP);   /* a happy hop, then he runs */
 +            lonk_gifted = 1;
 +        }
 +        break;
@@ -2172,6 +2226,10 @@ index c05d6c3..80a2b05 100644
 +        float lead = 0.3f * fminf(player_speed / 2, 1);
 +        if (squeezed) { target[0] = p[0] - fx * 1.6f; target[2] = p[2] - fz * 1.6f; }
 +        else { target[0] = p[0] - fz * 1.6f * side + fx * lead; target[2] = p[2] + fx * 1.6f * side + fz * lead; }
++        /* far off (coming to your whistle), he heads straight for you: his spot beside you swings round as you turn, and
++           he swung with it, copying your turns instead of sprinting to you (seen) */
++        float bx = a[0] - p[0], bz = a[2] - p[2], bl = hypotf(bx, bz);
++        if (bl > 6) { target[0] = p[0] + bx / bl * 1.6f; target[2] = p[2] + bz / bl * 1.6f; }
 +        /* you turning on the spot: he stays put and turns with you. He used to set off for his side in the first frames of
 +           your turn, and halfway round you he no longer counted as being on your other side, so he walked all the way (tested) */
 +        static float last_yaw;
@@ -2180,7 +2238,7 @@ index c05d6c3..80a2b05 100644
 +        last_yaw = yaw;
 +        turn_hold = tick_down(turn_hold);
 +        if (player_speed < 0.5f && turn_rate > 1.5f && !entering) turn_hold = 12;
-+        if (turn_hold && player_speed < 0.5f) { target[0] = a[0]; target[2] = a[2]; }   /* (you walk off: he comes at once) */
++        if (turn_hold && player_speed < 0.5f && bl <= 6) { target[0] = a[0]; target[2] = a[2]; }   /* (you walk off: he comes at once; far off, he keeps coming: he stopped at every turn of yours, seen) */
 +        float off = hypotf(target[0] - a[0], target[2] - a[2]);
 +        speed = fminf(fmaxf(player_speed * 1.05f + off * 2, 1.0f), LONK_SPRINT + 1); stop = 0.15f;
 +        if (off < 0.6f) { face_player = 0; buddy_face = 1; }
@@ -2226,7 +2284,8 @@ index c05d6c3..80a2b05 100644
 +        } else if (!found && (lonk_phase_left <= 1 || !left)) { fprintf(stderr, "[survey] lonk: you didn't find him\n"); lonk_enter(LONK_STALK, 300); }
 +        break;
 +    }
-+    case LONK_PARTY:   /* dances where he stands, facing you; a gift's party ends in a run */
++    case LONK_PARTY:   /* (his dance is gone, it looked broken: a hop where he stands, facing you; a gift's ends in a run) */
++        if (entering) lonk_emote_start(GAIT_JUMP);
 +        target[0] = a[0]; target[2] = a[2];
 +        if (lonk_gifted && lonk_phase_left <= 1) lonk_enter(LONK_FLEE, 240);
 +        break;
@@ -2267,7 +2326,7 @@ index c05d6c3..80a2b05 100644
 +                } else {
 +                    /* a snack; or ew, or a victory dance (looking up, "wasn't me", was cut: a 0.8 s glance up, it read
 +                       as nothing at all: he backed off, looked at you and came back) */
-+                    lonk_emote_start(how == MAD_EAT ? GAIT_EAT : arc4random_uniform(2) ? GAIT_YUCK : GAIT_PARTY);
++                    lonk_emote_start(how == MAD_EAT ? GAIT_EAT : arc4random_uniform(2) ? GAIT_YUCK : GAIT_JUMP);
 +                    left = 1;
 +                }
 +            }
@@ -2277,9 +2336,17 @@ index c05d6c3..80a2b05 100644
 +        }
 +        break;
 +    }
-+    case LONK_FLEE:   /* away from you, one way (it turns when he gets stuck, below) */
-+        if (entering) { lonk_pick_flee(a, lonk_flee_from_set ? lonk_flee_from : p, 0); lonk_flee_from_set = 0; }
++    case LONK_FLEE: {   /* away from you, one way (it turns when he gets stuck, below) */
++        /* 25 m off, he stops and watches you; come within 12 m, he's off again. As a set mood he ran on till he was lost,
++           popped back behind you, and ran again (seen) */
++        static int watching;
++        float off = hypotf(a[0] - p[0], a[2] - p[2]);
++        if (entering) { lonk_pick_flee(a, lonk_flee_from_set ? lonk_flee_from : p, 0); lonk_flee_from_set = 0; watching = 0; }
++        else if (watching && off < 12) { watching = 0; lonk_pick_flee(a, p, 0); }
++        else if (!watching && off > 25) watching = 1;
++        if (watching) { target[0] = a[0]; target[2] = a[2]; stop = 0.3f; break; }
 +        target[0] = a[0] + lonk_flee[0] * 5; target[2] = a[2] + lonk_flee[1] * 5; speed = LONK_SPRINT; stop = 0; face_player = 0; break;
++    }
 +    default: break;
 +    }
 +    /* emotes: arrived somewhere on a wander, he looks around; creeping up behind you and you turn round, he startles */
@@ -2362,7 +2429,7 @@ index c05d6c3..80a2b05 100644
 +            }
 +            last_whistle = frame;
 +        } else if (!strcmp(cmd, "UltraHandStart") || !strncmp(cmd, "LookAround", 10) || !strcmp(cmd, "Talk") || !strcmp(cmd, "TalkHello")) react = GAIT_LOOK;
-+        else if (!strncmp(cmd, "OpenTreasureBox", 15) || !strcmp(cmd, "Get") || !strcmp(cmd, "GetCookingVeryGood") || !strcmp(cmd, "GetCookingGood")) react = GAIT_PARTY;
++        else if (!strncmp(cmd, "OpenTreasureBox", 15) || !strcmp(cmd, "Get") || !strcmp(cmd, "GetCookingVeryGood") || !strcmp(cmd, "GetCookingGood")) react = GAIT_JUMP;
 +        else if (!strcmp(cmd, "GetCookingBad")) react = GAIT_YUCK;
 +        else if (!strncmp(cmd, "Climb", 5) || !strcmp(cmd, "Glide") || !strcmp(cmd, "ParasailGlide")) react = GAIT_LOOKUP;
 +        int jumping = lonk_emote_left && lonk_emote == GAIT_JUMP;
@@ -2455,7 +2522,11 @@ index c05d6c3..80a2b05 100644
 +        room = fmaxf(dist - stop, 0.0f);
 +        want_v = fminf(speed, sqrtf(2 * LONK_BRAKE * room));
 +        lonk_v = want_v > lonk_v ? fminf(want_v, lonk_v + LONK_ACCEL * lonk_dt) : fmaxf(want_v, lonk_v - LONK_BRAKE * lonk_dt);
-+        float step = fminf(lonk_v * lonk_dt, room), ux = dx / dist, uz = dz / dist;
++        /* (swimming, his speed surges with each stroke, as yours does: smooth, he glided along, seen) */
++        float stroke = 0;
++        if (lonk_swim && lonk_swim_gait == GAIT_SWIM && lonk_body) read_mem(lonk_body + 0x1e0, &stroke, sizeof stroke);
++        float surge = lonk_swim && lonk_swim_gait == GAIT_SWIM && isfinite(stroke) ? 1 + lonk_swim_push * sinf(6.2832f * stroke) : 1;
++        float step = fminf(lonk_v * lonk_dt * surge, room), ux = dx / dist, uz = dz / dist;
 +#if defined(TOTK_GAME_V143)
 +        /* around rocks, walls and trees: if the way ahead is blocked, try 30, 45, 90 then 120 degrees off to one side (the side
 +           that worked last time first, so he doesn't dither), then the other; boxed in, he stands still */
@@ -2502,20 +2573,21 @@ index c05d6c3..80a2b05 100644
 +    jump_rest = tick_down(jump_rest);
 +#if defined(TOTK_GAME_V143)
 +    /* you're climbing, more than 1.5 m above him, and he's stuck at the foot of it: he climbs too (a wall in front of his
-+       chest, towards you) */
++       chest, towards you, within 2 m: at 1.2 m he was often stopped further back, and jumped 7 m up the wall instead, seen) */
 +    if (follows && !lonk_climb && !lonk_air && !lonk_swim && lonk_you_climb && (lonk_blocked > 8 || no_gain > 10) && rise > 1.5f &&
 +        hypotf(p[0] - a[0], p[2] - a[2]) < 12 && !lonk_emote_left && isfinite(a[1])) {
 +        float gx = p[0] - a[0], gz = p[2] - a[2], gl = fmaxf(hypotf(gx, gz), 0.01f), hit[3], n[3];
-+        float from[3] = {a[0], a[1] + 1.0f, a[2]}, to[3] = {a[0] + gx / gl * 1.2f, a[1] + 1.0f, a[2] + gz / gl * 1.2f};
++        float from[3] = {a[0], a[1] + 1.0f, a[2]}, to[3] = {a[0] + gx / gl * 2.0f, a[1] + 1.0f, a[2] + gz / gl * 2.0f};
 +        if (ray_cast(from, to, hit, n) && fabsf(n[1]) < 0.7f && hypotf(n[0], n[2]) > 0.1f) {
 +            float nl = hypotf(n[0], n[2]);
 +            climb_n[0] = n[0] / nl; climb_n[1] = n[2] / nl; lonk_climb = 1; climb_left = 900; lonk_v = 0;
-+            a[0] = hit[0] + climb_n[0] * 0.4f; a[2] = hit[2] + climb_n[1] * 0.4f;
++            a[0] = hit[0] + climb_n[0] * 0.45f; a[2] = hit[2] + climb_n[1] * 0.45f;
 +            fprintf(stderr, "[survey] lonk: climbs after you (%.1f m up)\n", rise);
 +        }
 +    }
 +#endif
-+    if (follows && !lonk_climb && (lonk_blocked > 8 || no_gain > 10) && rise > 0.6f && rise < 7 && hypotf(p[0] - a[0], p[2] - a[2]) < 20 &&
++    /* (up a wall you're climbing, no more than 2.5 m: past that he climbs after you, above) */
++    if (follows && !lonk_climb && (lonk_blocked > 8 || no_gain > 10) && rise > 0.6f && rise < (lonk_you_climb ? 2.5f : 7) && hypotf(p[0] - a[0], p[2] - a[2]) < 20 &&
 +        !lonk_emote_left && lonk_jump == 0 && !jump_rest && lonk_at_edge(a, p) && !lonk_walk_up(a, p)) {
 +        lonk_no_gain = 0; jump_rest = 90; lonk_jump_aimed = 1;
 +        lonk_jump = sqrtf(2 * LONK_GRAVITY * (rise + 0.6f));
@@ -2604,9 +2676,26 @@ index c05d6c3..80a2b05 100644
 +    int move_gait = lonk_move_gait(gait_v, stopping && !pushed_left, lonk_kind == LONK_BUDDY && lonk_v > 0.8f && player_pace > 1 && !pushed_left);
 +    int falls = lonk_falling > (lonk_air ? 0 : 12);
 +    if (lonk_kind != LONK_PHOTO) lonk_photo_there = 0;
-+    pouch_gait(lonk_climb ? GAIT_CLIMB : falls ? (lonk_you_glide ? GAIT_GLIDE : GAIT_FALL) : lonk_swim ? (lonk_v > 3.5f ? GAIT_SWIMDASH : lonk_v > 0.3f ? GAIT_SWIM : GAIT_TREAD) :
++    /* a pose is a look at the loop, 5 s: it used to stay on till "off", and he walked about in his climb (seen) */
++    if (lonk_pose >= 0 && !(lonk_pose_left = tick_down(lonk_pose_left))) { lonk_pose = -1; lonk_cling = 0; }
++    /* in the water: tread, swim, fast swim, each held a third of a second, with a gap between their speeds. At one line
++       (0.3 m/s) beside you he flipped between swim and tread every few frames, each flip restarted the clip, and he
++       looked frozen (seen) */
++    int swim_g = lonk_swim_gait >= 0 ? lonk_swim_gait : GAIT_TREAD;
++    static unsigned swim_held;
++    /* (no fast swim: its clip lunges forward by itself, and with its own root bones he shot ahead and snapped back, seen;
++       the swim plays faster instead) */
++    /* (and while you swim, he swims: beside you he caught up, slowed, caught up, and flipped between swim and tread, each
++       flip his height too, so he bobbed up and down, seen; treading water only after 3/4 s of stopping) */
++    int swim_want = lonk_v > (swim_g == GAIT_TREAD ? 0.8f : 0.2f) || (player_speed > 0.8f && lonk_v > 0.05f) ? GAIT_SWIM : GAIT_TREAD;
++    swim_held = swim_want == swim_g ? 0 : swim_held + lonk_ticks;
++    if (!lonk_swim || swim_held >= (swim_want == GAIT_TREAD ? 45u : 20u)) { swim_g = lonk_swim ? swim_want : GAIT_TREAD; swim_held = 0; }
++    lonk_swim_gait = swim_g;
++    /* (his jump out of the water before the swim: it only takes off once his gait is the jump, and in the water it never
++       was, so he never got out, seen) */
++    pouch_gait(lonk_climb ? GAIT_CLIMB : falls ? (lonk_you_glide ? GAIT_GLIDE : GAIT_FALL) : lonk_swim && !(lonk_emote_left && lonk_emote == GAIT_JUMP) ? swim_g :
 +               lonk_emote_left ? lonk_emote : lonk_pose >= 0 ? lonk_pose : lonk_sparring && lonk_v < 0.5f ? GAIT_SWING :
-+               lonk_kind == LONK_PARTY || (lonk_kind == LONK_PHOTO && lonk_photo_there) ? GAIT_PARTY : move_gait,
++               move_gait,
 +               pushed_left ? fmaxf(lonk_v, lonk_speed) : lonk_v);   /* (his legs go at the speed he's at, getting up to it too) */
 +#endif
 +    if (buddy_face && lonk_speed < 0.8f) { dx = fx; dz = fz; }   /* standing beside you: same way you face */
@@ -2646,7 +2735,13 @@ index c05d6c3..80a2b05 100644
 +            float nl = hypotf(n[0], n[2]);
 +            climb_n[0] += (n[0] / nl - climb_n[0]) * ease(0.2f); climb_n[1] += (n[2] / nl - climb_n[1]) * ease(0.2f);
 +            nl = fmaxf(hypotf(climb_n[0], climb_n[1]), 0.01f); climb_n[0] /= nl; climb_n[1] /= nl;
-+            a[0] = hit[0] + climb_n[0] * 0.4f; a[2] = hit[2] + climb_n[1] * 0.4f;
++            a[0] = hit[0] + climb_n[0] * 0.45f; a[2] = hit[2] + climb_n[1] * 0.45f;
++            /* and at his knees: on a wall leaning back, 0.45 m off it at his chest put his feet in it (seen) */
++            float knee[3] = {a[0], a[1] + 0.4f, a[2]}, kto[3] = {a[0] - climb_n[0] * 0.6f, a[1] + 0.4f, a[2] - climb_n[1] * 0.6f}, kh[3];
++            if (ray_cast(knee, kto, kh, NULL)) {
++                float in = 0.45f - ((a[0] - kh[0]) * climb_n[0] + (a[2] - kh[2]) * climb_n[1]);
++                if (in > 0) { a[0] += climb_n[0] * in; a[2] += climb_n[1] * in; }
++            }
 +        }
 +        face[0] = -climb_n[0]; face[1] = -climb_n[1];
 +        lonk_v = 0; lonk_blocked = 0;
@@ -2693,14 +2788,36 @@ index c05d6c3..80a2b05 100644
 +        if (!(water_look = tick_down(water_look))) {
 +            float wh, fh;
 +            water_look = 4;
-+            int deep = water_surface(a[0], a[2], feet + 2.5f, feet - 4, &wh) &&
-+                       (!ray_floor(a[0], a[2], wh, wh - 60, &fh, NULL) || wh - fh > 1.2f);
-+            if (deep != lonk_swim) fprintf(stderr, "[survey] lonk: %s\n", deep ? "in the water, swims" : "out of the water");
++            /* shallow water you walk through (a puddle, a stream) counted as deep: he floated 1.4 m under its surface, in
++               the ground with his head out (seen). Now the floor is looked for from half a metre over the surface and must
++               be 1.6 m under it; no floor within 60 m is still deep (the sea) */
++            int wet = water_surface(a[0], a[2], feet + 2.5f, feet - 4, &wh), bottom = wet && ray_floor(a[0], a[2], wh + 0.5f, wh - 60, &fh, NULL);
++            /* (and the surface at his feet to get in: it's looked for down to 4 m under them, and on a bridge over a river
++               he'd have counted as swimming and dropped to it) */
++            int deep = wet && (lonk_swim || wh > feet - 0.3f) && (!bottom || wh - fh > 1.6f);
++            if (deep != lonk_swim) fprintf(stderr, "[survey] lonk: %s (surface %.2f, floor %s%.2f, feet %.2f)\n", deep ? "in the water, swims" : "out of the water",
++                                           wet ? wh : 0.0f, bottom ? "" : "none ", bottom ? fh : 0.0f, feet);
 +            lonk_swim = deep; water_at = deep ? wh : water_at;
 +        }
 +        if (lonk_climb) { feet += lonk_climb == 1 ? 1.2f * lonk_dt : 0; vy = 0; lonk_air = 0; ground_src = "climbing"; h = feet; up = 1; }   /* (Link's climb, about) */
-+        else if (lonk_swim && !(lonk_air && vy > 0)) {
-+            feet += (water_at - 1.4f - feet) * ease(0.2f); vy = 0; lonk_air = 0; ground_src = "water"; h = feet; up = 1;
++        /* (a jump out of the water flies till he comes down into it again: from its top the swim pulled him back down, and
++           he never got out onto the bank; and not on the way up, where his feet start 1.4 m under the surface, seen) */
++        else if (lonk_swim && (!lonk_air || (vy <= 0 && feet < water_at - 0.3f))) {
++            /* swimming, 0.5 m lower: his tree takes the root bone from a standing clip (so his runs don't drift), and the swim
++               clip's root is what puts the body in the water: at your height he swam in the air above it (seen) */
++            /* swimming, higher: his tree plays the swim clip's own root bones (the mod), which already put his body down in
++               it; at the tread's height he swam under the surface, 0.5 m higher still too low, 1.65 too high (seen) */
++            float want_sink = lonk_swim_gait == GAIT_SWIM ? -lonk_swim_lift : -lonk_tread_lift;
++            /* (from swim to tread and back the clip's root bones switch at once, so his height jumps too, when the game
++               shows the new clip: lonk_swim_delay frames after the switch is written. Eased, he sat at the wrong height
++               for a third of a second, seen; in the same frame, a quicker snap, seen) */
++            static float sink, was_sink;
++            static unsigned sink_wait;
++            if (want_sink != sink && !sink_wait) sink_wait = lonk_swim_delay + 1;
++            if (sink_wait && !--sink_wait) sink = want_sink;
++            if (sink != was_sink && fabsf(feet - (water_at - 1.4f - was_sink)) < 0.3f) feet -= sink - was_sink;
++            was_sink = sink;
++            feet += (water_at - 1.4f - sink - feet) * ease(0.1f); vy = 0; lonk_air = 0; ground_src = "water"; h = feet; up = 1;
 +        } else if (ray_floor(a[0], a[2], feet + 0.7f, feet - 60, &h, &up)) {
 +            ground_src = "ray";
 +            /* walking, he follows the floor's average over 80 cm along his way: up stairs, easing onto each step on its
@@ -2748,7 +2865,7 @@ index c05d6c3..80a2b05 100644
 +        static unsigned lost;
 +        float far = hypotf(p[0] - a[0], p[2] - a[2]);
 +        const char *why = fabsf(feet - p[1]) > 5 && lonk_blocked > 30 ? "height" : (far > 30 && lonk_blocked > 30) || (far > 60 && lonk_kind != LONK_STAY) ? "far" : lonk_no_gain > 240 ? "no way to you" : !strcmp(ground_src, "none") ? "no floor" :
-+                          stuck_seconds ? "stuck" : NULL;
++                          stuck_seconds ? "stuck" : !lonk_air && feet < p[1] - 8 && !lonk_you_glide && player_climb > -2 ? "fell below you" : NULL;
 +        lost = why ? lost + lonk_ticks : 0;
 +        if (lonk_you_moved && far > 10) { lost = 999; why = "you teleported"; }
 +        if (lonk_you_moved) lonk_you_moved--;
@@ -2829,9 +2946,13 @@ index c05d6c3..80a2b05 100644
 +        }
 +#endif
 +        if (ground_mode == GROUND_PHYSICS) read_mem(stalkers[i].actor + ACTOR_POS + 4, &y, sizeof y);   /* keep its own height */
-+        float matrix[12] = {hz, 0, hx, a[0],
-+                            0,  1, 0,  y,
-+                            -hx, 0, hz, a[2]};
++        /* swimming, tilted head up (about his right side), eased in and out */
++        static float tilt;
++        tilt += ((lonk_swim && lonk_swim_gait == GAIT_SWIM ? lonk_swim_pitch * 0.01745f : 0) - tilt) * ease(0.1f);
++        float tc = cosf(tilt), ts = sinf(tilt);
++        float matrix[12] = {hz,  -hx * ts, hx * tc, a[0],
++                            0,   tc,       ts,      y,
++                            -hx, -hz * ts, hz * tc, a[2]};
 +        /* forceSetMatrix's flags: with 0 the game takes every frame as a teleport and resets his cloth, so his ponytail hung
 +           still (tested: "mine bounces"); with 1 it moves with him. A real jump (over a metre in a frame: popping back
 +           behind you, a respawn) still goes as a teleport, or his hair would whip across with him. (The menu's own
@@ -2970,7 +3091,8 @@ index c05d6c3..80a2b05 100644
 +        for (unsigned k = 0; k < count; k++) if (!strcmp(outfit, sets[k].name) || (!strcmp(outfit, "random") && k == pick)) { n = sets[k].n; snprintf(outfit, sizeof outfit, "%s", sets[k].name); }
 +        if (!n) { fprintf(stderr, "[survey] lonk outfit: unknown set\n"); return 1; }
 +        pthread_mutex_lock(&survey_lock);
-+        lonk_outfit = n; lonk_twin = 0; dress_slot = -1; dress_left = 1;
++        lonk_outfit = n; lonk_twin = 1; dress_slot = -1; dress_left = 1;   /* (his clothes only: he keeps your weapons. Out of twins his
++                                                                                 weapons hid and their fused parts floated on alone, seen) */
 +        fprintf(stderr, "[survey] lonk: puts on the %s set\n", outfit);
 +        atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release); pthread_mutex_unlock(&survey_lock);
 +        return 1;
@@ -2998,8 +3120,21 @@ index c05d6c3..80a2b05 100644
 +            {"swim", GAIT_SWIM, 0}, {"tread", GAIT_TREAD, 0}, {"climb", GAIT_CLIMB, 0}, {"cling", GAIT_CLIMB, 1}, {"glide", GAIT_GLIDE, 0}, {"swing", GAIT_SWING, 0}, {"fastswim", GAIT_SWIMDASH, 0}, {"off", -1, 0}};
 +        int found = 0;
 +        for (unsigned k = 0; k < sizeof poses / sizeof *poses; k++)
-+            if (!strcmp(word, poses[k].name)) { lonk_pose = poses[k].gait; lonk_cling = poses[k].cling; found = 1; }
++            if (!strcmp(word, poses[k].name)) { lonk_pose = poses[k].gait; lonk_cling = poses[k].cling; lonk_pose_left = 300; found = 1; }
 +        fprintf(stderr, found ? "[survey] lonk: pose %s\n" : "[survey] rejected: lonk pose <swim|fastswim|tread|climb|cling|glide|swing|off> (%s)\n", word);
++        return 1;
++    }
++    unsigned delay;
++    if ((used = 0, sscanf(line, "survey lonk swimdelay %u %n", &delay, &used)) == 1 && used && !line[used] && delay < 10) {
++        lonk_swim_delay = delay;
++        fprintf(stderr, "[survey] lonk: swim height switches %u frames after the clip\n", delay);
++        return 1;
++    }
++    float sw[4];
++    if ((used = 0, sscanf(line, "survey lonk swim %f %f %f %f %n", &sw[0], &sw[1], &sw[2], &sw[3], &used)) == 4 && used && !line[used] &&
++        fabsf(sw[0]) < 3 && fabsf(sw[1]) < 3 && fabsf(sw[2]) <= 60 && sw[3] >= 0 && sw[3] < 1) {
++        lonk_swim_lift = sw[0]; lonk_tread_lift = sw[1]; lonk_swim_pitch = sw[2]; lonk_swim_push = sw[3];
++        fprintf(stderr, "[survey] lonk: swims %.2f m up, treads %.2f m up, %.0f degrees head up, push %.2f\n", sw[0], sw[1], sw[2], sw[3]);
 +        return 1;
 +    }
 +    if ((used = 0, sscanf(line, "survey lonk recopy %n", &used)) == 0 && used && !line[used]) {
@@ -3133,7 +3268,7 @@ index c05d6c3..80a2b05 100644
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,15 +3333,80 @@ void runtime_survey_cancel_user(void) {
+@@ -307,15 +3468,80 @@ void runtime_survey_cancel_user(void) {
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
@@ -3214,7 +3349,7 @@ index c05d6c3..80a2b05 100644
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
      } else if (request.kind == 1) {
-@@ -340,8 +3431,152 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -340,8 +3566,152 @@ void runtime_survey_tick(uint64_t frame) {
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }

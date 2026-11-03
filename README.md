@@ -22,8 +22,9 @@ Runs on the [MacNativeGames](https://github.com/ly05010419/MacNativeGames) nativ
   sky islands, caves and bridges count), around walls, off ledges after you, and up onto them when you're up there.
 - **He sees.** A ring of rays tells him what's around him: enemies, you, things in the way. He also reads what you're
   doing from your own animation commands.
-- **He swims, climbs and glides** (new): into the water after you (treading water when you stop), up a wall after you,
-  and down with you when you glide.
+- **He swims** (new): into the water after you, with Link's swim stroke at your height, treading water when you stop,
+  and out onto the bank after you. **Climbing** after you up a wall and **gliding** down with you are in too, still being
+  tested.
 - **He doesn't stay gone.** You die, he's back a couple of seconds after you are.
 - **He has a (small) brain.** Every few seconds he decides what to do, and what you're doing changes his dice: on the
   move he sticks with you, standing around he plays.
@@ -37,7 +38,7 @@ Runs on the [MacNativeGames](https://github.com/ly05010419/MacNativeGames) nativ
 | behind | is suddenly standing right behind you, and startles if you turn around |
 | wander | strolls off somewhere he can actually get to, then looks around, looks at the sky or has a snack |
 | hide | runs off to a spot you can't see; find him and he bolts, give up and so does he |
-| race | (new, while you're running) "race you!": a finish 25 m ahead on a clear run, he sprints past you to it; first there he dances, beaten he sulks |
+| race | (new, while you're running) "race you!": a finish 45 m ahead on a clear run, he races you to it at about your pace; first there he hops for joy, beaten he sulks. Set from the panel, he waits beside you till you set off |
 | fight | (when he sees an enemy) sprints at it, plants a bomb barrel next to it, panics and runs; lighting it is your job |
 
 And whatever the mood, he watches you:
@@ -106,10 +107,11 @@ from his first frame.
 | `survey lonk start [mood]` | spawn him and start his brain, or spawn him straight into one mood (brain off) |
 | `survey lonk twin` / `survey lonk naked` | dress him like you (and follow your changes, fused weapons included) / back to his underwear |
 | `survey lonk outfit <set\|random>` | a whole armor set: `hylian`, `wild`, `zora`, `desert`, `snowquill`, `flamebreaker`, `stealth`, `climbing`, `radiant`, `soldier`, `rubber`, `barbarian`, `royal`, `glide`, `froggy`, `miner`, `ember`, `charged`, `frostbite`, `mystic`, `zonaite`, `awakening`, `depths`, `yiga` |
-| `survey lonk <mood> <frames>` | force a mood: `stalk`, `buddy`, `block`, `behind`, `wander`, `gift`, `flee`, `party`, `fight`, `hide`, `race` |
+| `survey lonk <mood> <frames>` | force a mood: `stalk`, `buddy`, `block`, `behind`, `wander`, `gift`, `flee`, `fight`, `hide`, `race` |
 | `survey lonk hit [gift\|eat\|silly]` | as if you'd swung at him (any reaction, or that one) |
 | `survey lonk emote <name>` | `look`, `lookup`, `eat`, `meal` (the same as `eat` now), `yuck`, `jump`, `sulk`, `surprise` |
-| `survey lonk pose <swim\|fastswim\|tread\|climb\|cling\|glide\|swing\|off>` | play one of the new loops where he stands, to look at it (needs the mod rebuilt) |
+| `survey lonk pose <swim\|tread\|climb\|cling\|glide\|swing\|off>` | play one of the new loops where he stands for 5 s, to look at it (needs the mod rebuilt) |
+| `survey lonk swim <lift> <tread lift> <tilt> <push>` | tune his swimming: how much higher he swims (1.5 m) and treads water (0) than his feet 1.4 m under the surface, degrees head up (0), how much his speed surges with each stroke (0.35) |
 | `survey lonk drawat\|putat <0..1>` | when, in his draw / put-away clip, the weapon reaches his hand / his back |
 | `survey lonk goto <right> <forward> [m/s]` | send him somewhere (metres from you) |
 | `survey lonk nobuddy` / `survey lonk buddyok` | he stops / starts picking buddy mode himself (your whistle still calls him) |
@@ -141,8 +143,10 @@ reload.
 
 ## Known issues
 
-- He can't climb or swim: walls and ledges over 7 m he walks around, and if he gets stranded (far above or below you,
-  far away and getting nowhere, stuck) for 3 seconds, he pops back next to you.
+- Climbing after you and gliding are new and not yet tried in real play. If he gets stranded (far above or below you,
+  far away and getting nowhere, stuck, fallen 8 m below you) for 3 seconds, he pops back next to you.
+- Swimming, his stroke is smooth (yours surges as you pull), and from swimming to treading water his pose changes at
+  once (yours blends).
 - He steers with a knee-high probe: thin things (trees, fences) can still slip through, and anything knee high or lower
   he just walks over.
 - As your twin he only reaches for his weapons standing still; moving, they just switch between his back and his hands.
