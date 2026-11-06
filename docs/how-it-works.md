@@ -309,17 +309,23 @@ and on the way up his feet start under the surface). Tested in a pond on the Gre
 the stroke at your height, treading water, swimming out onto the bank. `survey peek water` lists the ponds within 200 m
 (water with a floor under it: at an island's edge there's water with nothing under it, and I fell off the island).
 
-Climbing (new): you're climbing (your body plays a `Climb` command), more than 1.5 m above him, and he's stuck at the
-foot: if a chest-high ray towards you hits a wall within 2 m (its normal less than 45 degrees off level), he climbs
-(within 1.2 m he was often stopped further back, and jumped 7 m up the wall instead: while you climb, his ledge jump
-goes no higher than 2.5 m). He keeps 0.45 m off it at his chest and his knees (on a wall leaning back his feet were
-in it; a ray 1.4 m up finds it every frame, and he turns with it), goes up at
-1.2 m/s with the climb loop, slides sideways towards you at up to 1 m/s, and faces the wall. When that ray finds no
-wall his chest is over the top: he pulls himself up the rest at the wall (3 m/s) to the floor 1 m in, then steps onto
-it (from his feet, a floor ray found the wall's sloping face below the top, and he stood on it 2.4 m short; then he
-popped up the last 1.5 m). You stop climbing below him, or 15 s go by: he lets
-go and falls. Tested on a 4 m ledge with `survey peek fakeclimb` (you count as climbing for 10 s; `survey peek ledges`
-lists ledges near you): up the wall at 1.15 m/s, a quick pull-up, and onto the top beside me.
+Climbing (reworked, tested with the user climbing beside him): you're climbing (your body plays a `Climb` command), 1 m
+above him or more, and there's a wall in front of your chest (or between you) at 1 m and at 1.8 m up: he climbs it,
+eased onto it, 1.5 m to your side and 0.4 m below you. The mod gives him Link's own climbs: a float selector on
+`Temperature` (which the patch writes while he climbs) picks up, down, left, the pull-up over the top, the climb jump,
+or hanging still; right goes through all three loop bools. They go round the root's bone blender (standing hips put his
+hands in the wall and his feet off it) through a free blender whose bone group holds his Root alone. Then the fit: every
+frame his hands' and toes' gaps to the wall, read from where the game draws them, move him nearer or further, lean him
+in, and turn him so both sides touch (measured 5 to 15 cm off the wall, hanging and moving sideways). He faces the wall
+across his whole body (rays 0.35 m to each side), not by one spot of it (carvings pointed it anywhere). Things that
+were wrong, all found with the recorder below: his walk kept pulling him back to his spot beside you while he slid
+along the wall (the sideways climb played on the spot), and his drawn heading was turned towards you every frame (with
+you behind him he flickered left and right). You climb-jump: he follows your measured jump (a short crouch, then 3.9 m
+in 0.4 s). Over the top: Link's pull-up clip, then a step in. A clip picked mid-climb would start wherever his command's
+clock is (sometimes near its end): another command and back in the same frame starts it from its first frame. You step
+off onto a walkable slope partway up: he keeps your height, slides over and steps off where the wall in front is walkable.
+He drops only when you're below him and off the wall, or after 15 s without you, and follows you off ledges up to 25 m.
+Six cases is all that float selector takes: a seventh crashed the game as he spawned, as did a node of my own.
 
 Standing, he reaches for them like Link: Link's own `Equip_Sword_On_Natural` / `Equip_Sword_Off_Natural` (and the
 `Lsword` and `Spear` ones) as an emote. The `UseItem` value `EatCookingDish` (his meal, which now eats like a snack)
@@ -582,3 +588,14 @@ What didn't make it: dubious and rock-hard food (`Item_Cook_O_01`/`02`) never sp
 actor comes out; cooked food isn't an actor of its own in the RomFS); squaring up (as twins his weapons are already out
 whenever you swing, so drawing them didn't show; a dash and two hops looked goofy, a slow walk-in and stare-down was too
 much); looking up, which is a 0.8 s glance and read as nothing.
+
+## Seeing what he does
+
+I can't watch the game, so the patch keeps notes for me. The body log (`survey lonk body`, `bodylog <frames>`) gives both
+Links' hands, elbows, feet, knees, waist and head, each against the wall, floor and water, from the game's own bone
+matrices (a model's skinning palette, two copies written in turn, the newer one is the one that changed). The recorder
+keeps the last 15 s of both Links every frame; `survey lonk mark [note]` or the panel's "that was weird" writes it out,
+with the gaps worked out a little each frame so the game doesn't hitch. Alarms watch for a part inside a wall or the
+floor, a foot floating or sliding, a limb or his waist jumping in a frame, a clip not moving, a clip that goes somewhere
+while he doesn't, a sudden turn, two of him, or gear in his hand while it's put away; each also marks the recorder.
+Your own Link runs the same tests, only counted, to show how touchy each one is.

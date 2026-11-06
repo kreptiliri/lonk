@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..4bfe906 100644
+index c05d6c3..4d74303 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -48,7 +48,7 @@ index c05d6c3..4bfe906 100644
  #include <unistd.h>
  
  #ifdef GAME_BOTW
-@@ -181,24 +185,186 @@ void runtime_survey_init(Module *m) {
+@@ -181,24 +185,189 @@ void runtime_survey_init(Module *m) {
  int runtime_survey_command(const char *line) { (void)line; return 0; }
  #endif
  #else
@@ -179,6 +179,9 @@ index c05d6c3..4bfe906 100644
 +static float climb_c_hand = NAN, climb_c_foot = NAN;   /* (this frame: his nearest hand's and toe's gap to the wall, - = in it; NAN unknown) */
 +static float climb_c_part[4] = {NAN, NAN, NAN, NAN}, climb_c_lat[4];   /* (and each one's: hand L, hand R, toe L, toe R; how far to his left along the wall) */
 +static float climb_yaw;   /* (on the wall: how far he's turned off square to it, radians, so his hands and toes on both sides touch it) */
++static int lonk_you_climbjump;   /* (your body plays a climb jump) */
++static unsigned lonk_fake_climbjump;   /* "survey lonk testjump": as if you climb-jumped (frames) */
++static float climb_jump_t = -1, climb_jump_y0;   /* (his climb jump: how far into it, s, -1 none; where it started) */
 +static unsigned climb_fit_age = 999;   /* (frames since his hands or toes were last seen: off screen they aren't) */
 +static int lonk_climb_test;   /* "survey lonk testclimb <up m> <sideways m>|off": on the wall nearest him, with no one climbing: a test */
 +static float climb_test_up, climb_test_side, climb_test_at[3];
@@ -240,7 +243,7 @@ index c05d6c3..4bfe906 100644
  
  static int read_mem(uintptr_t address, void *out, size_t size) {
      if (!address || address > UINTPTR_MAX - size) return 0;
-@@ -254,6 +420,45 @@ static uintptr_t player_actor(void) {
+@@ -254,6 +423,45 @@ static uintptr_t player_actor(void) {
      }
      return 0;
  }
@@ -286,7 +289,7 @@ index c05d6c3..4bfe906 100644
  void runtime_survey_init(Module *m) {
      const char *enabled = getenv("TOTK_SURVEY");
      if (!enabled || strcmp(enabled, "1")) return;
-@@ -272,6 +477,21 @@ void runtime_survey_init(Module *m) {
+@@ -272,6 +480,21 @@ void runtime_survey_init(Module *m) {
          runtime_fail("survey requires verified game-version forceSetMatrix entry");
      survey_main = (uintptr_t)m->base;
      survey_force = (void (*)(void *, const float *, uint32_t))(m->base + FORCE_MATRIX);
@@ -308,7 +311,7 @@ index c05d6c3..4bfe906 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,22 +502,4141 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,22 +505,4194 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -1311,6 +1314,16 @@ index c05d6c3..4bfe906 100644
 +        return;
 +    }
 +    if (n == 1 && !strcmp(tok[0], "palbuf")) { palbuf_left = 6; return; }
++    if (n == 1 && !strcmp(tok[0], "slotscan")) {   /* his body slot's first 0x400 bytes as floats, to diff over frames (slotscan.bin next to the log) */
++        char path[512];
++        snprintf(path, sizeof path, "%s/Library/Logs/MacNativeGames/slotscan.bin", getenv("HOME") ? getenv("HOME") : "/tmp");
++        FILE *f = fopen(path, "ab");
++        uint8_t buf[0x400] = {0};
++        if (lonk_body) read_mem(lonk_body, buf, sizeof buf);
++        if (f) { fwrite(buf, 1, sizeof buf, f); fclose(f); }
++        fprintf(stderr, "[survey] slotscan: %#llx\n", (unsigned long long)lonk_body);
++        return;
++    }
 +    if (n == 1 && !strcmp(tok[0], "bodymodels")) {   /* the body log's models: which palette, last drawn when, has a right hand */
 +        static const char *const kinds[5] = {"body", "head", "upper", "lower", "arm"};
 +        for (int w = 0; w < 2; w++) for (int k = 0; k < 5; k++) {
@@ -1587,14 +1600,22 @@ index c05d6c3..4bfe906 100644
 +            ((void (*)(uintptr_t, const void *, bool))set_bool)(bb, &f_key, right || swims || (loop && on == GAIT_GLIDE) || (climbs && !lonk_climb_upright));   /* (climbing: round the root's blender, to the mod's that holds his Root alone) */
 +            if (climbs) {
 +                struct { const char *name; uint64_t zero; } t_key = {"Temperature", 0};
-+                ((void (*)(uintptr_t, const void *, float))set_float)(bb, &t_key, lonk_climb == 2 ? 1004.0f : way == CLIMB_UP ? 1001.0f : way == CLIMB_DOWN ? 1002.0f :
++                ((void (*)(uintptr_t, const void *, float))set_float)(bb, &t_key, lonk_climb == 2 ? 1004.0f : climb_jump_t >= 0 ? 1005.0f : way == CLIMB_UP ? 1001.0f : way == CLIMB_DOWN ? 1002.0f :
 +                                                                       way == CLIMB_LEFT ? 1003.0f : 1000.0f);   /* (1004: over the top, Link's pull-up, lonkmod33 on) */
 +            }
-+            /* the pull-up from its first frame: the climb's clock carried on into it, and it started halfway (the recorder) */
-+            static int was_edge;
-+            int edge = climbs && lonk_climb == 2;
-+            if (edge && !was_edge && !emote_cmd) anim_command(actor, "PauseMenuWait", body_slot);
-+            was_edge = edge;
++            /* the pull-up and the climb jump from their first frame: a clip plays at its command's clock, which ran on from
++               his climb (it started halfway, or near its end and held: "sometimes he plays it, sometimes not", the user).
++               The same command again did nothing, nor writing his slot's clock (+0xf8 the frame, +0x1e0 that over the
++               clip's length: the game works them out again); another command and back in the same frame starts it over */
++            static int was_fresh;
++            int fresh_clip = climbs && (lonk_climb == 2 || climb_jump_t >= 0);
++            if (fresh_clip && !was_fresh && !emote_cmd) {
++                float before = -1;
++                read_mem(body + 0x1e0, &before, 4);
++                int u = anim_command(actor, "UseItem", body_slot), w = anim_command(actor, "PauseMenuWait", body_slot);
++                if (u <= 0 || w <= 0) fprintf(stderr, "[survey] lonk: his clip didn't start over (it was at %.2f; %d %d)\n", before, u, w);
++            }
++            was_fresh = fresh_clip;
 +        }
 +        was_loop = loop;
 +        ((void (*)(uintptr_t, const void *, const char *))set_string)(bb, &k_key, lonk_arm_kind);
@@ -1605,7 +1626,7 @@ index c05d6c3..4bfe906 100644
 +        int moving = !emote_cmd && (waiting ? lonk_gait : gait) >= GAIT_WALK && (waiting ? lonk_gait : gait) <= GAIT_DASH;
 +        int shown = waiting ? lonk_gait : gait;
 +        /* on the wall: his climb as fast as he goes that way (half at least), hanging still at Link's own rate */
-+        float climb_rate = lonk_climb == 1 && lonk_climb_clip != CLIMB_STILL ? fmaxf(lonk_climb_speed / 1.2f, 0.5f) : 1.0f;
++        float climb_rate = climb_jump_t >= 0 ? 1.0f : lonk_climb == 1 && lonk_climb_clip != CLIMB_STILL ? fmaxf(lonk_climb_speed / 1.2f, 0.5f) : 1.0f;
 +        float rate = shown == GAIT_SWIM ? fminf(fmaxf(speed / 2.5f, 0.8f), 2.0f) : !moving ? (shown == GAIT_CLIMB ? climb_rate : 1.0f) : shown == GAIT_WALK ? fminf(fmaxf(0.9f * speed / LONK_WALK, 0.5f), 2.0f) :
 +                     fminf(fmaxf(shown == GAIT_DASH ? 1.75f * speed / LONK_SPRINT : 1.5f * speed / LONK_RUN, 1.0f), 2.5f);   /* never slow motion */
 +        memcpy((void *)(body + 0xd0), &rate, sizeof rate);
@@ -2912,6 +2933,8 @@ index c05d6c3..4bfe906 100644
 +    lonk_you_glide = strstr(all, "Glide") != NULL || lonk_fake_glide;
 +    lonk_fake_climb = tick_down(lonk_fake_climb);
 +    lonk_you_climb = strstr(all, "Climb") != NULL || lonk_fake_climb;
++    lonk_fake_climbjump = tick_down(lonk_fake_climbjump);
++    lonk_you_climbjump = strstr(all, "ClimbJump") != NULL || lonk_fake_climbjump;
 +    {   /* your camera comes out (the pad up, or a selfie): he photobombs it */
 +        int camera = strstr(all, "SelfCamera") ? 2 : strstr(all, "LookPad") ? 1 : 0;
 +        if (camera && !lonk_you_camera && hypotf(p[0] - a[0], p[2] - a[2]) < 30 && lonk_kind != LONK_FIGHT && lonk_kind != LONK_MAD &&
@@ -3029,7 +3052,7 @@ index c05d6c3..4bfe906 100644
 +    int wanted = 0;   /* he's trying to get somewhere this frame */
 +    /* following you, you're below: he steps off ledges (and falls) instead of stopping at them */
 +    int follows = lonk_kind == LONK_STALK || lonk_kind == LONK_BUDDY || lonk_kind == LONK_BLOCK || lonk_kind == LONK_BEHIND || lonk_kind == LONK_GIFT;
-+    lonk_drop_ok = follows && isfinite(a[1]) && p[1] < a[1] - 1.5f && p[1] > a[1] - 12;
++    lonk_drop_ok = follows && isfinite(a[1]) && p[1] < a[1] - 1.5f && p[1] > a[1] - 25;   /* (12 m: you went 19 m down off a ledge, he paced up there 13 s till "lost") */
 +    float dx = target[0] - a[0], dz = target[2] - a[2], dist = hypotf(dx, dz), want_v = 0, room = 0;
 +    if (lonk_air) {   /* on his take-off's way, unless that's into a wall (a wall only: the ledge check stopped him dead
 +                         mid-air over any drop, and he came straight down) */
@@ -3304,7 +3327,7 @@ index c05d6c3..4bfe906 100644
 +       him (he fell straight into one and stuck in it, seen). lonk_climb 1 on the wall, 2 over the top, 3 dropping */
 +    static float climb_top, climb_in;   /* (pulling himself up: the top's floor; how far in he has stepped) */
 +    static unsigned climb_open;   /* (frames the ray found no wall) */
-+    if (lonk_climb != 1) lonk_climb_dir = 0;
++    if (lonk_climb != 1) { lonk_climb_dir = 0; climb_jump_t = -1; }
 +    if (lonk_climb != 1) { climb_tilt -= climb_tilt * ease(0.15f); if (fabsf(climb_tilt) < 0.001f) climb_tilt = 0; }   /* (off the wall, or over the top: upright again) */
 +    if (lonk_climb == 2) {   /* over the top: up the last bit at the wall, quickly, then a step in onto it */
 +        climb_yaw -= climb_yaw * ease(0.15f);   /* (square to it again, eased) */
@@ -3429,6 +3452,13 @@ index c05d6c3..4bfe906 100644
 +        }
 +        lonk_v = 0; lonk_blocked = 0;
 +        climb_open = wall ? 0 : climb_open + 1;
++        /* you've stepped off the wall onto a slope you can walk (partway up, "WallOff"): so does he, onto it, once it's
++           that slope in front of him (to him it was still wall, steeper than 58 degrees counts: he climbed on past you,
++           leaning all he can, and let go, 3 times at 7 m, seen) */
++        if (lonk_climb == 1 && wall && !lonk_you_climb && !lonk_climb_test && n[1] > 0.45f && p[1] > a[1] - 1.0f) {
++            lonk_climb = 0; climb_vy = 0;
++            fprintf(stderr, "[survey] lonk: steps off the wall onto the slope (%.0f degrees), as you did\n", acosf(fminf(n[1], 1)) * 57.3f);
++        }
 +        if (lonk_climb == 1) {
 +            float v = 1.2f;   /* (Link's climb, about) */
 +            /* you let go: for a third of a second (your climb flickered off for a frame high up, and he dropped 15 m, seen),
@@ -3436,8 +3466,13 @@ index c05d6c3..4bfe906 100644
 +            static unsigned you_off;
 +            you_off = lonk_you_climb ? 0 : you_off + lonk_ticks;
 +            int you_on = lonk_you_climb || (you_off <= 20 && p[1] > a[1] - 2) || lonk_climb_test;
-+            if (!lonk_you_climb && !lonk_climb_test && p[1] > a[1] + 0.5f) lonk_climb_dir = 1;   /* you're over the top (or above him off the wall): after you */
-+            else if (you_on) {   /* 0.4 m lower than you: faster the further off he is, smoothly (he went in fits and starts), still near it */
++            /* you're off the wall, at most 1 m below him: over the top (you're above: up after you), or stepped off it onto
++               a slope partway up ("WallOff", then walking): he keeps to your height and slides over to you along the wall
++               (off sideways, above) till that slope's in front of him, then steps off onto it (below). Up after you
++               whatever, he climbed on past you, and let go (the recorder, 2026-11-06) */
++            int you_near = !lonk_you_climb && !lonk_climb_test && p[1] > a[1] - 1.0f;
++            if (you_near && p[1] > a[1] + 0.5f) lonk_climb_dir = 1;
++            else if (you_on || you_near) {   /* 0.4 m lower than you: faster the further off he is, smoothly (he went in fits and starts), still near it */
 +                float err = lonk_climb_test ? climb_test_at[1] + climb_test_up - a[1] : p[1] - 0.4f - a[1];
 +                v = fminf(fmaxf(err * 2.5f, -1.2f), 1.2f);
 +                if (fabsf(err) < (climb_vy != 0 ? 0.05f : 0.25f)) v = 0;
@@ -3446,8 +3481,24 @@ index c05d6c3..4bfe906 100644
 +            if (!lonk_you_climb && !lonk_climb_test) climb_left = tick_down(climb_left);   /* (15 s off the wall without you: with you, up a tall one, he let go at 11 m, seen) */
 +            if (lonk_climb_dir == -2 || !climb_left) {
 +                lonk_climb = 3; lonk_climb_dir = 0; climb_vy = 0;
-+                fprintf(stderr, "[survey] lonk: drops off the wall (%.1f m up)\n", a[1] - climb_from);
++                fprintf(stderr, "[survey] lonk: drops off the wall (%.1f m up; %s, you %.1f m above him, off the wall %u ticks)\n", a[1] - climb_from,
++                        !climb_left ? "15 s without you" : lonk_you_climb ? "you climb" : "you're off it", p[1] - a[1], you_off);
 +            } else climb_vy = lonk_climb_dir ? copysignf(fabsf(v), (float)lonk_climb_dir) : 0;
++            /* you climb-jump (on a wall: up 4 m in under a second): so does he, the way yours goes (measured from yours: a
++               0.13 s crouch, then 3.9 m in 0.4 s, 6 cm back, held to 0.95 s); he climbed on at 1.2 m/s and was 4 m behind */
++            static int you_jumped;
++            if (lonk_you_climbjump && !you_jumped && climb_jump_t < 0 && lonk_climb == 1 && (p[1] > a[1] - 1.0f || lonk_climb_test)) { climb_jump_t = 0; climb_jump_y0 = a[1]; }
++            you_jumped = lonk_you_climbjump;
++            if (climb_jump_t >= 0 && lonk_climb == 1) {
++                static const float at[] = {0, 0.067f, 0.133f, 0.2f, 0.267f, 0.333f, 0.4f, 0.467f, 0.533f, 0.6f, 0.667f, 0.95f};
++                static const float up[] = {0, 0.10f, 0.25f, 0.62f, 1.51f, 2.35f, 3.15f, 3.71f, 4.01f, 4.08f, 4.02f, 3.98f};
++                climb_jump_t += lonk_dt;
++                int k = 0;
++                while (k < 10 && climb_jump_t > at[k + 1]) k++;
++                float u = fminf((climb_jump_t - at[k]) / (at[k + 1] - at[k]), 1.0f), want = climb_jump_y0 + up[k] + (up[k + 1] - up[k]) * u;
++                climb_vy = (want - a[1]) / fmaxf(lonk_dt, 1e-4f);
++                if (climb_jump_t >= 0.95f) climb_jump_t = -1;
++            } else climb_jump_t = -1;
 +        } else climb_vy = fmaxf(climb_vy - LONK_GRAVITY * lonk_dt, -20.0f);
 +        {   /* which climb he plays: the way he goes most (up and down over sideways), still under 0.15 m/s; a new one only
 +               once it's held for 6 frames (speeds near the line flipped them) */
@@ -3470,7 +3521,9 @@ index c05d6c3..4bfe906 100644
 +            lonk_climb_speed = lonk_climb_clip == CLIMB_LEFT || lonk_climb_clip == CLIMB_RIGHT ? side_v : up_v;
 +        }
 +        float step = climb_vy * lonk_dt;
-+        if (step < 0) {   /* going down: the floor under his feet (flat: the wall's own face doesn't count) */
++        /* (climbing down, or dropping: not the 6 cm his climb jump settles back at its end, which found a ledge 18 m up and
++           stood him on it, stuck there when you went down: the log, 2026-11-06) */
++        if (step < 0 && (lonk_climb == 3 || lonk_climb_dir < 0) && climb_jump_t < 0) {   /* going down: the floor under his feet (flat: the wall's own face doesn't count) */
 +            float ff[3] = {a[0], a[1] + 0.5f, a[2]}, ft[3] = {a[0], a[1] + step - 0.05f, a[2]}, fh[3], fn[3];
 +            if (ray_cast(ff, ft, fh, fn) && fn[1] > 0.6f) {
 +                a[1] = fh[1]; climb_vy = 0; lonk_climb = 0;
@@ -4289,6 +4342,9 @@ index c05d6c3..4bfe906 100644
 +    if ((used = 0, sscanf(line, "survey lonk testclimb off %n", &used)) == 0 && used && !line[used]) {
 +        lonk_climb_test = 0; fprintf(stderr, "[survey] lonk: test climb off\n"); return 1;
 +    }
++    if ((used = 0, sscanf(line, "survey lonk testjump %n", &used)) == 0 && used && !line[used]) {
++        lonk_fake_climbjump = 30; climb_test_up += 4; fprintf(stderr, "[survey] lonk: test climb jump\n"); return 1;   /* (and the test's height with it) */
++    }
 +    if ((used = 0, sscanf(line, "survey lonk climbupright %n", &used)) == 0 && used && !line[used]) {
 +        lonk_climb_upright = !lonk_climb_upright;
 +        fprintf(stderr, "[survey] lonk: climbs with %s hips\n", lonk_climb_upright ? "the standing" : "his climb's own");
@@ -4453,7 +4509,7 @@ index c05d6c3..4bfe906 100644
          atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
      }
      pthread_mutex_unlock(&survey_lock);
-@@ -307,15 +4646,91 @@ void runtime_survey_cancel_user(void) {
+@@ -307,15 +4702,91 @@ void runtime_survey_cancel_user(void) {
      if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
      pthread_mutex_lock(&survey_lock);
      request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
@@ -4545,7 +4601,7 @@ index c05d6c3..4bfe906 100644
          report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
          request.kind = 0; hold_left = 0;
      } else if (request.kind == 1) {
-@@ -340,8 +4755,152 @@ void runtime_survey_tick(uint64_t frame) {
+@@ -340,8 +4811,152 @@ void runtime_survey_tick(uint64_t frame) {
              } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
          }
      }

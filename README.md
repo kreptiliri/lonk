@@ -23,8 +23,14 @@ Runs on the [MacNativeGames](https://github.com/ly05010419/MacNativeGames) nativ
 - **He sees.** A ring of rays tells him what's around him: enemies, you, things in the way. He also reads what you're
   doing from your own animation commands.
 - **He swims** (new): into the water after you, with Link's swim stroke at your height, treading water when you stop,
-  and out onto the bank after you. **Climbing** after you up a wall and **gliding** down with you are in too, still being
-  tested.
+  and out onto the bank after you.
+- **He climbs** (new): up the wall after you, 1.5 m to your side and a bit below, with Link's own climbs up, down,
+  left, right and hanging still, his hands and feet on the wall (fitted from where the game draws them). He jumps when
+  you climb-jump, pulls himself over the top with Link's pull-up, steps off onto a ledge partway up when you do, and
+  drops when you let go. **Gliding** down with you is in too, still being tested.
+- **A recorder for bug hunting** (new): the last 15 s of both Links, every frame, written to a file by
+  `survey lonk mark` or the panel's "that was weird" button; glitch alarms log parts inside walls, snaps, spins and
+  frozen clips as they happen.
 - **He doesn't stay gone.** You die, he's back a couple of seconds after you are.
 - **He has a (small) brain.** Every few seconds he decides what to do, and what you're doing changes his dice: on the
   move he sticks with you, standing around he plays.
@@ -110,6 +116,8 @@ from his first frame.
 | `survey lonk <mood> <frames>` | force a mood: `stalk`, `buddy`, `block`, `behind`, `wander`, `gift`, `flee`, `fight`, `hide`, `race` |
 | `survey lonk hit [gift\|eat\|silly]` | as if you'd swung at him (any reaction, or that one) |
 | `survey lonk emote <name>` | `look`, `lookup`, `eat`, `meal` (the same as `eat` now), `yuck`, `jump`, `sulk`, `surprise` |
+| `survey lonk mark [note]` | write the last 15 s of both Links to `~/Library/Logs/MacNativeGames/lonk_mark_<time>.txt` (also the panel's "that was weird"); `survey lonk alarms on\|off`, `survey lonk rec on\|off` |
+| `survey lonk testclimb <up m> <sideways m>` / `off` | put him on the nearest wall near you and hold him there (a test); `survey lonk testjump` makes him climb-jump |
 | `survey lonk pose <swim\|tread\|climb\|cling\|glide\|swing\|off>` | play one of the new loops where he stands for 5 s, to look at it (needs the mod rebuilt) |
 | `survey lonk swim <lift> <tread lift> <tilt> <push>` | tune his swimming: how much higher he swims (1.5 m) and treads water (0) than his feet 1.4 m under the surface, degrees head up (0), how much his speed surges with each stroke (0.35) |
 | `survey lonk drawat\|putat <0..1>` | when, in his draw / put-away clip, the weapon reaches his hand / his back |
@@ -143,8 +151,10 @@ reload.
 
 ## Known issues
 
-- Climbing after you and gliding are new and not yet tried in real play. If he gets stranded (far above or below you,
-  far away and getting nowhere, stuck, fallen 8 m below you) for 3 seconds, he pops back next to you.
+- Gliding is new and not yet tried in real play. If he gets stranded (far above or below you, far away and getting
+  nowhere, stuck, fallen 8 m below you) for 3 seconds, he pops back next to you.
+- Climbing: he slides onto the wall rather than grabbing it the way you do. Landing after a long drop, a foot can sink
+  into the floor for a moment. On steep slopes he sometimes finds no room beside you and walks right behind you.
 - Swimming, his stroke is smooth (yours surges as you pull), and from swimming to treading water his pose changes at
   once (yours blends).
 - He steers with a knee-high probe: thin things (trees, fences) can still slip through, and anything knee high or lower

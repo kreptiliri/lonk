@@ -86,6 +86,9 @@ CLIMB_PICK, CLIMB_TEMPS = 335, (1001.0, 1002.0, 1003.0)
 # (and 1004: over the top, Link's own pull-up onto the ledge, a fifth case added to the selector; he snapped from his
 # climb up straight to standing, measured)
 CLIMB_EDGE = 1004.0
+# (and 1005: a climb jump, Link's own, with you: he climbed on at 1.2 m/s and was 4 m behind, measured)
+CLIMB_JUMP = 1005.0
+# (six cases is all the selector takes: a seventh crashed the game as he spawned, as did a node of our own)
 # (climbing right, with all three bools, skips the root's bone blender like swimming: a free blender of the menu's arm
 # poses, set up as that one, holds it in place too; without, he snapped each time it came on or off, seen)
 RIGHT_STILL = 221
@@ -236,6 +239,16 @@ def main():
         if value is not None:
             entry['Condition'] = value
     next(c for c in use['Body']['Child Nodes'] if c.get('Condition') == EQUIP_USE)['Node Index'] = EQUIP
+    # Pairs of the same pose (the same clip and frame controls, a tag picks which one, for the menu's own blends): both
+    # to the first, so the second one's free. (Out of free clips for his climbs; a node of our own crashed the game.)
+    paired = set()
+    for n in doc['Nodes']:
+        kids = n['Body'].get('Child Nodes') or [] if n['Node Type'] == 'PreviousTagSelector' else []
+        leaves = [nodes[c['Node Index']] for c in kids if isinstance(c, dict) and 'Node Index' in c]
+        if (len(leaves) > 1 and len(leaves) == len(kids) and all(l['Node Type'] == 'SkeletalAnimation' for l in leaves) and
+                len({(l['Body'].get('Animation'), json.dumps(l['Body'].get('Frame Controls'))) for l in leaves}) == 1):
+            for c in kids[1:]:
+                paired.add(c['Node Index']); c['Node Index'] = kids[0]['Node Index']
     taken = reached(doc)
 
     def plain_loop(leaf):   # no frame controls, or only a frame controller that loops the whole clip at rate 1
@@ -245,9 +258,10 @@ def main():
     # (the plain loops without events first, as before; then the others: clip() takes their frame controls and events off)
     first = [n for n in unused if plain_loop(n) and not n['Body'].get('Events')]
     free = first + [n for n in unused if not plain_loop(n) and not n['Body'].get('Events')] + [n for n in unused if n['Body'].get('Events')]
+    free = [n for n in free if n['Node Index'] not in paired] + [n for n in free if n['Node Index'] in paired]   # (the pairs' last: the others stay where they were)
     pickers = [n for n in doc['Nodes'] if n['Node Type'] == 'BoolSelector' and n['Node Index'] not in taken]
     fall = entries[5]   # (keyed by the original cases: 5 is his fall, at 15 now)
-    if len(free) < 10 or len(pickers) < 7 or nodes[fall['Node Index']]['Node Type'] != 'SkeletalAnimation':
+    if len(free) < 12 or len(pickers) < 7 or nodes[fall['Node Index']]['Node Type'] != 'SkeletalAnimation':
         sys.exit(f'no free bool selectors and clips for swimming and climbing ({len(free)} clips, {len(pickers)} selectors): not the 1.4.3 ASB?')
     guard, shield, shield2, fire, fire2, fire3 = pickers[:6]
     clips = iter(free)
@@ -257,7 +271,7 @@ def main():
         node['Body']['Child Nodes'] = [{'Condition True': if_true}, {'Condition False': if_false}]
 
     def clip(name):
-        leaf = next(clips)
+        leaf = next(clips)   # (a new node of our own crashed the game as he spawned: only free ones, 2026-11-06)
         leaf['Body']['Animation'] = name
         # (a menu pose's frame controller plays it once and holds it: his swim froze, its clock at 1.0, seen, also with the
         # end moved to the clip's end. None, as his walk has: then it loops)
@@ -291,6 +305,7 @@ def main():
         entry.update({'Condition Min': temp - 0.5, 'Condition Max': temp + 0.5, 'Node Index': clip(name)})
     climb['Body']['Child Nodes'][3]['Node Index'] = clip('Climb_Wall_Move_N_FootL')
     climb['Body']['Child Nodes'].insert(3, {'Condition Min': CLIMB_EDGE - 0.5, 'Condition Max': CLIMB_EDGE + 0.5, 'Node Index': clip('Climb_Wall_Ed_Edge_L')})
+    climb['Body']['Child Nodes'].insert(4, {'Condition Min': CLIMB_JUMP - 0.5, 'Condition Max': CLIMB_JUMP + 0.5, 'Node Index': clip('Climb_Wall_Jump_U_FootL')})
     holds[1]['Body']['Child Nodes'] = [standing['Node Index'], CLIMB_PICK]
     pick(shield2, S, CLIMB_STILL, fire3['Node Index'])
     pick(guard, G, shield['Node Index'], shield2['Node Index'])
