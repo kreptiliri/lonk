@@ -20,6 +20,8 @@ Runs on the [MacNativeGames](https://github.com/ly05010419/MacNativeGames) nativ
   The game drags every piece back into the menu's 3D scene each frame, so he pulls them back out each frame.
 - **He runs and sprints** with Link's own animations, at Link's own speeds, over the real ground (physics raycasts, so
   sky islands, caves and bridges count), around walls, off ledges after you, and up onto them when you're up there.
+- **His feet stand on the ground** (new): his own foot IK. The game's needs physics his body doesn't have, so each frame
+  the mod bends his knees in the bone matrices the game draws him with: his feet land on the slope instead of in it.
 - **He sees.** A ring of rays tells him what's around him: enemies, you, things in the way. He also reads what you're
   doing from your own animation commands.
 - **He swims** (new): into the water after you, with Link's swim stroke at your height, treading water when you stop,
@@ -30,7 +32,7 @@ Runs on the [MacNativeGames](https://github.com/ly05010419/MacNativeGames) nativ
   drops when you let go. **Gliding** down with you is in too, still being tested.
 - **A recorder for bug hunting** (new): the last 15 s of both Links, every frame, written to a file by
   `survey lonk mark` or the panel's "that was weird" button; glitch alarms log parts inside walls, snaps, spins and
-  frozen clips as they happen.
+  frozen clips as they happen. `survey lonk shake on` measures flicker: how hard each part of both Links jerks, every frame.
 - **He doesn't stay gone.** You die, he's back a couple of seconds after you are.
 - **He has a (small) brain.** Every few seconds he decides what to do, and what you're doing changes his dice: on the
   move he sticks with you, standing around he plays.
@@ -165,8 +167,10 @@ reload.
 - As your twin he holds a two-hander in one hand when he stands still (his tree has no two-handed idle; it looks tough, so
   it stays), and he doesn't copy a shield-only guard.
 - As your twin he's in his underwear for about half a second after he spawns, until his clothes are on.
-- His feet don't fit slopes the way yours do (your Link bends its feet to the ground, he doesn't): measured, on slopes
-  of 20 degrees and more his toes go 14 to 21 cm into the ground where yours go 4 to 5.
+- His feet fit slopes now (his own foot IK: each frame his knees bend so his feet land on the slope, and he sinks a
+  little on steep ground so the downhill foot reaches). Up to 35 degrees they sit like yours; steeper, a toe can still
+  go up to about 17 cm into the ground (yours, 2). On ground steeper than about 50 degrees he just runs, where your Link
+  climbs or does its slow slope walk.
 - With the mod installed, the inventory Link runs, sprints, celebrates, startles or eats in the pause menu when you hold
   a weapon.
 

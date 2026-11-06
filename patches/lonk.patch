@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..d9e86c9 100644
+index c05d6c3..fb08348 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -311,10 +311,20 @@ index c05d6c3..d9e86c9 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,22 +505,4377 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,66 +505,4975 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
+-int runtime_survey_command(const char *line) {
+-    if (strncmp(line, "survey ", 7)) return 0;
+-    char op[16], tag[64]; float xyz[3] = {0}; unsigned hold = 0; int used = 0, kind = 0;
+-    if (sscanf(line, "survey %15s %63s %n", op, tag, &used) == 2 && used && !line[used] && !strcmp(op, "pos")) kind = 1;
+-    used = 0;
+-    if (sscanf(line, "survey move %63s %f %f %f %u %n", tag, &xyz[0], &xyz[1], &xyz[2], &hold, &used) == 5 &&
+-        used && !line[used] && valid_xyz(xyz) && hold >= 1 && hold <= 600) kind = 2;
+-    if (!kind) { fprintf(stderr, "[survey] rejected: expected pos <tag> or move <tag> X Y Z <1..600 frames>\n"); return 1; }
+-    for (const char *p = tag; *p; ++p) if (!isalnum((unsigned char)*p) && *p != '_' && *p != '-') {
+-        fprintf(stderr, "[survey] rejected: invalid tag\n"); return 1;
 +#ifdef SURVEY_SPAWN
 +/* The created actor, once the PreActor holds it: a pointer in the PreActor's first 0x100 bytes whose actor name is the
 +   requested one (1.2.1 keeps it at +0x20; found by name here so a moved field shows in the log instead of misreading). */
@@ -323,7 +333,13 @@ index c05d6c3..d9e86c9 100644
 +        uintptr_t actor = read_ptr(spawn_pre + off), name = actor ? read_ptr(actor + GAME_ACTOR_NAME) : 0;
 +        char text[64] = {0};
 +        if (name && read_mem(name, text, sizeof text - 1) && !strcmp(text, spawn_name)) { *at = off; return actor; }
-+    }
+     }
+-    pthread_mutex_lock(&survey_lock);
+-    if (!survey_enabled) report(tag, "disabled", 0, 0);
+-    else if (request.kind || hold_left) report(tag, "busy", 0, 0);
+-    else {
+-        request.kind = kind; strcpy(request.tag, tag); memcpy(request.xyz, xyz, sizeof xyz); request.hold = hold;
+-        atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
 +    return 0;
 +}
 +static const float *spawn_where;   /* set: the next spawn goes exactly there instead of relative to the player */
@@ -372,7 +388,8 @@ index c05d6c3..d9e86c9 100644
 +        fprintf(stderr, "[survey] tag=%s status=spawn_no_actor frame=%llu preactor=%#llx head=%llx %llx %llx %llx %llx %llx %llx %llx\n", spawn_tag,
 +                (unsigned long long)frame, (unsigned long long)spawn_pre, (unsigned long long)head[0], (unsigned long long)head[1], (unsigned long long)head[2],
 +                (unsigned long long)head[3], (unsigned long long)head[4], (unsigned long long)head[5], (unsigned long long)head[6], (unsigned long long)head[7]);
-+    }
+     }
+-    pthread_mutex_unlock(&survey_lock);
 +}
 +static float frand(float lo, float hi) { return lo + (hi - lo) * (float)arc4random_uniform(1u << 24) / (float)(1u << 24); }
 +static void lonk_enter(int kind, unsigned frames) {
@@ -442,8 +459,14 @@ index c05d6c3..d9e86c9 100644
 +    int r = height_fn(&h, xz, scene, -1, 0, 1, 0);
 +    if ((r != 1 && r != 2) || !isfinite(h)) return 0;
 +    *out = h;
-+    return 1;
-+}
+     return 1;
+ }
+-void runtime_survey_cancel_user(void) {
+-    if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
+-    pthread_mutex_lock(&survey_lock);
+-    request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
+-    fprintf(stderr, "[survey] cancelled: user input\n");
+-    pthread_mutex_unlock(&survey_lock);
 +/* A physics raycast, set up the way the AI node QueryCheckCliffRayCast (0x260b30c) builds one on its stack: a 0x178-byte
 +   query, vtable [main+0x395d990]+0x10, start at +0x08, end at +0x14, fraction -1 at +0x3c, a collision filter at +0x128
 +   (vtable [main+0x3988178]+0x10, layers 0xfffcffff00000011) pointed to by +0x60; bool 0x1952a4(&query, 0) casts it and
@@ -477,7 +500,22 @@ index c05d6c3..d9e86c9 100644
 +    if (normal) memcpy(normal, q + 0x30, 12);
 +    for (int k = 0; k < 3; k++) if (!isfinite(hit[k])) return 0;
 +    return 1;
-+}
+ }
+-void runtime_survey_tick(uint64_t frame) {
+-    if (in_tick || !atomic_load_explicit(&runtime_survey_pending, memory_order_acquire)) return;
+-    in_tick = 1;
+-    pthread_mutex_lock(&survey_lock);
+-    uintptr_t actor = player_actor();
+-    if (!actor) {
+-        report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
+-        request.kind = 0; hold_left = 0;
+-    } else if (request.kind == 1) {
+-        report(request.tag, "position", frame, actor); request.kind = 0;
+-    } else {
+-        if (request.kind == 2) {
+-            memcpy(hold_xyz, request.xyz, sizeof hold_xyz); strcpy(hold_tag, request.tag);
+-            hold_left = request.hold; request.kind = 0;
+-            report(hold_tag, "move_begin", frame, actor);
 +/* Water's surface straight down (x, z) from top to bottom, 0 if no water: the game's QueryPhysicsRaycastWaterSurfaceIn-
 +   DownwardFromPosition (0x26f144c) is the same cast with the filter's layer word made by 0xb693dc for collision layer
 +   0x26: the u32 at [[[[main+0x395dac0]]+0x18]+0x48] + 0x26*4 in the high half, 0x11 in the low, minus the 0xfffc bits as
@@ -523,19 +561,26 @@ index c05d6c3..d9e86c9 100644
 +    return 1;
 +}
 +static int ray_height(float x, float z, float top, float bottom, float *out) { return ray_floor(x, z, top, bottom, out, NULL); }
++static int walkable_n(const float n[3]) {   /* (a hit's normal: ground he can walk up, up to 53 degrees) */
++    float nl = sqrtf(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
++    return nl > 0.5f && nl < 1.5f && n[1] / nl > 0.6f;
++}
 +/* Something in the way, knee high, within <reach> m along (dx, dz)? A walkable slope (normal pointing up) doesn't count. */
 +static int ray_blocked(const float at[3], float dx, float dz, float reach) {
 +    float start[3] = {at[0], at[1] + 0.6f, at[2]}, end[3] = {at[0] + dx * reach, at[1] + 0.6f, at[2] + dz * reach}, hit[3], normal[3];
 +    /* chest high too: a wall that leans out at the bottom reads as a walkable slope at the knee, and he walked into it */
 +    float chest[3] = {at[0], at[1] + 1.3f, at[2]}, chest_end[3] = {at[0] + dx * reach, at[1] + 1.3f, at[2] + dz * reach};
-+    if (ray_cast(chest, chest_end, hit, NULL)) return 1;
++    /* (but not ground he could walk on: running up a 50-degree slope, it reaches chest height within the metre, and a
++       one-frame "blocked" swerved him 40 degrees and back: the user saw him flicker left and right on steep slopes;
++       a leaning slab's underside faces sideways or down, it still counts) */
++    if (ray_cast(chest, chest_end, hit, normal) && !walkable_n(normal)) return 1;
 +    /* and head high: under a leaning slab the rock reaches his head before his chest, and he walked in under it to the
 +       shoulders and stood there (seen, 2026-11-06) */
 +    float head[3] = {at[0], at[1] + 1.75f, at[2]}, head_end[3] = {at[0] + dx * reach, at[1] + 1.75f, at[2] + dz * reach};
-+    if (ray_cast(head, head_end, hit, NULL)) return 1;
++    if (ray_cast(head, head_end, hit, normal) && !walkable_n(normal)) return 1;
 +    if (!ray_cast(start, end, hit, normal)) return 0;
 +    float nl = sqrtf(normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]);
-+    if (nl > 0.5f && nl < 1.5f && normal[1] / nl > 0.65f) return 0;
++    if (nl > 0.5f && nl < 1.5f && normal[1] / nl > 0.6f) return 0;   /* (0.6 = his walk's own limit for steep, 53 degrees: at 0.65 bumpy 45-degree ground flipped walkable/not frame to frame) */
 +    /* a stair: what he hit has its top a step above his knee, rising gently from his feet. Going up stairs the knee ray
 +       hit the steps a metre ahead as walls and he swerved out and back every few frames (tested) */
 +    float d = hypotf(hit[0] - at[0], hit[2] - at[2]), h;
@@ -546,7 +591,9 @@ index c05d6c3..d9e86c9 100644
 +   the same, but the knee-high probe usually sees that first). */
 +static int ray_ledge(const float at[3], float dx, float dz) {
 +    float h;
-+    return !ray_height(at[0] + dx * 0.8f, at[2] + dz * 0.8f, at[1] + 0.7f, at[1] - 2.5f, &h);
++    /* (from 1.7 m up: from 0.7 m, going up a slope over 41 degrees the ground 0.8 m ahead was above the ray's start, it
++       found no floor, "a ledge", and he swerved every 3 frames running uphill: the shake meter's sideways jerks) */
++    return !ray_height(at[0] + dx * 0.8f, at[2] + dz * 0.8f, at[1] + 1.7f, at[1] - 2.5f, &h);
 +}
 +static int lonk_drop_ok;   /* following you down: ledges don't stop him (he falls off them), walls still do */
 +/* (swimming, a drop doesn't count: raised to tread water at the surface, the pond floor was a cliff every way, and he was
@@ -589,7 +636,15 @@ index c05d6c3..d9e86c9 100644
 +        for (int i = 0; i < 8; i++) {
 +            float x = p[0] + (fx * dirs[i][0] - fz * dirs[i][1]) * reach[r], z = p[2] + (fz * dirs[i][0] + fx * dirs[i][1]) * reach[r], h, up;
 +            if (ray_floor(x, z, p[1] + 0.7f, p[1] - 1.0f, &h, &up) && up > 0.6f) { out[0] = x; out[1] = z; return; }
-+        }
+         }
+-        if (hold_left) {
+-            float rot[9] = {0}, matrix[12];
+-            int ok = read_mem(actor + ACTOR_ROT, rot, sizeof rot);
+-            for (unsigned i = 0; i < 9; i++) if (!isfinite(rot[i]) || fabsf(rot[i]) > 2) ok = 0;
+-            if (ok) {
+-                for (unsigned row = 0; row < 3; row++) {
+-                    for (unsigned col = 0; col < 3; col++) matrix[row * 4 + col] = rot[row * 3 + col];
+-                    matrix[row * 4 + 3] = hold_xyz[row];
 +    out[0] = p[0]; out[1] = p[2];
 +}
 +/* PouchPlayer, spawned by us, stays invisible: the pause menu normally binds its model to the UI model scene and switches its
@@ -898,10 +953,15 @@ index c05d6c3..d9e86c9 100644
 +static const char *const body_names[] = {"hand L", "wrist L", "elbow L", "hand R", "wrist R", "elbow R", "toe L", "toe R",
 +                                         "ankle L", "ankle R", "knee L", "knee R", "waist", "head", "chest"};
 +#define BODY_PARTS 15
++static const char *const leg_bones[12] = {"Leg_1_L", "Knee_L", "Leg_2_L", "Ankle_Assist_L", "Ankle_L", "Toe_L",
++                                          "Leg_1_R", "Knee_R", "Leg_2_R", "Ankle_Assist_R", "Ankle_R", "Toe_R"};   /* (each leg: thigh and all below it) */
++static int write_mem(uintptr_t address, const void *in, size_t size) {
++    return address && mach_vm_write(mach_task_self(), address, (vm_offset_t)in, (mach_msg_type_number_t)size) == KERN_SUCCESS;
++}
 +#define BODY_CHEST 14
 +static unsigned body_every, body_once;   /* (frames between body lines, 0 off; frames to a line) */
 +static uint64_t body_frame_now;   /* (the frame body_track last ran) */
-+struct body_model { uintptr_t model, palette, inv_bind, bones, copy; unsigned count; float sum, sum_b; int cur; uint64_t changed; int16_t slot[BODY_PARTS][2]; };
++struct body_model { uintptr_t model, palette, inv_bind, bones, copy; unsigned count; float sum, sum_b; int cur; uint64_t changed; int16_t slot[BODY_PARTS][2]; int16_t leg[12]; float leg_mark[2][12]; };
 +static struct body_model body_models[2][5];   /* (you, him: own body, head, upper, lower, arm) */
 +static int body_model_get(uintptr_t model, struct body_model *m) {
 +    uintptr_t side = model ? read_ptr(model + 0x18) : 0, res = side ? read_ptr(read_ptr(side + 0x120) + 0x18) : 0;
@@ -912,6 +972,8 @@ index c05d6c3..d9e86c9 100644
 +    if (m->model != model || m->palette != palette) {   /* (a new one: its bones by name) */
 +        m->model = model; m->palette = palette; m->inv_bind = inv; m->bones = res + 0x40; m->count = counts[0]; m->sum = m->sum_b = NAN; m->cur = 0; m->changed = 0;
 +        for (int p = 0; p < BODY_PARTS; p++) { m->slot[p][0] = m->slot[p][1] = -1; }
++        for (int j = 0; j < 12; j++) m->leg[j] = -1;
++        for (int j = 0; j < 12; j++) m->leg_mark[0][j] = m->leg_mark[1][j] = NAN;
 +        int top = -1;
 +        for (unsigned b = 0; b < m->count; b++) {
 +            char text[24] = {0};
@@ -922,6 +984,7 @@ index c05d6c3..d9e86c9 100644
 +            if (idx[3] > top) top = idx[3];
 +            if (!name || !read_mem(name + 2, text, sizeof text - 1)) continue;
 +            for (int p = 0; p < BODY_PARTS; p++) if (!strcmp(text, body_parts[p])) { m->slot[p][0] = idx[2]; m->slot[p][1] = idx[3]; }
++            for (int j = 0; j < 12; j++) if (!strcmp(text, leg_bones[j])) m->leg[j] = idx[2];
 +        }
 +        m->copy = ((uintptr_t)(top + 1) * 0x30 + 0xff) & ~(uintptr_t)0xff;   /* (the second buffer: "survey peek palbuf") */
 +
@@ -953,7 +1016,10 @@ index c05d6c3..d9e86c9 100644
 +                for (unsigned b = 0; b < mk->count; b++) {
 +                    int16_t idx[4];
 +                    if (read_mem(mk->bones + (uintptr_t)b * 0x58 + 0x20, idx, sizeof idx)) { if (idx[2] > top) top = idx[2]; if (idx[3] > top) top = idx[3]; }
-+                }
+                 }
+-                survey_force((void *)actor, matrix, 0);
+-                if (!--hold_left) report(hold_tag, "move_done", frame, actor);
+-            } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
 +                float a0[12], b0[12], best = INFINITY;
 +                int best_off = -1;
 +                read_mem(mk->palette, a0, sizeof a0);
@@ -982,8 +1048,11 @@ index c05d6c3..d9e86c9 100644
 +                if (!changed && run >= 0) { if (len < (int)sizeof line - 20) len += snprintf(line + len, sizeof line - len, " %d-%d", run, b - 1); run = -1; }
 +            }
 +            fprintf(stderr, "%s\n", line);
-+        }
-+    }
+         }
+     }
+-    atomic_store_explicit(&runtime_survey_pending, request.kind || hold_left, memory_order_release);
+-    pthread_mutex_unlock(&survey_lock);
+-    in_tick = 0;
 +    uintptr_t (*get_model)(uintptr_t) = (uintptr_t (*)(uintptr_t))get_model_fn;
 +    uintptr_t who[2] = {player, 0};
 +    for (unsigned i = 0; i < stalker_count; i++) if (!strcmp(stalkers[i].name, "PouchPlayer")) who[1] = stalkers[i].actor;
@@ -1045,6 +1114,308 @@ index c05d6c3..d9e86c9 100644
 +        return 1;
 +    }
 +    return 0;
++}
++/* His foot IK. The game's own (PathFootIK in the physics controller set) needs physics PouchPlayer doesn't have: adding
++   it crashes at his spawn. But the GPU draws his skinning palette as we leave it (tested: his left leg moved 0.5 m up),
++   so each frame, per leg: the ground under the foot (a ray), the ankle moved up or down by how far that ground is from
++   the ground under him (the clips are made for flat ground), the knee bent to reach it in the leg's own plane (two
++   bones: thigh about the hip, shin about the knee), the foot turned back as it was and tilted to the ground. Each
++   change is a rotation about a joint, so it's one matrix on the left of every bone below it (no bind pose needed).
++   Done on both palette buffers of each drawn model, each from its own pose; a buffer we already did keeps our mark. */
++static int foot_ik_off;   /* "survey lonk footik on|off" */
++static float fik_drop;   /* (how far his whole body goes down on a slope, so the downhill foot reaches: the waist control Link has) */
++static float fik_dy[2], fik_n[2][3] = {{0, 1, 0}, {0, 1, 0}};   /* (each leg, smoothed: how far up the ankle goes, the ground's normal) */
++static unsigned fik_frames, fik_writes, fik_fails, fik_short;   /* (frames done, matrices written, failed, legs that couldn't reach) */
++static void rot_between(const float a[3], const float b[3], float R[9]) {   /* the rotation turning a's direction to b's */
++    float la = sqrtf(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]), lb = sqrtf(b[0] * b[0] + b[1] * b[1] + b[2] * b[2]);
++    for (int i = 0; i < 9; i++) R[i] = i % 4 == 0;
++    if (la < 1e-6f || lb < 1e-6f) return;
++    float x[3] = {(a[1] * b[2] - a[2] * b[1]) / (la * lb), (a[2] * b[0] - a[0] * b[2]) / (la * lb), (a[0] * b[1] - a[1] * b[0]) / (la * lb)};
++    float sn = sqrtf(x[0] * x[0] + x[1] * x[1] + x[2] * x[2]), cs = (a[0] * b[0] + a[1] * b[1] + a[2] * b[2]) / (la * lb);
++    if (sn < 1e-6f) return;
++    float k[3] = {x[0] / sn, x[1] / sn, x[2] / sn}, t = 1 - cs;
++    R[0] = cs + k[0] * k[0] * t;        R[1] = k[0] * k[1] * t - k[2] * sn; R[2] = k[0] * k[2] * t + k[1] * sn;
++    R[3] = k[1] * k[0] * t + k[2] * sn; R[4] = cs + k[1] * k[1] * t;        R[5] = k[1] * k[2] * t - k[0] * sn;
++    R[6] = k[2] * k[0] * t - k[1] * sn; R[7] = k[2] * k[1] * t + k[0] * sn; R[8] = cs + k[2] * k[2] * t;
++}
++static void mul33(const float A[9], const float B[9], float out[9]) {
++    float o[9];
++    for (int i = 0; i < 3; i++) for (int j = 0; j < 3; j++) o[i * 3 + j] = A[i * 3] * B[j] + A[i * 3 + 1] * B[3 + j] + A[i * 3 + 2] * B[6 + j];
++    memcpy(out, o, sizeof o);
++}
++static void about(float mm[12], const float R[9], const float c[3]) {   /* a bone's matrix turned by R about the point c */
++    float o[12];
++    for (int i = 0; i < 3; i++) {
++        for (int j = 0; j < 3; j++) o[i * 4 + j] = R[i * 3] * mm[j] + R[i * 3 + 1] * mm[4 + j] + R[i * 3 + 2] * mm[8 + j];
++        o[i * 4 + 3] = R[i * 3] * (mm[3] - c[0]) + R[i * 3 + 1] * (mm[7] - c[1]) + R[i * 3 + 2] * (mm[11] - c[2]) + c[i];
++    }
++    memcpy(mm, o, sizeof o);
++}
++static void turn(float R[9], const float v[3], float out[3]) {
++    float o[3];
++    for (int i = 0; i < 3; i++) o[i] = R[i * 3] * v[0] + R[i * 3 + 1] * v[1] + R[i * 3 + 2] * v[2];
++    memcpy(out, o, sizeof o);
++}
++static int joint_at(const struct body_model *m, const float mm[12], int slot, float out[3]) {   /* a skinned bone's joint, from its palette matrix */
++    float ib[12];
++    if (slot < 0 || !read_mem(m->inv_bind + (uintptr_t)slot * 0x30, ib, sizeof ib)) return 0;
++    float b[3];
++    for (int r = 0; r < 3; r++) b[r] = -(ib[r] * ib[3] + ib[4 + r] * ib[7] + ib[8 + r] * ib[11]);
++    for (int r = 0; r < 3; r++) out[r] = mm[r * 4] * b[0] + mm[r * 4 + 1] * b[1] + mm[r * 4 + 2] * b[2] + mm[r * 4 + 3];
++    return isfinite(out[0]) && isfinite(out[1]) && isfinite(out[2]);
++}
++static int leg_ik(struct body_model *m, uintptr_t pal, int side, float dy, const float n[3], float mats[6][12]) {   /* one leg of one buffer */
++    const int16_t *slot = m->leg + side * 6;   /* (thigh, knee helper, shin, ankle helper, ankle, toe) */
++    for (int j = 0; j < 6; j++) if (slot[j] < 0 || !read_mem(pal + (uintptr_t)slot[j] * 0x30, mats[j], sizeof mats[j])) return 0;
++    float H[3], K[3], A[3], T[3];
++    if (!joint_at(m, mats[0], slot[0], H) || !joint_at(m, mats[2], slot[2], K) || !joint_at(m, mats[4], slot[4], A) || !joint_at(m, mats[5], slot[5], T)) return 0;
++    float l1 = sqrtf((K[0] - H[0]) * (K[0] - H[0]) + (K[1] - H[1]) * (K[1] - H[1]) + (K[2] - H[2]) * (K[2] - H[2]));
++    float l2 = sqrtf((A[0] - K[0]) * (A[0] - K[0]) + (A[1] - K[1]) * (A[1] - K[1]) + (A[2] - K[2]) * (A[2] - K[2]));
++    if (l1 < 0.1f || l2 < 0.1f) return 0;
++    float goal[3] = {A[0], A[1] + dy, A[2]}, v[3] = {goal[0] - H[0], goal[1] - H[1], goal[2] - H[2]};
++    float d = sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]), lo = fabsf(l1 - l2) + 0.01f, hi = (l1 + l2) * 0.995f;
++    if (d < 1e-4f) return 0;
++    if (d > hi) fik_short++;
++    float dc = d < lo ? lo : d > hi ? hi : d, u[3] = {v[0] / d, v[1] / d, v[2] / d};
++    for (int r = 0; r < 3; r++) goal[r] = H[r] + u[r] * dc;
++    /* (the way the knee bends: the clip's own, from the hip-to-ankle line it has (from the target's line it flipped
++       sides when the target swung past the knee: his knee snapped left and right on rock), a little forward like a knee) */
++    float kh[3] = {K[0] - H[0], K[1] - H[1], K[2] - H[2]}, ah0[3] = {A[0] - H[0], A[1] - H[1], A[2] - H[2]};
++    float al = sqrtf(ah0[0] * ah0[0] + ah0[1] * ah0[1] + ah0[2] * ah0[2]);
++    if (al < 1e-4f) return 0;
++    float ua = (kh[0] * ah0[0] + kh[1] * ah0[1] + kh[2] * ah0[2]) / (al * al);
++    float p[3] = {kh[0] - ah0[0] * ua, kh[1] - ah0[1] * ua, kh[2] - ah0[2] * ua};
++    float fw[3] = {T[0] - A[0], 0, T[2] - A[2]}, fl = sqrtf(fw[0] * fw[0] + fw[2] * fw[2]);
++    if (fl > 1e-4f) { p[0] += fw[0] / fl * 0.03f; p[2] += fw[2] / fl * 0.03f; }
++    float pu = p[0] * u[0] + p[1] * u[1] + p[2] * u[2];
++    for (int r = 0; r < 3; r++) p[r] -= u[r] * pu;
++    float pl = sqrtf(p[0] * p[0] + p[1] * p[1] + p[2] * p[2]);
++    if (pl < 1e-5f) return 0;
++    for (int r = 0; r < 3; r++) p[r] /= pl;
++    float a = (l1 * l1 - l2 * l2 + dc * dc) / (2 * dc), h = sqrtf(fmaxf(0, l1 * l1 - a * a));
++    float K2[3] = {H[0] + u[0] * a + p[0] * h, H[1] + u[1] * a + p[1] * h, H[2] + u[2] * a + p[2] * h};
++    float R1[9], R2[9], R12[9], R3[9], Rt[9], back[9];
++    float k2h[3] = {K2[0] - H[0], K2[1] - H[1], K2[2] - H[2]};
++    rot_between(kh, k2h, R1);
++    float ah[3] = {A[0] - H[0], A[1] - H[1], A[2] - H[2]}, A1[3];
++    turn(R1, ah, A1);
++    for (int r = 0; r < 3; r++) A1[r] += H[r];
++    float s1[3] = {A1[0] - K2[0], A1[1] - K2[1], A1[2] - K2[2]}, s2[3] = {goal[0] - K2[0], goal[1] - K2[1], goal[2] - K2[2]};
++    rot_between(s1, s2, R2);
++    mul33(R2, R1, R12);
++    for (int i = 0; i < 3; i++) for (int j = 0; j < 3; j++) back[i * 3 + j] = R12[j * 3 + i];   /* (the foot as it was) */
++    float up[3] = {0, 1, 0}, nn[3] = {n[0], n[1], n[2]};
++    if (nn[1] < 0.866f) {   /* (tilted at most 30 degrees) */
++        float hl = sqrtf(nn[0] * nn[0] + nn[2] * nn[2]);
++        nn[0] = nn[0] / hl * 0.5f; nn[2] = nn[2] / hl * 0.5f; nn[1] = 0.866f;
++    }
++    rot_between(up, nn, Rt);
++    mul33(Rt, back, R3);
++    for (int j = 0; j < 6; j++) about(mats[j], R1, H);
++    for (int j = 2; j < 6; j++) about(mats[j], R2, K2);
++    for (int j = 4; j < 6; j++) about(mats[j], R3, goal);
++    return 1;
++}
++static char fik_trace[64]; static unsigned fik_trace_n = 60, fik_ntrace_n = 40;   /* "survey lonk footik trace": 60 frames of which buffers the game rewrote (0/1/B both/- none), lower case = ours survived */
++static void fik_trace_step(uint64_t frame) {
++    if (fik_trace_n >= 60) return;
++    for (int k = 0; k < 5; k++) {
++        struct body_model *m = &body_models[1][k];
++        if (!m->model || frame - m->changed > 6 || m->leg[0] < 0) continue;
++        int fresh[2] = {0, 0};
++        for (int b = 0; b < 2; b++) {
++            float first[12];
++            if (b && !m->copy) continue;
++            if (read_mem(m->palette + (b ? m->copy : 0) + (uintptr_t)m->leg[0] * 0x30, first, sizeof first)) fresh[b] = memcmp(first, m->leg_mark[b], sizeof first) != 0;
++        }
++        fik_trace[fik_trace_n++] = fresh[0] && fresh[1] ? 'B' : fresh[0] ? '0' : fresh[1] ? '1' : '-';
++        if (fik_trace_n == 60) fprintf(stderr, "[survey] lonk: footik trace (model %d, cur %d): %.60s\n", k, m->cur, fik_trace);
++        return;
++    }
++}
++static void foot_ik(uintptr_t him, uint64_t frame, int posing) {   /* (posing: a loop played where he stands) */
++    float pos[3];
++    if (!him || !read_mem(him + ACTOR_POS, pos, sizeof pos)) return;
++    float cell[3];
++    for (int r = 0; r < 3; r++) cell[r] = 10 * floorf(pos[r] / 10);
++    fik_trace_step(frame);
++    int on = !foot_ik_off && !lonk_climb && !lonk_swim && !lonk_air && !posing;
++    float target[2] = {0, 0}, tn[2][3] = {{0, 1, 0}, {0, 1, 0}};
++    /* (the ground as one slope through 5 rays around him, 0.35 m out: one ray right under each foot followed every
++       bump and crease of rocky ground, and his legs twitched through them (the user: only on rock, never on grass)) */
++    float g0, gx = 0, gz = 0;
++    int have = 0;
++    if (on && ray_floor(pos[0], pos[2], pos[1] + 0.8f, pos[1] - 1.0f, &g0, NULL)) {
++        static const float ox[4] = {0.35f, -0.35f, 0, 0}, oz[4] = {0, 0, 0.35f, -0.35f};
++        float h[4], sum = g0;
++        int got[4], n = 1;
++        for (int q = 0; q < 4; q++) {
++            got[q] = ray_floor(pos[0] + ox[q], pos[2] + oz[q], pos[1] + 0.8f, pos[1] - 1.0f, &h[q], NULL) && fabsf(h[q] - g0) < 0.45f;
++            if (got[q]) { sum += h[q]; n++; }
++        }
++        /* (each way's slope from the pair, or one side and the middle) */
++        gx = got[0] && got[1] ? (h[0] - h[1]) / 0.7f : got[0] ? (h[0] - g0) / 0.35f : got[1] ? (g0 - h[1]) / 0.35f : 0;
++        gz = got[2] && got[3] ? (h[2] - h[3]) / 0.7f : got[2] ? (h[2] - g0) / 0.35f : got[3] ? (g0 - h[3]) / 0.35f : 0;
++        float mx = 0, mz = 0;   /* (the plane through the mean of the points it has) */
++        for (int q = 0; q < 4; q++) if (got[q]) { mx += ox[q]; mz += oz[q]; }
++        g0 = sum / n - gx * mx / n - gz * mz / n;
++        float steep = sqrtf(gx * gx + gz * gz);
++        if (steep > 1.2f) { gx *= 1.2f / steep; gz *= 1.2f / steep; }   /* (50 degrees at most) */
++        have = 1;
++    }
++    if (have) {
++        for (int k = 0; k < 5; k++) {
++            struct body_model *m = &body_models[1][k];
++            if (!m->model || frame - m->changed > 1 || m->leg[0] < 0) continue;
++            uintptr_t pal = m->palette + (m->cur ? m->copy : 0);
++            for (int side = 0; side < 2; side++) {
++                float ma[12], mt[12], A[3], T[3];
++                if (!read_mem(pal + (uintptr_t)m->leg[side * 6 + 4] * 0x30, ma, sizeof ma) || !read_mem(pal + (uintptr_t)m->leg[side * 6 + 5] * 0x30, mt, sizeof mt) ||
++                    !joint_at(m, ma, m->leg[side * 6 + 4], A) || !joint_at(m, mt, m->leg[side * 6 + 5], T)) continue;
++                float x = (A[0] + T[0]) / 2 + cell[0] - pos[0], z = (A[2] + T[2]) / 2 + cell[2] - pos[2];
++                float dy = gx * x + gz * z;   /* (the slope's height at the foot, from the height under him) */
++                target[side] = dy < -0.35f ? -0.35f : dy > 0.35f ? 0.35f : dy;
++                float nl = sqrtf(gx * gx + 1 + gz * gz);
++                tn[side][0] = -gx / nl; tn[side][1] = 1 / nl; tn[side][2] = -gz / nl;
++                if (fik_ntrace_n < 40 && side == 0) { fik_ntrace_n++; fprintf(stderr, "[fik] f=%llu L dy %+.3f slope %+.2f %+.2f\n", (unsigned long long)frame, dy, gx, gz); }
++            }
++            break;
++        }
++    }
++    float lowest = target[0] < target[1] ? target[0] : target[1], want = on && lowest < 0 ? -lowest * 0.5f : 0;
++    fik_drop += ((want > 0.15f ? 0.15f : want) - fik_drop) * 0.1f;
++    int any = fik_drop > 0.003f;
++    for (int side = 0; side < 2; side++) {
++        fik_dy[side] += (target[side] - fik_dy[side]) * 0.35f;
++        for (int r = 0; r < 3; r++) fik_n[side][r] += (tn[side][r] - fik_n[side][r]) * 0.35f;
++        if (fabsf(fik_dy[side]) > 0.003f || fik_n[side][1] < 0.999f) any = 1;
++    }
++    if (!any) return;
++    fik_frames++;
++    for (int k = 0; k < 5; k++) {
++        struct body_model *m = &body_models[1][k];
++        if (!m->model || frame - m->changed > 6 || m->leg[0] < 0) continue;
++        for (int b = 0; b < 2; b++) {
++            if (b && !m->copy) continue;
++            uintptr_t pal = m->palette + (b ? m->copy : 0);
++            float first[12];
++            if (!read_mem(pal + (uintptr_t)m->leg[0] * 0x30, first, sizeof first) || !memcmp(first, m->leg_mark[b], sizeof first)) continue;   /* (still ours) */
++            for (int side = 0; side < 2; side++) {
++                float mats[6][12];
++                if (!leg_ik(m, pal, side, fik_dy[side] + fik_drop, fik_n[side], mats)) continue;   /* (his body went down by the drop: the feet come back up by it) */
++                for (int j = 0; j < 6; j++) {
++                    if (write_mem(pal + (uintptr_t)m->leg[side * 6 + j] * 0x30, mats[j], sizeof mats[j])) fik_writes++; else fik_fails++;
++                }
++                if (side == 0) memcpy(m->leg_mark[b], mats[0], sizeof mats[0]);
++            }
++        }
++    }
++}
++/* "survey lonk shake on|off": a flicker meter, every frame: both Links' knees, ankles and toes from their waist, how hard
++   each jerks (the change of its velocity, cm a frame per frame) and how often it turns back on itself (a flicker goes
++   back and forth), and how much the foot IK's own lift jumped. A line every 60 frames, him and you side by side. */
++static int shake_on;
++static float shake_prev[2][6][2][3];   /* (who, part, 1 and 2 frames ago) */
++static float shake_acc_prev[2][6][3];
++static int shake_have[2][6];
++static double shake_sum[2][6]; static float shake_max[2][6]; static unsigned shake_flips[2][6], shake_n[2][6], shake_frames;
++static float shake_ik_last[2]; static double shake_ik_sum; static float shake_ik_max; static uint64_t shake_last_frame;
++static unsigned lonk_stat_detour, lonk_stat_boxed;   /* (declared again below, with the steering stats) */
++static float lonk_want_off; static int lonk_want_why;   /* (his facing: how far the way he wants to face was from it, degrees; why: 0 the way he goes, 1 you, 2 your way, 3 his enemy) */
++struct jerk { float p1[3], p2[3], a1[3]; int have; double sum; float max; unsigned flips, n; };
++static const char *shake_who, *shake_part; static uint64_t shake_f; static unsigned shake_events; static float shake_slope;
++static void shake_event(float al, float pl) {   /* (one hard jerk that went back on itself: say it now, at most 6 a second) */
++    static uint64_t last_f; static unsigned in_s;
++    if (shake_f / 30 != last_f / 30) in_s = 0;
++    last_f = shake_f;
++    if (in_s++ >= 6) return;
++    shake_events++;
++    fprintf(stderr, "[shake!] f=%llu %s %s jerked %.0f then %.0f back (gait %d, slope %.0f deg, ik lift L %+.2f R %+.2f drop %.2f, climb %d air %d, detours %u boxed %u, wants to face %+.0f off (%d))\n",
++            (unsigned long long)shake_f, shake_who, shake_part, pl, al, lonk_gait, shake_slope, fik_dy[0], fik_dy[1], fik_drop, lonk_climb, lonk_air, lonk_stat_detour, lonk_stat_boxed, lonk_want_off, lonk_want_why);
++}
++static struct jerk shake_root[2][4];   /* (who: root sideways+forward, root up, facing (degrees), drawn waist in the world) */
++static void jerk_add(struct jerk *j, const float v[3], float scale) {   /* (a reset have = 0 restarts it) */
++    if (j->have >= 2) {
++        float a[3], al = 0, dot = 0, pl = 0;
++        for (int r = 0; r < 3; r++) { a[r] = v[r] - 2 * j->p1[r] + j->p2[r]; al += a[r] * a[r]; dot += a[r] * j->a1[r]; pl += j->a1[r] * j->a1[r]; }
++        al = sqrtf(al) * scale; pl = sqrtf(pl) * scale;
++        j->sum += al; j->n++;
++        if (al > j->max) j->max = al;
++        if (al > 3 && pl > 3 && dot * scale * scale < -0.5f * pl * al) { j->flips++; if (al > 20 && pl > 20) shake_event(al, pl); }
++        memcpy(j->a1, a, sizeof a);
++    }
++    memcpy(j->p2, j->p1, sizeof j->p1); memcpy(j->p1, v, sizeof j->p1);
++    if (j->have < 2) j->have++;
++}
++static void shake_step(uintptr_t player, uintptr_t him, uint64_t frame, const char *gait) {
++    static const int parts[6] = {10, 11, 8, 9, 6, 7};   /* (knee L R, ankle L R, toe L R) */
++    static const char *const names[6] = {"knee L", "knee R", "ankle L", "ankle R", "toe L", "toe R"};
++    if (frame != shake_last_frame + 1) { memset(shake_have, 0, sizeof shake_have); for (int w = 0; w < 2; w++) for (int q = 0; q < 4; q++) shake_root[w][q].have = 0; }   /* (a skipped frame: start over) */
++    shake_last_frame = frame;
++    uintptr_t who[2] = {him, player};
++    shake_f = frame; shake_slope = acosf(fminf(1, fik_n[0][1])) * 57.3f;
++    for (int w = 0; w < 2; w++) {
++        float pos[3], cell[3], waist[3];
++        int from;
++        if (!who[w] || !read_mem(who[w] + ACTOR_POS, pos, sizeof pos)) continue;
++        for (int r = 0; r < 3; r++) cell[r] = 10 * floorf(pos[r] / 10);
++        int bw = w ? 0 : 1;   /* (body_bone: 0 you, 1 him) */
++        {   /* (the root: where the game has him, his facing; then his drawn waist) */
++            float rot[9], hz[3] = {pos[0], 0, pos[2]}, vt[3] = {0, pos[1], 0}, fa[3] = {0, 0, 0};
++            if (read_mem(who[w] + ACTOR_ROT, rot, sizeof rot)) fa[0] = atan2f(rot[2], rot[8]) * 57.2958f;
++            if (shake_root[w][2].have) fa[0] = shake_root[w][2].p1[0] + remainderf(fa[0] - shake_root[w][2].p1[0], 360);   /* (no jump at +-180, however far it has wound) */
++            shake_who = w ? "you" : "him";
++            shake_part = "body sideways"; jerk_add(&shake_root[w][0], hz, 100);
++            shake_part = "body height"; jerk_add(&shake_root[w][1], vt, 100);
++            shake_part = "facing (deg)"; jerk_add(&shake_root[w][2], fa, 1);
++        }
++        if (!body_bone(bw, 12, cell, frame, waist, &from)) { memset(shake_have[w], 0, sizeof shake_have[w]); continue; }
++        shake_part = "drawn waist"; jerk_add(&shake_root[w][3], waist, 100);
++        for (int k = 0; k < 6; k++) {
++            float b[3], o[3];
++            if (!body_bone(bw, parts[k], cell, frame, b, &from)) { shake_have[w][k] = 0; continue; }
++            for (int r = 0; r < 3; r++) o[r] = b[r] - waist[r];
++            if (shake_have[w][k] >= 2) {
++                float a[3], al = 0, dot = 0, pl = 0;
++                for (int r = 0; r < 3; r++) { a[r] = o[r] - 2 * shake_prev[w][k][0][r] + shake_prev[w][k][1][r]; al += a[r] * a[r]; dot += a[r] * shake_acc_prev[w][k][r]; pl += shake_acc_prev[w][k][r] * shake_acc_prev[w][k][r]; }
++                al = sqrtf(al) * 100;
++                shake_sum[w][k] += al; shake_n[w][k]++;
++                if (al > shake_max[w][k]) shake_max[w][k] = al;
++                if (al > 3 && sqrtf(pl) * 100 > 3 && dot < -0.5f * sqrtf(pl) * al / 100) {   /* (hard, and back the other way) */
++                    shake_flips[w][k]++;
++                    if (al > 25 && sqrtf(pl) * 100 > 25) { shake_who = w ? "you" : "him"; shake_part = names[k]; shake_event(al, sqrtf(pl) * 100); }
++                }
++                memcpy(shake_acc_prev[w][k], a, sizeof a);
++            }
++            memcpy(shake_prev[w][k][1], shake_prev[w][k][0], sizeof o);
++            memcpy(shake_prev[w][k][0], o, sizeof o);
++            if (shake_have[w][k] < 2) shake_have[w][k]++;
++        }
++    }
++    for (int side = 0; side < 2; side++) {
++        float d = fabsf(fik_dy[side] + fik_drop - shake_ik_last[side]) * 100;
++        shake_ik_sum += d; if (d > shake_ik_max) shake_ik_max = d;
++        shake_ik_last[side] = fik_dy[side] + fik_drop;
++    }
++    if (++shake_frames < 60) return;
++    char line[1200];
++    int len = snprintf(line, sizeof line, "[shake] f=%llu him %s, ik lift jumps avg %.2f max %.2f cm, drop %.2f |", (unsigned long long)frame, gait,
++                       shake_ik_sum / (2 * shake_frames), shake_ik_max, fik_drop);
++    for (int w = 0; w < 2; w++) {
++        len += snprintf(line + len, sizeof line - len, " %s:", w ? "you" : "him");
++        static const char *const rn[4] = {"root", "rootup", "facing", "waist"};
++        for (int q = 0; q < 4; q++) {
++            struct jerk *j = &shake_root[w][q];
++            len += snprintf(line + len, sizeof line - len, " %s %.1f/%.0f/%u", rn[q], j->n ? j->sum / j->n : 0, j->max, j->flips);
++            j->sum = 0; j->max = 0; j->flips = 0; j->n = 0;
++        }
++        for (int k = 0; k < 6 && len < (int)sizeof line - 60; k++)
++            len += snprintf(line + len, sizeof line - len, " %s %.1f/%.0f/%u", names[k], shake_n[w][k] ? shake_sum[w][k] / shake_n[w][k] : 0, shake_max[w][k], shake_flips[w][k]);
++        len += snprintf(line + len, sizeof line - len, " |");
++    }
++    fprintf(stderr, "%s\n", line);
++    memset(shake_sum, 0, sizeof shake_sum); memset(shake_max, 0, sizeof shake_max); memset(shake_flips, 0, sizeof shake_flips); memset(shake_n, 0, sizeof shake_n);
++    shake_frames = 0; shake_ik_sum = 0; shake_ik_max = 0;
 +}
 +/* The parts of one body (bone: where each is, has: which, a bit each), as the body log writes them, onto line: each one
 +   from his feet (r right, u up, f forward, as he faces), against the wall (wall_way: into it; NULL, the way he faces),
@@ -1638,7 +2009,7 @@ index c05d6c3..d9e86c9 100644
 +        lonk_body = body; lonk_body_emote = emote_cmd;
 +    }
 +    if (!waiting) lonk_gait = gait;
-+}
+ }
 +/* Place PouchPlayer with the game's own set-transform, as the menu does: 0x2ba758(actor, &arg, 0); arg = position, row-major
 +   rotation, scale, 8 zero bytes at +0x40, flags 7 at +0x48. Facing the player, where it already stands. */
 +static void pouch_place(uintptr_t player) {
@@ -3094,10 +3465,11 @@ index c05d6c3..d9e86c9 100644
 +        static int steer = 1;
 +        static float detour[2];
 +        static unsigned detour_left;   /* a way round, kept for a third of a second so he doesn't flip between sides */
++        static unsigned blocked_run;   /* (frames in a row the straight way read blocked) */
 +        wanted = step > 0.001f;
 +        if (step > 0.001f && detour_left && isfinite(a[1]) && way_blocked(a, ux, uz) && !way_blocked(a, detour[0], detour[1])) {
 +            ux = detour[0]; uz = detour[1]; detour_left = tick_down(detour_left);
-+        } else if (step > 0.001f && isfinite(a[1]) && way_blocked(a, ux, uz)) {
++        } else if (step > 0.001f && isfinite(a[1]) && way_blocked(a, ux, uz) && ++blocked_run >= 2) {   /* (2 frames running: a one-frame "blocked" jerked him aside and back) */
 +            static const float turns[] = {0.524f, 0.785f, 1.571f, 2.094f};
 +            int found = 0;
 +            for (int side = 0; side < 2 && !found; side++, steer = -steer)
@@ -3107,7 +3479,7 @@ index c05d6c3..d9e86c9 100644
 +                }
 +            if (found) { steer = -steer; detour[0] = ux; detour[1] = uz; detour_left = 20; lonk_stat_detour++; }   /* undo the flip the loop did after the side that worked */
 +            else { step = 0; detour_left = 0; lonk_stat_boxed++; lonk_v = 0; }
-+        } else detour_left = 0;
++        } else { detour_left = 0; if (!(step > 0.001f && isfinite(a[1]) && way_blocked(a, ux, uz))) blocked_run = 0; }
 +#endif
 +        a[0] += ux * step; a[2] += uz * step;
 +    } else lonk_v = 0;
@@ -3300,7 +3672,11 @@ index c05d6c3..d9e86c9 100644
 +    static float lonk_speed;
 +    float mx = a[0] - before[0], mz = a[2] - before[1], moved = hypotf(mx, mz);
 +    lonk_speed += ((moved > 2 ? 0 : moved / lonk_dt) - lonk_speed) * ease(0.2f);
-+    if (lonk_speed > 0.8f && moved > 0.001f) { face_player = 0; dx = mx; dz = mz; }
++    /* (the way he goes, eased: a single frame's move pointed sideways or back whenever a shove out of your way or a
++       sidestep came in, and he turned 30-40 degrees toward it for a frame and back: the shake meter's facing flicks) */
++    static float mv[2];
++    if (moved < 2) { mv[0] += (mx / lonk_dt - mv[0]) * ease(0.25f); mv[1] += (mz / lonk_dt - mv[1]) * ease(0.25f); }
++    if (lonk_speed > 0.8f && moved > 0.001f && hypotf(mv[0], mv[1]) > 0.3f) { face_player = 0; dx = mv[0]; dz = mv[1]; }
 +#if defined(TOTK_GAME_V143)
 +    /* coming down: his fall (a jump past its top, or more than a fifth of a second off a ledge; a step down he just walks off) */
 +    /* the gait from the speed he means to go (lonk_v, not smoothed: that lagged 20 frames behind every stop), beside you
@@ -3342,6 +3718,7 @@ index c05d6c3..d9e86c9 100644
 +    /* turn toward that over a few frames instead of snapping; a teleport (behind) snaps */
 +    if (!(lonk_kind == LONK_BEHIND && entering)) {   /* by angle: blending the two directions got stuck on a U-turn */
 +        float now = atan2f(face[1], face[0]), want = atan2f(hz, hx), d = remainderf(want - now, 6.2832f);
++        lonk_want_off = d * 57.2958f; lonk_want_why = face_player ? 1 : buddy_face && lonk_speed < 0.8f ? 2 : lonk_sparring ? 3 : 0;
 +        float turn = d * ease(0.18f), least = 0.03f * lonk_dt * 60;
 +        if (fabsf(turn) < least) turn = fabsf(d) < least ? d : copysignf(least, d);
 +        hx = cosf(now + turn); hz = sinf(now + turn);
@@ -3804,7 +4181,7 @@ index c05d6c3..d9e86c9 100644
 +        if (lonk_climb || fabsf(climb_tilt) > 0.001f) tilt = -climb_tilt;
 +        float tc = cosf(tilt), ts = sinf(tilt);
 +        float matrix[12] = {hz,  -hx * ts, hx * tc, a[0],
-+                            0,   tc,       ts,      y,
++                            0,   tc,       ts,      y - fik_drop,   /* (lowered on slopes: foot IK) */
 +                            -hx, -hz * ts, hz * tc, a[2]};
 +        /* forceSetMatrix's flags: with 0 the game takes every frame as a teleport and resets his cloth, so his ponytail hung
 +           still (tested: "mine bounces"); with 1 it moves with him. A real jump (over a metre in a frame: popping back
@@ -4336,15 +4713,13 @@ index c05d6c3..d9e86c9 100644
 +}
 +#endif
 +#endif
- int runtime_survey_command(const char *line) {
-     if (strncmp(line, "survey ", 7)) return 0;
--    char op[16], tag[64]; float xyz[3] = {0}; unsigned hold = 0; int used = 0, kind = 0;
++int runtime_survey_command(const char *line) {
++    if (strncmp(line, "survey ", 7)) return 0;
 +    char op[16], tag[64], name[64] = {0}; float xyz[3] = {0}; unsigned hold = 0; int used = 0, kind = 0;
-     if (sscanf(line, "survey %15s %63s %n", op, tag, &used) == 2 && used && !line[used] && !strcmp(op, "pos")) kind = 1;
-     used = 0;
-     if (sscanf(line, "survey move %63s %f %f %f %u %n", tag, &xyz[0], &xyz[1], &xyz[2], &hold, &used) == 5 &&
-         used && !line[used] && valid_xyz(xyz) && hold >= 1 && hold <= 600) kind = 2;
--    if (!kind) { fprintf(stderr, "[survey] rejected: expected pos <tag> or move <tag> X Y Z <1..600 frames>\n"); return 1; }
++    if (sscanf(line, "survey %15s %63s %n", op, tag, &used) == 2 && used && !line[used] && !strcmp(op, "pos")) kind = 1;
++    used = 0;
++    if (sscanf(line, "survey move %63s %f %f %f %u %n", tag, &xyz[0], &xyz[1], &xyz[2], &hold, &used) == 5 &&
++        used && !line[used] && valid_xyz(xyz) && hold >= 1 && hold <= 600) kind = 2;
 +    used = 0;
 +    float off[3] = {2.0f, 0.0f, 1.5f};   /* optional: survey spawn <tag> <Name> [forward [sideways [up]]] metres; tag "prop" stays on its own */
 +#ifdef SURVEY_SPAWN
@@ -4505,6 +4880,14 @@ index c05d6c3..d9e86c9 100644
 +    }
 +    char onoff[8];
 +    if ((used = 0, sscanf(line, "survey lonk feetstats %n", &used)) == 0 && used && !line[used]) { fs_print(); al_details(); return 1; }
++    if ((used = 0, sscanf(line, "survey lonk footik %n", &used)) == 0 && used && !line[used]) {
++        fprintf(stderr, "[survey] lonk: footik %s, lift L %+.3f R %+.3f drop %.3f, %u frames, %u matrices written (%u failed), %u legs too short\n",
++                foot_ik_off ? "off" : "on", fik_dy[0], fik_dy[1], fik_drop, fik_frames, fik_writes, fik_fails, fik_short); return 1; }
++    if ((used = 0, sscanf(line, "survey lonk footik trace %n", &used)) == 0 && used && !line[used]) { fik_trace_n = 0; fik_ntrace_n = 0; return 1; }
++    if ((used = 0, sscanf(line, "survey lonk shake on %n", &used)) == 0 && used && !line[used]) { shake_on = 1; shake_frames = 0; fprintf(stderr, "[survey] lonk: shake on\n"); return 1; }
++    if ((used = 0, sscanf(line, "survey lonk shake off %n", &used)) == 0 && used && !line[used]) { shake_on = 0; fprintf(stderr, "[survey] lonk: shake off\n"); return 1; }
++    if ((used = 0, sscanf(line, "survey lonk footik on %n", &used)) == 0 && used && !line[used]) { foot_ik_off = 0; fprintf(stderr, "[survey] lonk: footik on\n"); return 1; }
++    if ((used = 0, sscanf(line, "survey lonk footik off %n", &used)) == 0 && used && !line[used]) { foot_ik_off = 1; fprintf(stderr, "[survey] lonk: footik off\n"); return 1; }
 +    if ((used = 0, sscanf(line, "survey lonk feetstats reset %n", &used)) == 0 && used && !line[used]) {
 +        memset(fs_hist, 0, sizeof fs_hist); memset(fs_vert_sunk, 0, sizeof fs_vert_sunk); memset(fs_in_floor, 0, sizeof fs_in_floor); memset(fs_in_other, 0, sizeof fs_in_other); memset(al_in_part, 0, sizeof al_in_part); memset(al_slide_by, 0, sizeof al_slide_by);
 +        fprintf(stderr, "[survey] lonk: feetstats reset\n"); return 1;
@@ -4676,39 +5059,40 @@ index c05d6c3..d9e86c9 100644
 +    }
 +#endif
 +    if (!kind) { fprintf(stderr, "[survey] rejected: expected pos <tag>, move <tag> X Y Z <1..600 frames> or spawn <tag> <ActorName>\n"); return 1; }
-     for (const char *p = tag; *p; ++p) if (!isalnum((unsigned char)*p) && *p != '_' && *p != '-') {
-         fprintf(stderr, "[survey] rejected: invalid tag\n"); return 1;
-     }
-     pthread_mutex_lock(&survey_lock);
-     if (!survey_enabled) report(tag, "disabled", 0, 0);
++    for (const char *p = tag; *p; ++p) if (!isalnum((unsigned char)*p) && *p != '_' && *p != '-') {
++        fprintf(stderr, "[survey] rejected: invalid tag\n"); return 1;
++    }
++    pthread_mutex_lock(&survey_lock);
++    if (!survey_enabled) report(tag, "disabled", 0, 0);
 +#ifdef SURVEY_SPAWN
 +    else if (request.kind || hold_left || spawn_left) report(tag, "busy", 0, 0);
 +#else
-     else if (request.kind || hold_left) report(tag, "busy", 0, 0);
++    else if (request.kind || hold_left) report(tag, "busy", 0, 0);
 +#endif
-     else {
--        request.kind = kind; strcpy(request.tag, tag); memcpy(request.xyz, xyz, sizeof xyz); request.hold = hold;
++    else {
 +        request.kind = kind; strcpy(request.tag, tag); memcpy(request.xyz, xyz, sizeof xyz); memcpy(request.off, off, sizeof off); request.hold = hold; strcpy(request.name, name);
-         atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
-     }
-     pthread_mutex_unlock(&survey_lock);
-@@ -307,15 +4885,91 @@ void runtime_survey_cancel_user(void) {
-     if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
-     pthread_mutex_lock(&survey_lock);
-     request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
++        atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
++    }
++    pthread_mutex_unlock(&survey_lock);
++    return 1;
++}
++void runtime_survey_cancel_user(void) {
++    if (!atomic_load_explicit(&runtime_survey_pending, memory_order_relaxed)) return;
++    pthread_mutex_lock(&survey_lock);
++    request.kind = 0; hold_left = 0; atomic_store(&runtime_survey_pending, 0);
 +#ifdef SURVEY_SPAWN
 +    /* a spawn in flight keeps being watched (gifts, body pieces): you're playing, not cancelling it */
 +    if (stalk_left || spawn_left || pouch_idle_left || drop_request[0] || dress_left || dress_watch || lonk_respawn_left || stalker_count) atomic_store(&runtime_survey_pending, 1);
 +#endif
-     fprintf(stderr, "[survey] cancelled: user input\n");
-     pthread_mutex_unlock(&survey_lock);
- }
- void runtime_survey_tick(uint64_t frame) {
-     if (in_tick || !atomic_load_explicit(&runtime_survey_pending, memory_order_acquire)) return;
-     in_tick = 1;
++    fprintf(stderr, "[survey] cancelled: user input\n");
++    pthread_mutex_unlock(&survey_lock);
++}
++void runtime_survey_tick(uint64_t frame) {
++    if (in_tick || !atomic_load_explicit(&runtime_survey_pending, memory_order_acquire)) return;
++    in_tick = 1;
 +    uint64_t t0 = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
-     pthread_mutex_lock(&survey_lock);
-     uintptr_t actor = player_actor();
++    pthread_mutex_lock(&survey_lock);
++    uintptr_t actor = player_actor();
 +#ifdef SURVEY_SPAWN
 +    if (spawn_left) spawn_watch(frame);
 +    if (request.kind == 3 && actor) {   /* tag "prop": a thing on its own, not a piece of him */
@@ -4748,6 +5132,7 @@ index c05d6c3..d9e86c9 100644
 +        static const uint32_t w_model[] = {0xf9411408, 0xb4000168, 0xf9400500, 0xb4000100, 0xf9400008};
 +        uintptr_t gm = (uintptr_t)game_fn(0xba8854, w_model, 5);
 +        if (gm) body_track(actor, gm, frame);
++        if (gm && stalker_count) { uintptr_t him_ = 0; for (unsigned i = 0; i < stalker_count; i++) if (!strcmp(stalkers[i].name, "PouchPlayer")) him_ = stalkers[i].actor; foot_ik(him_, frame, lonk_pose >= 0); if (shake_on) shake_step(actor, him_, frame, gait_names[lonk_gait < 0 ? 0 : lonk_gait]); }
 +        if (gm && (body_once ? !--body_once : body_every && frame % body_every == 0)) body_report(actor, frame);
 +        if (gm && recording) rec_take(actor, frame);
 +    }
@@ -4777,17 +5162,34 @@ index c05d6c3..d9e86c9 100644
 +    }
 +#endif
 +#endif
-     if (!actor) {
++    if (!actor) {
 +#ifdef SURVEY_SPAWN
 +        if (!request.kind && !hold_left) goto done;   /* stalking or watching a spawn: wait for the player to come back */
 +#endif
-         report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
-         request.kind = 0; hold_left = 0;
-     } else if (request.kind == 1) {
-@@ -340,8 +4994,152 @@ void runtime_survey_tick(uint64_t frame) {
-             } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
-         }
-     }
++        report(request.kind ? request.tag : hold_tag, "no_player", frame, 0);
++        request.kind = 0; hold_left = 0;
++    } else if (request.kind == 1) {
++        report(request.tag, "position", frame, actor); request.kind = 0;
++    } else {
++        if (request.kind == 2) {
++            memcpy(hold_xyz, request.xyz, sizeof hold_xyz); strcpy(hold_tag, request.tag);
++            hold_left = request.hold; request.kind = 0;
++            report(hold_tag, "move_begin", frame, actor);
++        }
++        if (hold_left) {
++            float rot[9] = {0}, matrix[12];
++            int ok = read_mem(actor + ACTOR_ROT, rot, sizeof rot);
++            for (unsigned i = 0; i < 9; i++) if (!isfinite(rot[i]) || fabsf(rot[i]) > 2) ok = 0;
++            if (ok) {
++                for (unsigned row = 0; row < 3; row++) {
++                    for (unsigned col = 0; col < 3; col++) matrix[row * 4 + col] = rot[row * 3 + col];
++                    matrix[row * 4 + 3] = hold_xyz[row];
++                }
++                survey_force((void *)actor, matrix, 0);
++                if (!--hold_left) report(hold_tag, "move_done", frame, actor);
++            } else { report(hold_tag, "invalid_rotation", frame, actor); hold_left = 0; }
++        }
++    }
 +#ifdef SURVEY_SPAWN
 +done:
 +    atomic_store_explicit(&runtime_survey_pending, request.kind || hold_left || spawn_left || stalk_left || pouch_request || height_request || peek_request[0] ||
@@ -4795,14 +5197,14 @@ index c05d6c3..d9e86c9 100644
 +                          dress_left || dress_watch || lonk_respawn_left || stalker_count,
 +                          memory_order_release);
 +#else
-     atomic_store_explicit(&runtime_survey_pending, request.kind || hold_left, memory_order_release);
++    atomic_store_explicit(&runtime_survey_pending, request.kind || hold_left, memory_order_release);
 +#endif
-     pthread_mutex_unlock(&survey_lock);
++    pthread_mutex_unlock(&survey_lock);
 +    uint64_t took = clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - t0;   /* his cost per frame, for the stats line */
 +    tick_ns_sum += took; tick_n++;
 +    if (took > tick_ns_max) tick_ns_max = took;
-     in_tick = 0;
- }
++    in_tick = 0;
++}
 +#ifndef LONK_PLUGIN
 +/* Hot reload: TOTK_LONK_PLUGIN names a dylib built from this file with -DLONK_PLUGIN (lonk's tools/plugin.sh). It's loaded
 +   at start, and again when the file changes (checked every 30 game frames while the survey runs, and before each command)
