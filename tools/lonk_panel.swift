@@ -83,48 +83,59 @@ final class Panel: NSObject, NSApplicationDelegate {
         return stack
     }
 
-    func applicationDidFinishLaunching(_ note: Notification) {
-        let outfit = NSPopUpButton(frame: .zero, pullsDown: false)
-        outfit.controlSize = .small
-        outfit.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        outfit.addItems(withTitles: ["outfit…", "random"] + outfits)
-        outfit.target = self
-        outfit.action = #selector(pickOutfit(_:))
+    // a dropdown: its first item is its name; picking another sends that item's lines, then it shows its name again
+    var menus: [ObjectIdentifier: [[String]]] = [:]
+    func menu(_ name: String, _ items: [(String, [String])]) -> NSPopUpButton {
+        let m = NSPopUpButton(frame: .zero, pullsDown: false)
+        m.controlSize = .small
+        m.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        m.addItems(withTitles: [name] + items.map { $0.0 })
+        m.target = self
+        m.action = #selector(picked(_:))
+        menus[ObjectIdentifier(m)] = [[]] + items.map { $0.1 }
+        return m
+    }
+    @objc func picked(_ sender: NSPopUpButton) {
+        let i = sender.indexOfSelectedItem
+        if i > 0, let lines = menus[ObjectIdentifier(sender)]?[i] { send(lines) }
+        sender.selectItem(at: 0)
+    }
+    func line(_ views: [NSView]) -> NSView {
+        let s = NSStackView(views: views)
+        s.orientation = .horizontal
+        s.spacing = 4
+        return s
+    }
 
-        let spawn = row("Lonk", [
-            button("Spawn (brain)") { send(["survey lonk twin", "survey lonk start"]) },
-            button("Brain on") { send(["survey lonk brain \(forever)"]) },
+    func applicationDidFinishLaunching(_ note: Notification) {
+        // the flight recorder keeps the last 15 s of both Links; this writes them out for Claude to read (lonk_mark_*.txt)
+        let weird = button("that was weird") { send(["survey lonk mark (the panel's button)"]) }
+        weird.controlSize = .regular
+        weird.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
+        let top = line([
+            weird,
+            button("Spawn") { send(["survey lonk twin", "survey lonk start"]) },
             button("Stop") { send(["survey lonk stop"]) },
         ])
-        let mood = rows("Mood (brain off, he stays in it)", moods.map { m in button(m) { send(["survey lonk \(m) \(forever)"]) } }, per: 6)
-        let emote = rows("Emote", emotes.map { e in button(e) { send(["survey lonk emote \(e)"]) } } +
-                         [button("hit him") { send(["survey lonk hit"]) }], per: 4)
-        let pose = rows("Loops (to look at them)", poses.map { p in button(p) { send(["survey lonk pose \(p)"]) } }, per: 8)
-        let look = row("Looks", [
-            button("twin") { send(["survey lonk twin"]) },
-            button("naked") { send(["survey lonk naked"]) },
-            outfit,
-        ])
-        let dice = row("His dice", [
-            button("no buddy") { send(["survey lonk nobuddy"]) },
-            button("buddy ok") { send(["survey lonk buddyok"]) },
-            button("no stalk") { send(["survey lonk nostalk"]) },
-            button("stalk ok") { send(["survey lonk stalkok"]) },
-        ])
-        // the flight recorder keeps the last 15 s of both Links; this writes them out for Claude to read (lonk_mark_*.txt)
-        let weird = row("Something looked off?", [
-            button("that was weird") { send(["survey lonk mark (the panel's button)"]) },
+        let picks = line([
+            menu("Mood", [("brain (he picks)", ["survey lonk brain \(forever)"])] + moods.map { m in (m, ["survey lonk \(m) \(forever)"]) }),
+            menu("Emote", emotes.map { e in (e, ["survey lonk emote \(e)"]) } + [("hit him", ["survey lonk hit"])]),
+            menu("Looks", [("twin", ["survey lonk twin"]), ("naked", ["survey lonk naked"]), ("random outfit", ["survey lonk outfit random"])] +
+                          outfits.map { o in (o, ["survey lonk outfit \(o)"]) }),
+            menu("More", poses.map { p in ("loop: \(p)", ["survey lonk pose \(p)"]) } +
+                         [("no buddy", ["survey lonk nobuddy"]), ("buddy ok", ["survey lonk buddyok"]),
+                          ("no stalk", ["survey lonk nostalk"]), ("stalk ok", ["survey lonk stalkok"])]),
         ])
         status.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
         status.textColor = .secondaryLabelColor
-        status.preferredMaxLayoutWidth = 300
+        status.preferredMaxLayoutWidth = 280
         status.stringValue = "watching \(logPath)"
 
-        let stack = NSStackView(views: [spawn, weird, mood, emote, pose, look, dice, status])
+        let stack = NSStackView(views: [top, picks, status])
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 10
-        stack.edgeInsets = NSEdgeInsets(top: 10, left: 12, bottom: 12, right: 12)
+        stack.spacing = 6
+        stack.edgeInsets = NSEdgeInsets(top: 8, left: 10, bottom: 8, right: 10)
 
         panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 320, height: 300),
                         styleMask: [.titled, .closable, .utilityWindow, .nonactivatingPanel], backing: .buffered, defer: false)
@@ -145,12 +156,6 @@ final class Panel: NSObject, NSApplicationDelegate {
         Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in self?.readLog() }
     }
 
-    @objc func pickOutfit(_ sender: NSPopUpButton) {
-        guard sender.indexOfSelectedItem > 0, let name = sender.titleOfSelectedItem else { return }
-        send(["survey lonk outfit \(name)"])
-        sender.selectItem(at: 0)
-    }
-
     func readLog() {
         guard let file = FileHandle(forReadingAtPath: logPath) else { return }
         defer { try? file.close() }
@@ -161,14 +166,14 @@ final class Panel: NSObject, NSApplicationDelegate {
         logOffset = end
         guard let text = String(data: data, encoding: .utf8) else { return }
         for line in text.split(separator: "\n") where line.hasPrefix("[survey] lonk: ") || line.hasPrefix("[survey] twins: ") ||
-                                                       line.hasPrefix("[mark] ") || line.hasPrefix("[alarm] f=") {
+                                                       line.hasPrefix("[mark] ") {
             var s = line.replacingOccurrences(of: "[survey] ", with: "")
             if s.hasPrefix("[mark] wrote ") { s = "saved: the last 15 s (" + (s.split(separator: "/").last.map(String.init) ?? "") + ")" }
             else if s.hasPrefix("[mark] ") { continue }
             if s.hasPrefix("lonk: frame=") { continue }
             recent.append(s)
         }
-        if recent.count > 4 { recent.removeFirst(recent.count - 4) }
+        if recent.count > 2 { recent.removeFirst(recent.count - 2) }
         if !recent.isEmpty { status.stringValue = recent.joined(separator: "\n") }
     }
 }

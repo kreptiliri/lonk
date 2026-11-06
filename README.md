@@ -58,6 +58,8 @@ And whatever the mood, he watches you:
 - you take out your camera: he photobombs it (runs into the shot and dances; in a selfie, he's behind your shoulder)
 - you open a chest or cook something great: he celebrates; you cook something bad: he's grossed out
 - you climb: he climbs the wall after you; you glide: he glides down after you
+- you're up on something he can't walk to: a ledge up to about 1.2 m he hops, anything higher he climbs (and pulls
+  himself over the top to you)
 - shove him enough and he sulks
 
 ## Where he's going
@@ -131,9 +133,9 @@ from his first frame.
 
 ### A control panel instead of the commands file
 
-`tools/lonk_panel.swift` is a small floating panel with buttons for all of that: spawn, brain on, stop, every mood, the new loops,
-the emotes, "hit him", twin / naked / an outfit, and his dice (no buddy, no stalk). It writes the same lines to the
-commands file and shows his newest log lines. It stays on top of the game, even in full screen, and doesn't take the
+`tools/lonk_panel.swift` is a small floating panel: "that was weird", spawn and stop as buttons, and four dropdowns for
+the rest (Mood: the brain or one mood; Emote: the emotes and "hit him"; Looks: twin / naked / an outfit; More: the new
+loops and his dice). It writes the same lines to the commands file and shows his two newest log lines. It stays on top of the game, even in full screen, and doesn't take the
 keyboard: release the mouse from the camera (the `` ` `` key), click, and play on.
 
 ```
