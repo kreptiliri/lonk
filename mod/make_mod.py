@@ -77,7 +77,24 @@ EQUIP_CLIPS = [(21, 321, 'Equip_Sword_On_Natural'), (22, 322, 'Equip_Lsword_On_N
 # didn't follow), so his tree had a loop in it, and the clips it took were his face's blinks.
 LOOP_BOOLS = ('WeaponGuardEnhance', 'ShieldEquip', 'WeaponFire')
 # fire alone: swim; fire and guard: glide (those two lie flat: they skip the bone blender, below); guard alone: tread
-# water; shield alone: climb; guard and shield: a sword swing, fighting beside you (cling: the climb held still)
+# water; shield alone: climb; guard and shield: a sword swing, fighting beside you; all three: climbing right.
+# Climbing goes on to a float selector on Temperature (a free one: the menu's weapon poses had it), which the patch
+# writes while he climbs: 1001 up, 1002 down, 1003 left, anything else hanging still (the game writes the real
+# temperature every frame, before the patch: off the wall it's back by itself). One climb clip, frozen to wait and
+# played forwards going down, hung him with a foot in the air and climbed him up while he went down (seen)
+CLIMB_PICK, CLIMB_TEMPS = 335, (1001.0, 1002.0, 1003.0)
+# (and 1004: over the top, Link's own pull-up onto the ledge, a fifth case added to the selector; he snapped from his
+# climb up straight to standing, measured)
+CLIMB_EDGE = 1004.0
+# (climbing right, with all three bools, skips the root's bone blender like swimming: a free blender of the menu's arm
+# poses, set up as that one, holds it in place too; without, he snapped each time it came on or off, seen)
+RIGHT_STILL = 221
+# And climbing holds only his Root bone in place, not his hips: the root's blender (Root and Skl_Root from the standing
+# clip) kept the standing hips, and his hands went into the wall and his feet hung off it (measured: hands 7 cm in, a
+# toe 57 cm off); with nothing held, the climb's own Root carried him 0.6 m up each loop and snapped back (measured).
+# The patch climbs on the root's way round its blender (WeaponFire on), through a free blender of the menu's, with the
+# ArmR bone group turned into Root alone (its one other user, the right arm of the menu's hot and cold idle, loses it)
+CLIMB_STILL, CLIMB_GROUP = 225, 'ArmR'
 
 
 def reached(doc):
@@ -224,12 +241,14 @@ def main():
     def plain_loop(leaf):   # no frame controls, or only a frame controller that loops the whole clip at rate 1
         return all(nodes[c]['Node Type'] == 'FrameController' and nodes[c]['Body'].get('Loop Num') == -1 and
                    nodes[c]['Body'].get('Animation Rate') == 1.0 for c in leaf['Body'].get('Frame Controls') or [])
-    free = [n for n in doc['Nodes'] if n['Node Type'] == 'SkeletalAnimation' and n['Node Index'] not in taken and
-            not n['Body'].get('Events') and plain_loop(n)]
+    unused = [n for n in doc['Nodes'] if n['Node Type'] == 'SkeletalAnimation' and n['Node Index'] not in taken]
+    # (the plain loops without events first, as before; then the others: clip() takes their frame controls and events off)
+    first = [n for n in unused if plain_loop(n) and not n['Body'].get('Events')]
+    free = first + [n for n in unused if not plain_loop(n) and not n['Body'].get('Events')] + [n for n in unused if n['Body'].get('Events')]
     pickers = [n for n in doc['Nodes'] if n['Node Type'] == 'BoolSelector' and n['Node Index'] not in taken]
     fall = entries[5]   # (keyed by the original cases: 5 is his fall, at 15 now)
-    if len(free) < 6 or len(pickers) < 7 or nodes[fall['Node Index']]['Node Type'] != 'SkeletalAnimation':
-        sys.exit('no free bool selectors and clips for swimming and climbing: not the 1.4.3 ASB?')
+    if len(free) < 10 or len(pickers) < 7 or nodes[fall['Node Index']]['Node Type'] != 'SkeletalAnimation':
+        sys.exit(f'no free bool selectors and clips for swimming and climbing ({len(free)} clips, {len(pickers)} selectors): not the 1.4.3 ASB?')
     guard, shield, shield2, fire, fire2, fire3 = pickers[:6]
     clips = iter(free)
 
@@ -243,13 +262,37 @@ def main():
         # (a menu pose's frame controller plays it once and holds it: his swim froze, its clock at 1.0, seen, also with the
         # end moved to the clip's end. None, as his walk has: then it loops)
         leaf['Body'].pop('Frame Controls', None)
+        leaf['Body'].pop('Events', None)   # (a reused clip's own sounds and effects: not his)
         print(f'{name}: node {leaf["Node Index"]}')
         return leaf['Node Index']
     G, S, F = LOOP_BOOLS
     pick(fire, F, clip('Float_Glide_N'), clip('Swim_Wait'))
-    pick(shield, S, clip('Sword_Attack_S1'), fire['Node Index'])
+    group = next((g for g in doc['Bone Groups'] if g['Name'] == CLIMB_GROUP), None)
+    holds = [nodes.get(RIGHT_STILL, {}), nodes.get(CLIMB_STILL, {})]
+    if group is None or not any(b['Name'] == 'Root' for b in group['Bones']) or any(h.get('Node Type') != 'BoneBlender' for h in holds) or {RIGHT_STILL, CLIMB_STILL} & taken:
+        sys.exit('no free bone blenders and group for climbing: not the 1.4.3 ASB?')
+    group['Unknown'] = 0
+    for bone in group['Bones']:
+        bone['Unknown'] = 1.0 if bone['Name'] == 'Root' else 0.0
+    for hold in holds:
+        for key in ('Unknown 1', 'Blend Rate', 'Unknown 3', 'Unknown 4'):
+            hold['Body'][key] = still['Body'][key]
+        hold['Body']['Bone Group Name'] = CLIMB_GROUP
+    holds[0]['Body']['Child Nodes'] = [standing['Node Index'], clip('Climb_Wall_Move_R')]
+    pick(fire2, F, RIGHT_STILL, clip('Sword_Attack_S1'))
+    pick(shield, S, fire2['Node Index'], fire['Node Index'])
     pick(fire3, F, clip('Swim_Move_Slow_F'), fall['Node Index'])
-    pick(shield2, S, clip('Climb_Wall_Move_U'), fire3['Node Index'])
+    climb = nodes.get(CLIMB_PICK, {})
+    if (climb.get('Node Type') != 'FloatSelector' or CLIMB_PICK in taken or len(climb['Body'].get('Child Nodes', [])) != 4 or
+            'Default' not in climb['Body']['Child Nodes'][3] or doc['Blackboard']['float'][0]['Name'] != 'Temperature'):
+        sys.exit('no free float selector for climbing: not the 1.4.3 ASB?')
+    climb['Body']['Parameter'] = {'Blackboard Index': 0, 'Type': 'float', 'Select Flag': 'SelectOnUpdate'}
+    for entry, temp, name in zip(climb['Body']['Child Nodes'], CLIMB_TEMPS, ('Climb_Wall_Move_U', 'Climb_Wall_Move_D', 'Climb_Wall_Move_L')):
+        entry.update({'Condition Min': temp - 0.5, 'Condition Max': temp + 0.5, 'Node Index': clip(name)})
+    climb['Body']['Child Nodes'][3]['Node Index'] = clip('Climb_Wall_Move_N_FootL')
+    climb['Body']['Child Nodes'].insert(3, {'Condition Min': CLIMB_EDGE - 0.5, 'Condition Max': CLIMB_EDGE + 0.5, 'Node Index': clip('Climb_Wall_Ed_Edge_L')})
+    holds[1]['Body']['Child Nodes'] = [standing['Node Index'], CLIMB_PICK]
+    pick(shield2, S, CLIMB_STILL, fire3['Node Index'])
     pick(guard, G, shield['Node Index'], shield2['Node Index'])
     fall['Node Index'] = guard['Node Index']
     # Swimming and gliding (WeaponFire) his whole tree plays without the bone blender over it: the blender's standing root
@@ -258,7 +301,7 @@ def main():
     water = pickers[6]
     pick(water, F, ROOT, STILL)
     next(c for c in doc['Commands'] if c['Name'] == 'PauseMenuWait')['Node Index'] = water['Node Index']
-    if (taken & {n['Node Index'] for n in (guard, shield, shield2, fire, fire3, water)}) or ROOT in reached({'Nodes': doc['Nodes'], 'Commands': [{'Node Index': guard['Node Index']}]}):
+    if (taken & {n['Node Index'] for n in (guard, shield, shield2, fire, fire2, fire3, water)} | ({CLIMB_PICK, RIGHT_STILL, CLIMB_STILL} & taken)) or ROOT in reached({'Nodes': doc['Nodes'], 'Commands': [{'Node Index': guard['Node Index']}]}):
         sys.exit('the loops would loop back into his tree')
     AsbFile.from_dict(doc).to_binary(str(work) + '/')
     edited = (work / 'PouchPlayer.root.asb').read_bytes()

@@ -111,12 +111,16 @@ final class Panel: NSObject, NSApplicationDelegate {
             button("no stalk") { send(["survey lonk nostalk"]) },
             button("stalk ok") { send(["survey lonk stalkok"]) },
         ])
+        // the flight recorder keeps the last 15 s of both Links; this writes them out for Claude to read (lonk_mark_*.txt)
+        let weird = row("Something looked off?", [
+            button("that was weird") { send(["survey lonk mark (the panel's button)"]) },
+        ])
         status.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
         status.textColor = .secondaryLabelColor
         status.preferredMaxLayoutWidth = 300
         status.stringValue = "watching \(logPath)"
 
-        let stack = NSStackView(views: [spawn, mood, emote, pose, look, dice, status])
+        let stack = NSStackView(views: [spawn, weird, mood, emote, pose, look, dice, status])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 10
@@ -156,8 +160,11 @@ final class Panel: NSObject, NSApplicationDelegate {
         let data = file.readDataToEndOfFile()
         logOffset = end
         guard let text = String(data: data, encoding: .utf8) else { return }
-        for line in text.split(separator: "\n") where line.hasPrefix("[survey] lonk: ") || line.hasPrefix("[survey] twins: ") {
-            let s = line.replacingOccurrences(of: "[survey] ", with: "")
+        for line in text.split(separator: "\n") where line.hasPrefix("[survey] lonk: ") || line.hasPrefix("[survey] twins: ") ||
+                                                       line.hasPrefix("[mark] ") || line.hasPrefix("[alarm] f=") {
+            var s = line.replacingOccurrences(of: "[survey] ", with: "")
+            if s.hasPrefix("[mark] wrote ") { s = "saved: the last 15 s (" + (s.split(separator: "/").last.map(String.init) ?? "") + ")" }
+            else if s.hasPrefix("[mark] ") { continue }
             if s.hasPrefix("lonk: frame=") { continue }
             recent.append(s)
         }
