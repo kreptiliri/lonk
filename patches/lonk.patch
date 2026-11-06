@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..b469040 100644
+index c05d6c3..6275b0e 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -40,15 +40,17 @@ index c05d6c3..b469040 100644
  #include <limits.h>
  #include <mach/mach.h>
  #include "mach_vm_compat.h"
-@@ -13,6 +16,7 @@
+@@ -13,7 +16,9 @@
  #include <stdio.h>
  #include <stdlib.h>
  #include <string.h>
 +#include <time.h>
  #include <unistd.h>
++#include <stdarg.h>
  
  #ifdef GAME_BOTW
-@@ -181,24 +185,189 @@ void runtime_survey_init(Module *m) {
+ /* Breath of the Wild 1.6.0: no frame-end hook (the survey sync object is never found, see runtime_survey_sync), so
+@@ -181,24 +186,203 @@ void runtime_survey_init(Module *m) {
  int runtime_survey_command(const char *line) { (void)line; return 0; }
  #endif
  #else
@@ -240,10 +242,24 @@ index c05d6c3..b469040 100644
 +static unsigned tick_n;
 +static uint64_t part_ns[4];   /* of it: his step, stalkers check, twin_draw, dress_keep */
 +#define PART(i, x) do { uint64_t t_ = clock_gettime_nsec_np(CLOCK_UPTIME_RAW); x; part_ns[i] += clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - t_; } while (0)
++
++/* his decisions ("[survey] lonk: ..." lines): printed, and kept for the flight recorder's next frame, so a mark shows
++   what he decided on the frame he decided it (they were only in the game log, with no frame to line them up by) */
++static char lonk_said[200];
++static void lonk_say(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
++static void lonk_say(const char *fmt, ...) {
++    char buf[400];
++    va_list ap;
++    va_start(ap, fmt); vsnprintf(buf, sizeof buf, fmt, ap); va_end(ap);
++    fputs(buf, stderr);
++    const char *t = strncmp(buf, "[survey] lonk: ", 15) ? buf : buf + 15;
++    size_t n = strlen(lonk_said), m = strcspn(t, "\n");
++    if (n + 3 + m < sizeof lonk_said) { if (n) { memcpy(lonk_said + n, " ; ", 3); n += 3; } memcpy(lonk_said + n, t, m); lonk_said[n + m] = 0; }
++}
  
  static int read_mem(uintptr_t address, void *out, size_t size) {
      if (!address || address > UINTPTR_MAX - size) return 0;
-@@ -254,6 +423,45 @@ static uintptr_t player_actor(void) {
+@@ -254,6 +438,45 @@ static uintptr_t player_actor(void) {
      }
      return 0;
  }
@@ -289,7 +305,7 @@ index c05d6c3..b469040 100644
  void runtime_survey_init(Module *m) {
      const char *enabled = getenv("TOTK_SURVEY");
      if (!enabled || strcmp(enabled, "1")) return;
-@@ -272,6 +480,21 @@ void runtime_survey_init(Module *m) {
+@@ -272,6 +495,21 @@ void runtime_survey_init(Module *m) {
          runtime_fail("survey requires verified game-version forceSetMatrix entry");
      survey_main = (uintptr_t)m->base;
      survey_force = (void (*)(void *, const float *, uint32_t))(m->base + FORCE_MATRIX);
@@ -311,7 +327,7 @@ index c05d6c3..b469040 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,66 +505,4998 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,66 +520,5073 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -394,7 +410,7 @@ index c05d6c3..b469040 100644
 +static float frand(float lo, float hi) { return lo + (hi - lo) * (float)arc4random_uniform(1u << 24) / (float)(1u << 24); }
 +static void lonk_enter(int kind, unsigned frames) {
 +    lonk_kind = kind; lonk_entered = 0; lonk_gifted = 0; lonk_phase_left = frames; lonk_emoted = 0;
-+    fprintf(stderr, "[survey] lonk: -> %s (%u frames)\n", lonk_names[kind], frames);
++    lonk_say("[survey] lonk: -> %s (%u frames)\n", lonk_names[kind], frames);
 +}
 +/* The dice: mostly stalking, sometimes in the way, a gift, a wander or right behind you. */
 +static KEEP int lonk_no_buddy, lonk_no_stalk;
@@ -1048,8 +1064,11 @@ index c05d6c3..b469040 100644
 +                if (!changed && run >= 0) { if (len < (int)sizeof line - 20) len += snprintf(line + len, sizeof line - len, " %d-%d", run, b - 1); run = -1; }
 +            }
 +            fprintf(stderr, "%s\n", line);
-+        }
-+    }
+         }
+     }
+-    atomic_store_explicit(&runtime_survey_pending, request.kind || hold_left, memory_order_release);
+-    pthread_mutex_unlock(&survey_lock);
+-    in_tick = 0;
 +    uintptr_t (*get_model)(uintptr_t) = (uintptr_t (*)(uintptr_t))get_model_fn;
 +    uintptr_t who[2] = {player, 0};
 +    for (unsigned i = 0; i < stalker_count; i++) if (!strcmp(stalkers[i].name, "PouchPlayer")) who[1] = stalkers[i].actor;
@@ -1227,7 +1246,7 @@ index c05d6c3..b469040 100644
 +            if (read_mem(m->palette + (b ? m->copy : 0) + (uintptr_t)m->leg[0] * 0x30, first, sizeof first)) fresh[b] = memcmp(first, m->leg_mark[b], sizeof first) != 0;
 +        }
 +        fik_trace[fik_trace_n++] = fresh[0] && fresh[1] ? 'B' : fresh[0] ? '0' : fresh[1] ? '1' : '-';
-+        if (fik_trace_n == 60) fprintf(stderr, "[survey] lonk: footik trace (model %d, cur %d): %.60s\n", k, m->cur, fik_trace);
++        if (fik_trace_n == 60) lonk_say("[survey] lonk: footik trace (model %d, cur %d): %.60s\n", k, m->cur, fik_trace);
 +        return;
 +    }
 +}
@@ -1996,7 +2015,7 @@ index c05d6c3..b469040 100644
 +                float before = -1;
 +                read_mem(body + 0x1e0, &before, 4);
 +                int u = anim_command(actor, "UseItem", body_slot), w = anim_command(actor, "PauseMenuWait", body_slot);
-+                if (u <= 0 || w <= 0) fprintf(stderr, "[survey] lonk: his clip didn't start over (it was at %.2f; %d %d)\n", before, u, w);
++                if (u <= 0 || w <= 0) lonk_say("[survey] lonk: his clip didn't start over (it was at %.2f; %d %d)\n", before, u, w);
 +            }
 +            was_fresh = fresh_clip;
 +        }
@@ -2117,7 +2136,7 @@ index c05d6c3..b469040 100644
 +    }
 +    if (!dropped) fprintf(stderr, "[survey] drop: nothing named %s*\n", drop_request);
 +    if (!stalker_count) lonk_anchored = 0;
-+}
+ }
 +/* Dressing PouchPlayer the way the pause menu's OneShotChangeEquipmentForPouch does: eu = 0xcbffa0(actor) (its EquipmentUser,
 +   [[actor+0x228]+0x230]), then equip 0x1b6cd78(eu, slot, &name, dye -1, 0, 0) per slot. An empty name dresses like the player
 +   (or hair + default clothes when the player wears none). The real Player gets its Zonai arm the same way: slot 19 (Extra),
@@ -2148,12 +2167,9 @@ index c05d6c3..b469040 100644
 +            uintptr_t (*get_model)(uintptr_t) = (uintptr_t (*)(uintptr_t))game_fn(0xba8854, w_model, 5);
 +            uintptr_t world_model = get_model ? get_model(player) : 0;
 +            dress_show(eu, world_model ? read_ptr(world_model + 0x60) : 0, false);
-         }
-     }
--    atomic_store_explicit(&runtime_survey_pending, request.kind || hold_left, memory_order_release);
--    pthread_mutex_unlock(&survey_lock);
--    in_tick = 0;
- }
++        }
++    }
++}
 +/* Every frame once he's dressed: the game keeps putting his pieces back in the menu's scene (that's the flashing, then no legs), so they
 +   go back to the world scene each frame. Logs how often that was needed every 10 s. */
 +static unsigned fuse_show(uintptr_t eu, uintptr_t world, bool quiet);
@@ -2710,6 +2726,7 @@ index c05d6c3..b469040 100644
 +/* in the air (my rule): he keeps the way and speed he took off with and forgets about you till he lands (lonk_air, above) */
 +static KEEP unsigned lonk_falling;   /* frames he's been coming down (a jump past its top, or off a ledge) */
 +static char lonk_src_now[12];   /* (where his floor came from, this frame: for the recorder) */
++static unsigned lonk_buried;   /* (the last frame's buried count, of 6: see rec_take) */
 +static unsigned lonk_parts_inside;   /* (his body parts inside something on the last frame the alarms checked: see "inside something") */
 +static float lonk_last_solid[3] = {NAN, NAN, NAN};   /* (where he last stood on a walkable floor: back there if he walks into the ground) */
 +static KEEP float lonk_air_vel[2];   /* m/s, sideways */
@@ -2749,7 +2766,7 @@ index c05d6c3..b469040 100644
 +    if (lonk_air && gait != GAIT_JUMP) return;   /* in the air he's busy (a mood change used to start one mid-jump) */
 +    if ((lonk_swim || lonk_climb) && gait != GAIT_JUMP) return;   /* (and swimming, climbing: a snack treading water stood him still, and he stopped following, seen) */
 +    lonk_emote = gait; lonk_emote_left = frames[gait] ? frames[gait] : 120; lonk_emote_late = 0;
-+    fprintf(stderr, "[survey] lonk: emote %s\n", gait_names[gait]);
++    lonk_say("[survey] lonk: emote %s\n", gait_names[gait]);
 +}
 +/* A wander goes somewhere he can actually get to: the best of 8 random directions (your way, if he's over 15 m off), 4
 +   to 10 m, stopping short of walls and ledges. */
@@ -2797,7 +2814,7 @@ index c05d6c3..b469040 100644
 +        out[0] = spot[0]; out[1] = spot[2];
 +        return 1;
 +    }
-+    fprintf(stderr, "[survey] lonk: nowhere to hide (%u blocked, %u no floor, %u in sight)\n", no_path, no_floor, seen);
++    lonk_say("[survey] lonk: nowhere to hide (%u blocked, %u no floor, %u in sight)\n", no_path, no_floor, seen);
 +#endif
 +    (void)a; (void)p; (void)out;
 +    return 0;
@@ -2821,7 +2838,7 @@ index c05d6c3..b469040 100644
 +        if (!name || !read_mem(name, text, sizeof text - 1) || strcmp(text, stalkers[i].name) ||
 +            !read_mem(actor + ACTOR_POS, pos, sizeof pos) || !valid_xyz(pos) || (pouch && !modeled && had_model == actor)) {
 +            if (had_model == actor) had_model = 0;
-+            fprintf(stderr, "[survey] lonk: dropped %s (%#llx)\n", stalkers[i].name, (unsigned long long)actor);
++            lonk_say("[survey] lonk: dropped %s (%#llx)\n", stalkers[i].name, (unsigned long long)actor);
 +            /* he comes back with a mood running, brain or not (with the brain off he used to stay gone after a death or a
 +               loading zone), and nothing of the old body carries over: its animation slot (freed with it), a jump, an emote */
 +            if (!strcmp(stalkers[i].name, "PouchPlayer")) {
@@ -2858,7 +2875,7 @@ index c05d6c3..b469040 100644
 +        last_clock = clock; last_body = lonk_body; last_you = you;
 +        static int was_paused;
 +        lonk_paused = paused;
-+        if (paused != was_paused) fprintf(stderr, "[survey] lonk: %s\n", paused ? "the game's paused, so is he" : "the game goes on, so does he");
++        if (paused != was_paused) lonk_say("[survey] lonk: %s\n", paused ? "the game's paused, so is he" : "the game goes on, so does he");
 +        was_paused = paused;
 +        if (paused) return;
 +        lonk_dt = fminf(fmaxf(dt, 1 / 120.0f), 1 / 15.0f);   /* (a hitch doesn't fling him) */
@@ -2941,17 +2958,17 @@ index c05d6c3..b469040 100644
 +        char seen[64];
 +        float e[3];
 +        if (lonk_look_enemy(lonk_anchor, frame, e, seen)) {
-+            if (!lonk_enemy_left) fprintf(stderr, "[survey] lonk: spotted %s, %.1f m away\n", seen, hypotf(e[0] - lonk_anchor[0], e[2] - lonk_anchor[2]));
++            if (!lonk_enemy_left) lonk_say("[survey] lonk: spotted %s, %.1f m away\n", seen, hypotf(e[0] - lonk_anchor[0], e[2] - lonk_anchor[2]));
 +            memcpy(lonk_enemy, e, sizeof e); lonk_enemy_left = 180;
 +        }
 +    }
 +    if (lonk_brain && lonk_enemy_left && !lonk_fight_cooldown && lonk_kind != LONK_FIGHT && lonk_kind != LONK_GIFT &&
 +        lonk_kind != LONK_PARTY && lonk_kind != LONK_FLEE && lonk_kind != LONK_SPAR && lonk_kind != LONK_STAY) {
 +        if (arc4random_uniform(3) == 0) {   /* or not: sometimes he hides behind you instead */
-+            fprintf(stderr, "[survey] lonk: hides behind you\n");
++            lonk_say("[survey] lonk: hides behind you\n");
 +            lonk_enter(LONK_BEHIND, 300); lonk_emote_start(GAIT_SURPRISE); lonk_fight_cooldown = 900;
 +        } else {
-+            fprintf(stderr, "[survey] lonk: picks a fight\n");
++            lonk_say("[survey] lonk: picks a fight\n");
 +            lonk_enter(LONK_FIGHT, 600);
 +        }
 +    }
@@ -3009,14 +3026,14 @@ index c05d6c3..b469040 100644
 +           up to 10 s, and the race starts when you set off */
 +        if (entering) {
 +            ready = player_speed < 3; wait_left = 600;
-+            if (ready) fprintf(stderr, "[survey] lonk: race you! run when you're ready\n");
++            if (ready) lonk_say("[survey] lonk: race you! run when you're ready\n");
 +            if (!lonk_brain && lonk_home == LONK_RACE) lonk_home = LONK_STALK;   /* (set as a mood: one race, then he follows you; it started over after every finish) */
 +        }
 +        if (ready) {
 +            wait_left = tick_down(wait_left);
 +            if (player_speed < 3) {
 +                target[0] = p[0] - fz * 1.6f; target[2] = p[2] + fx * 1.6f; stop = 0.2f;
-+                if (!wait_left) { fprintf(stderr, "[survey] lonk: no race (you never ran)\n"); lonk_enter(LONK_STALK, 300); }
++                if (!wait_left) { lonk_say("[survey] lonk: no race (you never ran)\n"); lonk_enter(LONK_STALK, 300); }
 +                break;
 +            }
 +            ready = 0; entering = 1;
@@ -3028,23 +3045,23 @@ index c05d6c3..b469040 100644
 +            if (isfinite(p[1])) d = path_free(p, fx, fz, 45);   /* a clear run (no wall, no drop on the way) */
 +#endif
 +            if (player_speed < 3 || d < 20) {
-+                fprintf(stderr, "[survey] lonk: no race (%s)\n", player_speed < 3 ? "you're not running" : "no clear run ahead of you");
++                lonk_say("[survey] lonk: no race (%s)\n", player_speed < 3 ? "you're not running" : "no clear run ahead of you");
 +                lonk_enter(LONK_STALK, 300); target[0] = a[0]; target[2] = a[2]; break;
 +            }
 +            d -= 1;
 +            finish[0] = p[0] + fx * d; finish[1] = p[2] + fz * d;
-+            fprintf(stderr, "[survey] lonk: race you! (to %.0f m ahead)\n", d);
++            lonk_say("[survey] lonk: race you! (to %.0f m ahead)\n", d);
 +        }
 +        float him = hypotf(finish[0] - a[0], finish[1] - a[2]), you = hypotf(finish[0] - p[0], finish[1] - p[2]);
 +        target[0] = finish[0]; target[2] = finish[1]; stop = 0.3f; face_player = 0;
 +        speed = fmaxf(LONK_RUN, player_speed + 0.6f);   /* about your pace: at block's overtaking boost (+2.5) he won every time (seen) */
 +        if (!done && him < 0.8f) {
 +            done = 1;
-+            fprintf(stderr, "[survey] lonk: wins the race\n");
++            lonk_say("[survey] lonk: wins the race\n");
 +            lonk_enter(LONK_STALK, 300); lonk_emote_start(GAIT_JUMP);
 +        } else if (!done && you < 1.5f && him > 2) {   /* you got there first */
 +            done = 1;
-+            fprintf(stderr, "[survey] lonk: you won the race\n");
++            lonk_say("[survey] lonk: you won the race\n");
 +            lonk_enter(LONK_STALK, 300); lonk_emote_start(GAIT_SULK);
 +        } else if (lonk_phase_left <= 1 || (!done && lonk_ticks && you > 40)) lonk_enter(LONK_STALK, 300);   /* (you ran off elsewhere) */
 +        break;
@@ -3062,7 +3079,7 @@ index c05d6c3..b469040 100644
 +        }
 +        target[0] = spot[0]; target[2] = spot[1]; speed = LONK_SPRINT; stop = 0.2f;
 +        face_player = hypotf(spot[0] - a[0], spot[1] - a[2]) < 1;
-+        if (!lonk_photo_there && hypotf(spot[0] - a[0], spot[1] - a[2]) < 0.4f) { lonk_photo_there = 1; fprintf(stderr, "[survey] lonk: in your shot\n"); }
++        if (!lonk_photo_there && hypotf(spot[0] - a[0], spot[1] - a[2]) < 0.4f) { lonk_photo_there = 1; lonk_say("[survey] lonk: in your shot\n"); }
 +        after = lonk_you_camera ? 0 : after + lonk_ticks;
 +        if (after > 120 && lonk_phase_left > 1) lonk_phase_left = 1;   /* (ends next frame) */
 +        break;
@@ -3077,7 +3094,7 @@ index c05d6c3..b469040 100644
 +        target[0] = lonk_enemy[0] - ex / el * 1.6f; target[2] = lonk_enemy[2] - ez / el * 1.6f;
 +        speed = LONK_SPRINT; stop = 0.2f; face_player = 0;
 +        lonk_sparring = el < 2.4f;
-+        if ((!lonk_enemy_left || lonk_you_swung > 300) && lonk_phase_left > 1) { lonk_phase_left = 1; lonk_sparring = 0; fprintf(stderr, "[survey] lonk: done fighting\n"); }
++        if ((!lonk_enemy_left || lonk_you_swung > 300) && lonk_phase_left > 1) { lonk_phase_left = 1; lonk_sparring = 0; lonk_say("[survey] lonk: done fighting\n"); }
 +        break;
 +    }
 +    case LONK_BEHIND:
@@ -3135,6 +3152,8 @@ index c05d6c3..b469040 100644
 +    case LONK_BUDDY: {   /* walks beside you, a step to one side, at your pace, looking where you look */
 +        static unsigned look_left;   /* 4 times a second: is there room for him on his side of you? */
 +        static int squeezed;         /* no room either side (a corridor): he walks behind you */
++        static float buddy_room = 9;   /* (how much room his side has, the last look) */
++        static unsigned buddy_swap_hold;
 +        float side = lonk_buddy_side;
 +        if (entering) { side = lonk_buddy_side = arc4random_uniform(2) ? 1 : -1; look_left = 0; squeezed = 0; lonk_buddy_round = 0; }
 +        /* you turn round: he stays on the side he's on and turns with you, instead of crossing over to his old side */
@@ -3153,13 +3172,17 @@ index c05d6c3..b469040 100644
 +            float sx = -fz * side, sz = fx * side;
 +            float from_here[3] = {p[0] + sx * 0.5f, p[1], p[2] + sz * 0.5f}, from_there[3] = {p[0] - sx * 0.5f, p[1], p[2] - sz * 0.5f};
 +            float here = path_free(from_here, sx, sz, 1.4f), there = path_free(from_there, -sx, -sz, 1.4f);
-+            if (here < 1.0f && there > here + 0.4f) {
-+                side = lonk_buddy_side = -side; lonk_buddy_round = 150;
-+                fprintf(stderr, "[survey] lonk: buddy: no room on that side (%.1f m), the other side\n", here);
++            buddy_room = here;
++            /* (once he's swapped, he stays 2 s: on a narrow steep top neither side had room, and he swapped every quarter
++               second, running round you in circles for 7 s: the recorder, 2026-11-06) */
++            buddy_swap_hold = tick_down(buddy_swap_hold);
++            if (here < 1.0f && there > here + 0.4f && !buddy_swap_hold) {
++                side = lonk_buddy_side = -side; lonk_buddy_round = 150; buddy_swap_hold = 120; buddy_room = there;
++                lonk_say("[survey] lonk: buddy: no room on that side (%.1f m), the other side\n", here);
 +            }
 +            int was = squeezed;
 +            squeezed = here < 1.0f && there < 1.0f;
-+            if (squeezed != was) fprintf(stderr, "[survey] lonk: buddy: %s\n", squeezed ? "no room either side, behind you" : "room beside you again");
++            if (squeezed != was) lonk_say("[survey] lonk: buddy: %s\n", squeezed ? "no room either side, behind you" : "room beside you again");
 +        }
 +#endif
 +        /* a step ahead of you only once you're moving: standing, after you turned round he was 0.6 m off his spot and
@@ -3171,6 +3194,9 @@ index c05d6c3..b469040 100644
 +           he swung with it, copying your turns instead of sprinting to you (seen) */
 +        float bx = a[0] - p[0], bz = a[2] - p[2], bl = hypotf(bx, bz);
 +        if (bl > 6) { target[0] = p[0] + bx / bl * 1.6f; target[2] = p[2] + bz / bl * 1.6f; }
++        /* you standing, him already near you and no room at his spot: he stays where he is (he ran for spots that
++           weren't there, round and round you, seen) */
++        if (player_speed < 0.5f && bl < 2.5f && fabsf(a[1] - p[1]) < 1.0f && buddy_room < 1.0f) { target[0] = a[0]; target[2] = a[2]; }   /* (at your height: from the top 7.5 m over you he stayed up there, seen) */
 +        /* you turning on the spot: he stays put and turns with you. He used to set off for his side in the first frames of
 +           your turn, and halfway round you he no longer counted as being on your other side, so he walked all the way (tested) */
 +        static float last_yaw;
@@ -3212,7 +3238,7 @@ index c05d6c3..b469040 100644
 +        if (entering || (!found && no_gain > 120)) {
 +            if (++tries > 3 || !lonk_pick_hide(a, p, spot)) { lonk_enter(LONK_WANDER, 400); target[0] = a[0]; target[2] = a[2]; break; }
 +            closest = hypotf(spot[0] - a[0], spot[1] - a[2]); no_gain = 0;
-+            fprintf(stderr, "[survey] lonk: hides (%.1f m away)%s\n", closest, tries > 1 ? ", somewhere else" : "");
++            lonk_say("[survey] lonk: hides (%.1f m away)%s\n", closest, tries > 1 ? ", somewhere else" : "");
 +        }
 +        left = tick_down(left);
 +        target[0] = spot[0]; target[2] = spot[1]; speed = LONK_RUN; stop = 0.3f; face_player = hypotf(spot[0] - a[0], spot[1] - a[2]) < 0.5f;
@@ -3220,9 +3246,9 @@ index c05d6c3..b469040 100644
 +           he picks hiding from right beside you) */
 +        if (!found && hypotf(spot[0] - a[0], spot[1] - a[2]) < 1 && hypotf(p[0] - a[0], p[2] - a[2]) < 3) {
 +            found = 1;
-+            fprintf(stderr, "[survey] lonk: found!\n");
++            lonk_say("[survey] lonk: found!\n");
 +            lonk_enter(LONK_FLEE, 200); lonk_emote_start(GAIT_SURPRISE);
-+        } else if (!found && (lonk_phase_left <= 1 || !left)) { fprintf(stderr, "[survey] lonk: you didn't find him\n"); lonk_enter(LONK_STALK, 300); }
++        } else if (!found && (lonk_phase_left <= 1 || !left)) { lonk_say("[survey] lonk: you didn't find him\n"); lonk_enter(LONK_STALK, 300); }
 +        break;
 +    }
 +    case LONK_PARTY:   /* (his dance is gone, it looked broken: a hop where he stands, facing you; a gift's ends in a run) */
@@ -3246,7 +3272,7 @@ index c05d6c3..b469040 100644
 +            spot[0] = a[0] + way[0] * free; spot[1] = a[2] + way[1] * free;
 +            how = lonk_mad_force >= 0 ? lonk_mad_force : (int)arc4random_uniform(MAD_KINDS);
 +            lonk_mad_force = -1; step = 0; left = 240;
-+            fprintf(stderr, "[survey] lonk: mad, steps back %.1f m, then %s\n", free, mad_names[how]);
++            lonk_say("[survey] lonk: mad, steps back %.1f m, then %s\n", free, mad_names[how]);
 +        }
 +        target[0] = a[0]; target[2] = a[2];
 +        if (step == 0) {   /* stepping back (his back to you), a 4 s limit (the startle doesn't count) */
@@ -3273,7 +3299,7 @@ index c05d6c3..b469040 100644
 +            }
 +        } else if (step == 2) {   /* his reaction plays; done, back to his mood */
 +            int done = !(left = tick_down(left)) && !lonk_emote_left;
-+            if (done) { step = 3; lonk_phase_left = 1; fprintf(stderr, "[survey] lonk: not mad any more\n"); }
++            if (done) { step = 3; lonk_phase_left = 1; lonk_say("[survey] lonk: not mad any more\n"); }
 +        }
 +        break;
 +    }
@@ -3333,7 +3359,7 @@ index c05d6c3..b469040 100644
 +        if (camera && !lonk_you_camera && hypotf(p[0] - a[0], p[2] - a[2]) < 30 && lonk_kind != LONK_FIGHT && lonk_kind != LONK_MAD &&
 +            lonk_kind != LONK_STAY && lonk_kind != LONK_SPAR &&   /* (staying means staying) */
 +            !lonk_air && !lonk_swim && !lonk_climb) {
-+            fprintf(stderr, "[survey] lonk: your camera! photobombs it\n");
++            lonk_say("[survey] lonk: your camera! photobombs it\n");
 +            lonk_you_camera = camera;
 +            lonk_enter(LONK_PHOTO, 1200);
 +        }
@@ -3354,20 +3380,20 @@ index c05d6c3..b469040 100644
 +        else if ((!strncmp(cmd, "CutS", 4) || !strcmp(cmd, "CutDash") || !strncmp(cmd, "ChargeAttack", 12) || !strcmp(cmd, "ChargeLSwordSpin")) &&
 +                 ll < 3 && facing_him && lonk_kind != LONK_MAD) {   /* swinging at him: he's mad (running off for good got lost on
 +                                                                    cliffs and in water; now he only steps back) */
-+            fprintf(stderr, "[survey] lonk: you swung at him (%s)\n", cmd);
++            lonk_say("[survey] lonk: you swung at him (%s)\n", cmd);
 +            lonk_enter(LONK_MAD, 600); lonk_emote_start(GAIT_SURPRISE);
 +        } else if ((!strncmp(cmd, "CutS", 4) || !strcmp(cmd, "CutDash") || !strncmp(cmd, "ChargeAttack", 12) || !strcmp(cmd, "ChargeLSwordSpin")) &&
 +                   lonk_enemy_left && lonk_kind != LONK_MAD) {   /* you're fighting something he's seen: he joins in */
 +            lonk_you_swung = 0;
-+            if (lonk_kind != LONK_SPAR) { fprintf(stderr, "[survey] lonk: fights beside you\n"); lonk_enter(LONK_SPAR, 1800); }
++            if (lonk_kind != LONK_SPAR) { lonk_say("[survey] lonk: fights beside you\n"); lonk_enter(LONK_SPAR, 1800); }
 +        } else if (!strcmp(cmd, "HorseCall") || !strcmp(cmd, "CallComeon")) {   /* you whistled: he comes; whistle again right after: he stays */
 +            static uint64_t last_whistle;
 +            if (frame - last_whistle < 10) { last_whistle = frame; continue; }   /* (one whistle, seen in two of your slots) */
 +            if (lonk_kind == LONK_BUDDY && frame - last_whistle < 300) {   /* (a whistle lasts nearly 3 s: again within 5 s) */
-+                fprintf(stderr, "[survey] lonk: you whistled twice, he stays\n");
++                lonk_say("[survey] lonk: you whistled twice, he stays\n");
 +                lonk_enter(LONK_STAY, 216000000);
 +            } else if (lonk_kind != LONK_BUDDY) {
-+                fprintf(stderr, "[survey] lonk: you whistled, he comes\n");
++                lonk_say("[survey] lonk: you whistled, he comes\n");
 +                lonk_enter(LONK_BUDDY, 900);
 +            }
 +            last_whistle = frame;
@@ -3379,7 +3405,7 @@ index c05d6c3..b469040 100644
 +        if (react == GAIT_JUMP && (jumping || lonk_jump > 0)) react = -1;   /* one jump per jump of yours: the slots report it more than once */
 +        if (lonk_air) react = -1;   /* in the air he's busy */
 +        if (react >= 0 && near && (!lonk_emote_left || react == GAIT_SURPRISE)) {
-+            fprintf(stderr, "[survey] lonk: you %s\n", cmd);
++            lonk_say("[survey] lonk: you %s\n", cmd);
 +            lonk_emote_start(react);
 +            if (react == GAIT_JUMP) lonk_jump = LONK_JUMP;
 +            if (react == GAIT_PARTY) lonk_emote_left = 150;
@@ -3417,7 +3443,7 @@ index c05d6c3..b469040 100644
 +                lonk_jump_aimed = 0;
 +                if (p[1] - a[1] > 0.6f && ++lonk_jump_tries >= 2) {
 +                    float at[2];
-+                    fprintf(stderr, "[survey] lonk: couldn't jump up, comes to you\n");
++                    lonk_say("[survey] lonk: couldn't jump up, comes to you\n");
 +                    spot_near(p, fx, fz, at); a[0] = at[0]; a[2] = at[1]; a[1] = p[1]; lonk_jump_tries = 0;
 +                } else if (p[1] - a[1] <= 0.6f) lonk_jump_tries = 0;
 +            }
@@ -3530,7 +3556,7 @@ index c05d6c3..b469040 100644
 +                gaps[k] = ray_cast(gf, gt, gh, NULL) ? hypotf(gh[0] - p[0], gh[2] - p[2]) : -1;
 +            }
 +            float sx = -climb_n[1], sz = climb_n[0];
-+            fprintf(stderr, "[survey] lonk: you climb %.2f m off the wall at your chest, %.2f at your knees (him: %s, %.2f m to your side, %.2f below, %.2f apart)\n",
++            lonk_say("[survey] lonk: you climb %.2f m off the wall at your chest, %.2f at your knees (him: %s, %.2f m to your side, %.2f below, %.2f apart)\n",
 +                    gaps[0], gaps[1], lonk_climb ? "on it" : "not on it", (a[0] - p[0]) * sx + (a[2] - p[2]) * sz, p[1] - a[1], hypotf(a[0] - p[0], a[2] - p[2]));
 +        }
 +    }
@@ -3557,8 +3583,8 @@ index c05d6c3..b469040 100644
 +            a[0] = bh[0] + climb_n[0] * lonk_climb_gap; a[2] = bh[2] + climb_n[1] * lonk_climb_gap;   /* (straight onto it: a test) */
 +            memcpy(climb_test_at, a, sizeof climb_test_at);
 +            lonk_teleports++;   /* (the recorder: ours, not a snap) */
-+            fprintf(stderr, "[survey] lonk: test climb on a wall %.1f m from you (out %.2f,%.2f)\n", best, climb_n[0], climb_n[1]);
-+        } else { lonk_climb_test = 0; fprintf(stderr, "[survey] lonk: test climb: no wall 4 m high within 14 m of you\n"); }
++            lonk_say("[survey] lonk: test climb on a wall %.1f m from you (out %.2f,%.2f)\n", best, climb_n[0], climb_n[1]);
++        } else { lonk_climb_test = 0; lonk_say("[survey] lonk: test climb: no wall 4 m high within 14 m of you\n"); }
 +    }
 +    /* you're climbing, 1 m above him or more: he climbs after you, up the wall you're on (the one in front of your chest)
 +       or the one between you. Only a wall: there at 1 m and 1.8 m up (a step at the foot of one started a climb, then a
@@ -3583,11 +3609,22 @@ index c05d6c3..b469040 100644
 +            float nl = hypotf(n[0], n[2]);
 +            climb_n[0] = n[0] / nl; climb_n[1] = n[2] / nl; lonk_climb = 1; climb_left = 900; lonk_v = 0; climb_vy = 0; climb_from = a[1]; climb_side = 0; lonk_climb_clip = CLIMB_UP; climb_tilt = 0; climb_fit_d = climb_fit_t = 0; climb_yaw = 0;
 +            if (lonk_emote_left > 1) lonk_emote_left = 1;   /* (the look up ends) */
-+            fprintf(stderr, "[survey] lonk: climbs after you (%.1f m up, the wall %.1f m off, %s)\n", rise, hypotf(hit[0] - a[0], hit[2] - a[2]), ways_yours && !k ? "yours" : "between you");
++            lonk_say("[survey] lonk: climbs after you (%.1f m up, the wall %.1f m off, %s)\n", rise, hypotf(hit[0] - a[0], hit[2] - a[2]), ways_yours && !k ? "yours" : "between you");
 +            break;
 +        }
 +    }
 +#endif
++    /* (why he isn't climbing up to you, once a second while you're over 1.2 m above him: for the recorder) */
++    if (follows && !lonk_climb && !lonk_you_climb && rise > 1.2f && rise < 25) {
++        static unsigned why_left;
++        if (!(why_left = tick_down(why_left))) {
++            why_left = 60;
++            int edge = lonk_at_edge(a, p), walk = lonk_walk_up(a, p);
++            if (!((lonk_blocked > 8 || no_gain > 10) && hypotf(p[0] - a[0], p[2] - a[2]) < 20 && !lonk_emote_left && lonk_jump == 0 && !jump_rest && edge && !walk))
++                lonk_say("[survey] lonk: below you %.1f m, not climbing up: blocked %d no_gain %d far %.1f emote %d jump %d rest %d at_edge %d walk_up %d\n", rise,
++                         (int)lonk_blocked, (int)no_gain, hypotf(p[0] - a[0], p[2] - a[2]), (int)lonk_emote_left, lonk_jump != 0, (int)jump_rest, edge, walk);
++        }
++    }
 +    /* (not while you're on a wall: he climbs after you, above; a 1 to 2 m hop at it as you started up looked like a jump) */
 +    if (follows && !lonk_climb && !lonk_you_climb && (lonk_blocked > 8 || no_gain > 10) && rise > 1.2f && rise < 25 && hypotf(p[0] - a[0], p[2] - a[2]) < 20 &&
 +        !lonk_emote_left && lonk_jump == 0 && !jump_rest && lonk_at_edge(a, p) && !lonk_walk_up(a, p)) {
@@ -3605,8 +3642,8 @@ index c05d6c3..b469040 100644
 +                float nl = hypotf(n[0], n[2]);
 +                climb_n[0] = n[0] / nl; climb_n[1] = n[2] / nl; lonk_climb = 1; climb_left = 900; lonk_v = 0; climb_vy = 0; climb_from = a[1]; climb_side = 0; lonk_climb_clip = CLIMB_UP; climb_tilt = 0; climb_fit_d = climb_fit_t = 0; climb_yaw = 0;
 +                lonk_no_gain = 0;
-+                fprintf(stderr, "[survey] lonk: climbs up to you (%.1f m up, the wall %.1f m off)\n", rise, hypotf(hit[0] - a[0], hit[2] - a[2]));
-+            } else fprintf(stderr, "[survey] lonk: can't get up to you (%.1f m up, no wall to climb toward you)\n", rise);
++                lonk_say("[survey] lonk: climbs up to you (%.1f m up, the wall %.1f m off)\n", rise, hypotf(hit[0] - a[0], hit[2] - a[2]));
++            } else lonk_say("[survey] lonk: can't get up to you (%.1f m up, no wall to climb toward you)\n", rise);
 +        }
 +    }
 +    if (follows && !lonk_climb && !lonk_you_climb && (lonk_blocked > 8 || no_gain > 10) && rise > 0.6f && rise <= 1.2f && hypotf(p[0] - a[0], p[2] - a[2]) < 20 &&
@@ -3614,7 +3651,7 @@ index c05d6c3..b469040 100644
 +        lonk_no_gain = 0; jump_rest = 90; lonk_jump_aimed = 1;
 +        lonk_jump = sqrtf(2 * LONK_GRAVITY * (rise + 0.6f));
 +        lonk_emote_start(GAIT_JUMP);
-+        fprintf(stderr, "[survey] lonk: jumps up to you (%.1f m)\n", rise);
++        lonk_say("[survey] lonk: jumps up to you (%.1f m)\n", rise);
 +    }
 +    if (++st_frames >= 600) {
 +        double n_ = tick_n ? tick_n * 1e6 : 1;
@@ -3639,15 +3676,15 @@ index c05d6c3..b469040 100644
 +        busy_seconds = busy ? busy_seconds + 1 : 0;
 +        if (!stuck && !lonk_climb && busy_seconds >= 3 && hypotf(a[0] - was_at[1][0], a[2] - was_at[1][1]) < 1.5f) {
 +            stuck = 1; busy_seconds = 0;
-+            fprintf(stderr, "[survey] lonk: pacing up and down, counts as stuck\n");
++            lonk_say("[survey] lonk: pacing up and down, counts as stuck\n");
 +        }
 +        memmove(was_at[1], was_at[0], sizeof was_at[0] * 2); was_at[0][0] = watch_from[0]; was_at[0][1] = watch_from[1];
 +        if (stuck && lonk_kind == LONK_WANDER) {
 +            lonk_pick_wander(a, p);
-+            fprintf(stderr, "[survey] lonk: stuck, wandering somewhere else\n");
++            lonk_say("[survey] lonk: stuck, wandering somewhere else\n");
 +        } else if (stuck && lonk_kind == LONK_FLEE) {
 +            lonk_pick_flee(a, p, 1);
-+            fprintf(stderr, "[survey] lonk: stuck, fleeing another way\n");
++            lonk_say("[survey] lonk: stuck, fleeing another way\n");
 +        }
 +        if (stuck) lonk_stat_stuck++;
 +        if (stuck && lonk_kind == LONK_BUDDY) {   /* that side of you is a wall: the other side, then */
@@ -3656,7 +3693,7 @@ index c05d6c3..b469040 100644
 +        }
 +        if (stuck && lonk_kind == LONK_BLOCK) {   /* can't get in front of you (a wall there): he tags along for 5 s, then tries
 +                                                     again (for the rest of the mood, it was the rest of the hour; tested) */
-+            fprintf(stderr, "[survey] lonk: can't get in front of you, follows instead\n");
++            lonk_say("[survey] lonk: can't get in front of you, follows instead\n");
 +            lonk_enter(LONK_STALK, 300);
 +            stuck = 0;
 +        }
@@ -3760,7 +3797,7 @@ index c05d6c3..b469040 100644
 +        else {
 +            float in = fminf(3.0f * lonk_dt, 1.0f - climb_in);
 +            a[0] -= climb_n[0] * in; a[2] -= climb_n[1] * in; climb_in += in;
-+            if (climb_in >= 0.999f) { lonk_climb = 0; fprintf(stderr, "[survey] lonk: climbs over the top\n"); }
++            if (climb_in >= 0.999f) { lonk_climb = 0; lonk_say("[survey] lonk: climbs over the top\n"); }
 +        }
 +    } else if (lonk_climb) {
 +        climb_side_v = 0;
@@ -3886,7 +3923,7 @@ index c05d6c3..b469040 100644
 +        if (lonk_climb == 1 && wall && !lonk_you_climb && !lonk_climb_test && n[1] > 0.45f && p[1] > a[1] - 1.0f && p[1] < a[1] + 1.0f &&
 +            ray_floor(a[0] - climb_n[0] * 0.5f, a[2] - climb_n[1] * 0.5f, a[1] + 1.5f, a[1] - 1.0f, &off_h, &off_up) && off_up > 0.6f) {
 +            lonk_climb = 0; climb_vy = 0;
-+            fprintf(stderr, "[survey] lonk: steps off the wall onto the slope (%.0f degrees in front, %.0f where he stands), as you did\n",
++            lonk_say("[survey] lonk: steps off the wall onto the slope (%.0f degrees in front, %.0f where he stands), as you did\n",
 +                    acosf(fminf(n[1], 1)) * 57.3f, acosf(fminf(off_up, 1)) * 57.3f);
 +        }
 +        if (lonk_climb == 1) {
@@ -3911,7 +3948,7 @@ index c05d6c3..b469040 100644
 +            if (!lonk_you_climb && !lonk_climb_test) climb_left = tick_down(climb_left);   /* (15 s off the wall without you: with you, up a tall one, he let go at 11 m, seen) */
 +            if (lonk_climb_dir == -2 || !climb_left) {
 +                lonk_climb = 3; lonk_climb_dir = 0; climb_vy = 0;
-+                fprintf(stderr, "[survey] lonk: drops off the wall (%.1f m up; %s, you %.1f m above him, off the wall %u ticks)\n", a[1] - climb_from,
++                lonk_say("[survey] lonk: drops off the wall (%.1f m up; %s, you %.1f m above him, off the wall %u ticks)\n", a[1] - climb_from,
 +                        !climb_left ? "15 s without you" : lonk_you_climb ? "you climb" : "you're off it", p[1] - a[1], you_off);
 +            } else climb_vy = lonk_climb_dir ? copysignf(fabsf(v), (float)lonk_climb_dir) : 0;
 +            /* you climb-jump (on a wall: up 4 m in under a second): so does he, the way yours goes (measured from yours: a
@@ -3946,7 +3983,7 @@ index c05d6c3..b469040 100644
 +            if (want != lonk_climb_clip && (want_for >= (lonk_climb_clip == CLIMB_STILL ? 4 : 15) || lonk_climb != 1)) {
 +                static const char *const ways[] = {"hanging still", "up", "down", "left", "right"};
 +                lonk_climb_clip = want;
-+                fprintf(stderr, "[survey] lonk: climbs %s (%.2f m/s up, %.2f sideways, leaning %.0f deg)\n", ways[want], climb_vy, climb_side_v * climb_side_dir, climb_tilt * 57.3f);
++                lonk_say("[survey] lonk: climbs %s (%.2f m/s up, %.2f sideways, leaning %.0f deg)\n", ways[want], climb_vy, climb_side_v * climb_side_dir, climb_tilt * 57.3f);
 +            }
 +            lonk_climb_speed = lonk_climb_clip == CLIMB_LEFT || lonk_climb_clip == CLIMB_RIGHT ? side_v : up_v;
 +        }
@@ -3957,7 +3994,7 @@ index c05d6c3..b469040 100644
 +            float ff[3] = {a[0], a[1] + 0.5f, a[2]}, ft[3] = {a[0], a[1] + step - 0.05f, a[2]}, fh[3], fn[3];
 +            if (ray_cast(ff, ft, fh, fn) && fn[1] > 0.6f) {
 +                a[1] = fh[1]; climb_vy = 0; lonk_climb = 0;
-+                fprintf(stderr, "[survey] lonk: down off the wall, on the floor\n");
++                lonk_say("[survey] lonk: down off the wall, on the floor\n");
 +            }
 +        }
 +        if (lonk_climb == 1 && climb_open >= 3 && lonk_climb_dir > 0 && a[1] > climb_from + 0.5f) {   /* (onto the top's floor, 1 m in: from his feet a floor ray found the wall's sloping face below it, tested) */
@@ -3972,10 +4009,10 @@ index c05d6c3..b469040 100644
 +            float top;
 +            if (ray_height(a[0] - climb_n[0], a[2] - climb_n[1], a[1] + 1.5f, a[1] - 1.0f, &top)) {
 +                climb_top = fmaxf(top, a[1]); lonk_climb = 2; climb_vy = 0; climb_in = 0;
-+                fprintf(stderr, "[survey] lonk: the wall's gone, onto the floor beyond it (%.1f m up)\n", top - a[1]);
++                lonk_say("[survey] lonk: the wall's gone, onto the floor beyond it (%.1f m up)\n", top - a[1]);
 +            } else {
 +                lonk_climb = 0; climb_vy = 0;
-+                fprintf(stderr, "[survey] lonk: the wall's gone, nothing beyond it: lets go\n");
++                lonk_say("[survey] lonk: the wall's gone, nothing beyond it: lets go\n");
 +            }
 +        }
 +    }
@@ -4023,7 +4060,7 @@ index c05d6c3..b469040 100644
 +            /* (and the surface at his feet to get in: it's looked for down to 4 m under them, and on a bridge over a river
 +               he'd have counted as swimming and dropped to it) */
 +            int deep = wet && (lonk_swim || wh > feet - 0.3f) && (!bottom || wh - fh > 1.6f);
-+            if (deep != lonk_swim) fprintf(stderr, "[survey] lonk: %s (surface %.2f, floor %s%.2f, feet %.2f)\n", deep ? "in the water, swims" : "out of the water",
++            if (deep != lonk_swim) lonk_say("[survey] lonk: %s (surface %.2f, floor %s%.2f, feet %.2f)\n", deep ? "in the water, swims" : "out of the water",
 +                                           wet ? wh : 0.0f, bottom ? "" : "none ", bottom ? fh : 0.0f, feet);
 +            lonk_swim = deep; water_at = deep ? wh : water_at;
 +        }
@@ -4078,7 +4115,7 @@ index c05d6c3..b469040 100644
 +                float h_over, up_over;
 +                if (!lonk_air && vy == 0 && isfinite(lonk_last_solid[0]) && ray_floor(a[0], a[2], feet + 1.5f, h + 0.3f, &h_over, &up_over) && h_over > feet - 0.6f && h_over < feet + 1.2f) {   /* (not a roof over his head) */
 +                    static uint64_t said;
-+                    if (frame - said > 120) fprintf(stderr, "[survey] lonk: into the ground (a floor %.2f m above his feet, his ray missed it), back to where he stood\n", h_over - feet);
++                    if (frame - said > 120) lonk_say("[survey] lonk: into the ground (a floor %.2f m above his feet, his ray missed it), back to where he stood\n", h_over - feet);
 +                    said = frame;
 +                    a[0] = lonk_last_solid[0]; a[2] = lonk_last_solid[2]; feet = lonk_last_solid[1]; h = feet; lonk_v = 0;
 +                    ground_src = "back out";
@@ -4114,12 +4151,12 @@ index c05d6c3..b469040 100644
 +           rock, his rays don't stop him: he ran about in one for 13 s and jumped 6 m out of its top, seen). Your Link never
 +           had 5 in for even a third of a second */
 +        static unsigned inside_ticks;
-+        inside_ticks = lonk_parts_inside >= 5 && !lonk_climb && !lonk_swim ? inside_ticks + lonk_ticks : 0;
++        inside_ticks = lonk_parts_inside >= 5 && !lonk_climb && !lonk_swim ? inside_ticks + lonk_ticks : 0;   /* (lonk_buried: measured only, not trusted yet: it missed him in the slab, 2026-11-06) */
 +        if (inside_ticks > 30) { lost = 999; why = "inside something"; inside_ticks = 0; }
 +        if (lonk_you_moved && far > 10) { lost = 999; why = "you teleported"; }
 +        if (lonk_you_moved) lonk_you_moved--;
 +        if (lost > 180) {
-+            fprintf(stderr, "[survey] lonk: lost (%s), back behind you\n", why);
++            lonk_say("[survey] lonk: lost (%s), back behind you\n", why);
 +            lonk_stat_lost++;
 +            float at[2];
 +            spot_near(p, fx, fz, at);
@@ -4220,7 +4257,7 @@ index c05d6c3..b469040 100644
 +#if defined(TOTK_GAME_V143)
 +        ray_height(a[0], a[2], p[1] + 10, p[1] - 50, &rh); terrain_height(a[0], a[2], p[1] + 2, &th);
 +#endif
-+        fprintf(stderr, "[survey] lonk: frame=%llu %s ground=%s (%s) dist=%.2f y=%.2f player_y=%.2f ray=%.2f terrain=%.2f at %.2f,%.2f\n",
++        lonk_say("[survey] lonk: frame=%llu %s ground=%s (%s) dist=%.2f y=%.2f player_y=%.2f ray=%.2f terrain=%.2f at %.2f,%.2f\n",
 +                (unsigned long long)frame, lonk_names[lonk_kind], ground_names[ground_mode], ground_src, hypotf(p[0] - a[0], p[2] - a[2]), ground,
 +                p[1], rh, th, a[0], a[2]);
 +    }
@@ -4247,10 +4284,12 @@ index c05d6c3..b469040 100644
 +    uint32_t alarms, lost, teleports;   /* (the alarms that went off this frame, a bit each; his "lost" count and our teleports, to tell a teleport) */
 +    uintptr_t him_actor;
 +    char you_cmds[48];
++    char said[200];   /* (his decisions this frame, lonk_say) */
 +    /* the scene around him (every 2nd frame): how far the rays from him reach in 16 ways (world headings 0, 22.5.. 337.5 deg,
 +       0 = +z, 90 = +x) at knee, chest and head height (0.6, 1.3, 1.75 m), up to SCENE_R (NAN: nothing there); the top of
 +       whatever is over him (from 12 m up down to 1.9 m over his feet, his feet = 0), and the floor under his feet (and its
 +       slope), for both of you; and where his floor came from this frame */
++    int8_t buried;   /* (rays toward his chest from outside that hit rock first, of 6: 5+ = he's inside something whole) */
 +    uint8_t has_scene;
 +    float scene[3][16], over[2], under[2], under_deg[2];
 +    char src[12];
@@ -4368,7 +4407,7 @@ index c05d6c3..b469040 100644
 +            "#   loop (0..1 through it) clock (its frames) gear w|b|s=<1 out, 0 away>(nearest hand, m) at x,y,z face (deg, 0 = +z)\n"
 +            "#   [(we put him at x,z: m off): where our code wants him, when the game has him 3 cm or more away from it]\n"
 +            "#   | you <your animation commands> [climbing] at x,y,z face | apart (m) | drawn you|him <parts drawn this frame>/<parts known>\n"
-+            "#   | TELEPORTED (by us: over 1 m in one go) | NEW BODY (he came back) | ALARM <kinds>\n"
++            "#   | TELEPORTED (by us: over 1 m in one go) | NEW BODY (he came back) | ALARM <kinds> | SAID <his decisions, ; between>\n"
 +            "# Every 2nd frame (and each alarm's), \"  [body] him|you\" and the parts as in the body log: r right, u up, f forward from\n"
 +            "#   the feet as each one faces; wall: gap to the wall ahead (his climbing wall's while he climbs; - is in it); floor:\n"
 +            "#   height over it; water; IN: a ray from the chest hits something on the way; (b|h|u|l|a): from the body, head,\n"
@@ -4419,6 +4458,8 @@ index c05d6c3..b469040 100644
 +            len += snprintf(line + len, sizeof line - len, " | ALARM");
 +            for (int k = 0; k < AL_KINDS; k++) if (r->alarms >> k & 1) len += snprintf(line + len, sizeof line - len, " %s", alarm_names[k]);
 +        }
++        if (r->buried >= 3) len += snprintf(line + len, sizeof line - len, " | BURIED %d/6", r->buried);
++        if (r->said[0]) len += snprintf(line + len, sizeof line - len, " | SAID %s", r->said);
 +        fprintf(mark_file, "%s\n", line);
 +        if (mark_at % 2 == 0 || r->alarms) {
 +            for (int w = 0; w < 2; w++) {
@@ -4460,7 +4501,7 @@ index c05d6c3..b469040 100644
 +    /* a mark 3 s later: at most 1 a minute, 12 a session and 2 per kind (one bug that keeps going can't use them all up),
 +       and not when your Link set off the same test in the last 5 s (then it's the place, not him) */
 +    int you_too = you_said_ns[kind] && r->ns - you_said_ns[kind] < 5000000000ull;
-+    if (!mark_file && !mark_due_ns && mark_alarm_files < 12 && kind_marks[kind] < 2 && !you_too && (!mark_alarm_ns || r->ns - mark_alarm_ns > 60000000000ull)) {
++    if (!mark_file && !mark_due_ns && mark_alarm_files < 12 && kind_marks[kind] < 2 && !you_too && (!mark_alarm_ns || r->ns - mark_alarm_ns > 15000000000ull)) {
 +        kind_marks[kind]++;
 +        mark_due_ns = r->ns + 3000000000ull;
 +        snprintf(mark_why, sizeof mark_why, "alarm %s: %s", alarm_names[kind], what);
@@ -4549,6 +4590,32 @@ index c05d6c3..b469040 100644
 +            }
 +            if (++slide_run[w][k] == 4) { snprintf(what, sizeof what, "%s %s slides along the floor at %.1f m/s", who, body_names[feet[k]], speed); alarm_fire(r, w, AL_SLIDE, what); }
 +        }
++        /* landings (a log line, no alarm): over 1.5 m down with both feet 30 cm+ off the floor on the way, then for 0.6 s
++           after a foot is back on it: how deep the deepest foot part goes, and how far the toes slide while down */
++        {
++            static float peak[2], deep[2], slid[2], since[2], fell[2];
++            static int airborne[2], landing[2], deep_k[2];
++            float wy = r->bone[w][12][1];
++            if (isfinite(lowest) && lowest > 0.3f && (fresh >> 12 & 1)) {
++                if (!airborne[w]) { airborne[w] = 1; peak[w] = wy; }
++                if (wy > peak[w]) peak[w] = wy;
++            } else if (airborne[w] && isfinite(lowest) && lowest < 0.08f) {
++                airborne[w] = 0;
++                if (peak[w] - wy > 1.5f) { landing[w] = 1; fell[w] = peak[w] - wy; deep[w] = 1; deep_k[w] = 0; slid[w] = 0; since[w] = 0; }
++            }
++            if (landing[w]) {
++                for (int k = 0; k < 4; k++) if (isfinite(gap[k]) && gap[k] < deep[w]) { deep[w] = gap[k]; deep_k[w] = feet[k]; }
++                for (int k = 0; k < 2; k++) {
++                    const float *b = r->bone[w][feet[k]], *a = q->bone[w][feet[k]];
++                    if (isfinite(gap[k]) && gap[k] < 0.05f && (q->fresh[w] >> feet[k] & 1)) slid[w] += hypotf(b[0] - a[0], b[2] - a[2]) / 2;
++                }
++                if ((since[w] += dt) >= 0.6f) {
++                    landing[w] = 0;
++                    fprintf(stderr, "[landing] %s fell %.1f m (%s): deepest %s %+.2f m off the floor, toes slid %.2f m in 0.6 s\n", w ? "him" : "you", fell[w],
++                            w ? gait_names[r->gait >= 0 && r->gait < GAITS ? r->gait : 0] : r->you_cmds, body_names[deep_k[w]], deep[w], slid[w]);
++                }
++            }
++        }
 +        int standing = w ? on_ground && !r->emote && (r->gait == GAIT_IDLE || r->gait == GAIT_WALK) : on_ground && strstr(r->you_cmds, "Wait") != NULL;
 +        if (standing && isfinite(lowest)) { feet_sum[w] += lowest; feet_n[w]++; }
 +        if (w) {
@@ -4612,7 +4679,13 @@ index c05d6c3..b469040 100644
 +    const struct rec_frame *half = rec_ago(0.5f), *quarter = rec_ago(0.25f);
 +    int stepping = (!r->emote && !r->air && !r->swim && !r->climb && (r->gait == GAIT_WALK || r->gait == GAIT_RUN || r->gait == GAIT_DASH)) ||
 +                   (r->climb == 1 && r->clip != CLIMB_STILL);
-+    if (half && stepping && (half->climb == 1) == (r->climb == 1)) {
++    /* only after a full 0.5 s of stepping (26 of 30 alarms were his first frame off from standing still, measured
++       against where he stood), and not while the world stands still (the other 4: you, him and your clip all frozen to
++       the bit for 0.5 s+, a menu pausing the game while we kept ticking) */
++    static float stepping_t;
++    stepping_t = stepping ? stepping_t + dt : 0;
++    int frozen = half && !memcmp(r->you, half->you, sizeof r->you) && !memcmp(r->him, half->him, sizeof r->him);
++    if (half && stepping && stepping_t > 0.55f && !frozen && (half->climb == 1) == (r->climb == 1)) {
 +        float moved = hypotf(hypotf(r->him[0] - half->him[0], r->him[1] - half->him[1]), r->him[2] - half->him[2]);
 +        if (moved < 0.05f) {
 +            if (++in_place_run == 1) {
@@ -4672,6 +4745,7 @@ index c05d6c3..b469040 100644
 +        }
 +    }
 +    anim_cmds(player, r->you_cmds, sizeof r->you_cmds);
++    memcpy(r->said, lonk_said, sizeof r->said); lonk_said[0] = 0;
 +    r->you_climb = (int8_t)lonk_you_climb;
 +    r->gait = (int8_t)lonk_gait; r->kind = (int8_t)lonk_kind; r->climb = (int8_t)lonk_climb; r->clip = (int8_t)lonk_climb_clip;
 +    r->air = (int8_t)(lonk_air != 0); r->swim = (int8_t)(lonk_swim != 0); r->paused = (int8_t)lonk_paused; r->emote = (int8_t)lonk_body_emote; r->armed = (int8_t)(lonk_armed != 0);
@@ -4690,6 +4764,23 @@ index c05d6c3..b469040 100644
 +        if (g && (!read_mem(g + ACTOR_POS, r->gear[k], sizeof r->gear[k]) || !valid_xyz(r->gear[k]))) r->gear[k][0] = r->gear[k][1] = r->gear[k][2] = NAN;
 +        r->gear_out[k] = (int8_t)(g && drawn ? drawn(eu, links[k]) : -1);
 +    }
++    /* buried: his whole body in the rock. The inside test (rays from his chest to each part) said "a toe" while all of
++       him was in the slab with only his weapon's fused rock sticking out (the user's photo, 2026-11-06): from inside,
++       those rays hit nothing. So from outside in: toward his chest from 2 m off on 4 sides, from 2.5 m over him, and
++       from your chest; rock first on 5 or more = buried (against a wall, in a corner or under an overhang it's 1 to 3) */
++    if (isfinite(r->him[0])) {
++        float c[3] = {r->him[0], r->him[1] + 1.2f, r->him[2]}, hit2[3];
++        float ends[6][3] = {{c[0] + 2, c[1], c[2]}, {c[0] - 2, c[1], c[2]}, {c[0], c[1], c[2] + 2}, {c[0], c[1], c[2] - 2}, {c[0], c[1] + 2.5f, c[2]},
++                            {r->you[0], r->you[1] + 1.2f, r->you[2]}};
++        int n6 = 0, used = 0;
++        for (int k = 0; k < 6; k++) {
++            if (k == 5 && !(isfinite(r->you[0]) && hypotf(r->you[0] - c[0], r->you[2] - c[2]) < 8)) continue;
++            used++;
++            n6 += ray_cast(ends[k], c, hit2, NULL);
++        }
++        r->buried = (int8_t)(used == 6 ? n6 : n6 + (n6 >= 5));
++        lonk_buried = (unsigned)r->buried;
++    } else lonk_buried = 0;
 +    if (frame % 2 == 0 && isfinite(r->him[0])) {
 +        static const float hts[3] = {0.6f, 1.3f, 1.75f};
 +        r->has_scene = 1;
@@ -4774,7 +4865,7 @@ index c05d6c3..b469040 100644
 +        for (int g = 0; g < GROUND_MODES; g++) if (!strcmp(word, ground_names[g])) mode = g;
 +        if (mode < 0) { fprintf(stderr, "[survey] rejected: ground <player|physics|trail|terrain>\n"); return 1; }
 +        pthread_mutex_lock(&survey_lock); ground_mode = mode; pthread_mutex_unlock(&survey_lock);
-+        fprintf(stderr, "[survey] lonk: ground=%s\n", ground_names[mode]);
++        lonk_say("[survey] lonk: ground=%s\n", ground_names[mode]);
 +        return 1;
 +    }
 +    /* "survey pouch": make spawned PouchPlayers draw; "survey height": log the terrain height under the player */
@@ -4823,7 +4914,7 @@ index c05d6c3..b469040 100644
 +    if (!kind && (used = 0, sscanf(line, "survey lonk %7[a-z] %f %n", which, &draw_at, &used)) == 2 && used && !line[used] && draw_at >= 0 && draw_at <= 1 &&
 +        (!strcmp(which, "drawat") || !strcmp(which, "putat"))) {
 +        *(which[0] == 'd' ? &lonk_draw_at : &lonk_put_at) = draw_at;
-+        fprintf(stderr, "[survey] lonk: %s %.2f of the clip\n", which, draw_at);
++        lonk_say("[survey] lonk: %s %.2f of the clip\n", which, draw_at);
 +        return 1;
 +    }
 +    /* "survey lonk hit [gift|eat|silly]": as if you'd swung at him (any of the three, or that one) */
@@ -4851,7 +4942,7 @@ index c05d6c3..b469040 100644
 +        pthread_mutex_lock(&survey_lock);
 +        lonk_outfit = n; lonk_twin = 1; dress_slot = -1; dress_left = 1;   /* (his clothes only: he keeps your weapons. Out of twins his
 +                                                                                 weapons hid and their fused parts floated on alone, seen) */
-+        fprintf(stderr, "[survey] lonk: puts on the %s set\n", outfit);
++        lonk_say("[survey] lonk: puts on the %s set\n", outfit);
 +        atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release); pthread_mutex_unlock(&survey_lock);
 +        return 1;
 +    }
@@ -4860,7 +4951,7 @@ index c05d6c3..b469040 100644
 +        pthread_mutex_lock(&survey_lock);
 +        lonk_no_stalk = nostalk;
 +        if (nostalk && lonk_kind == LONK_STALK && lonk_brain) lonk_phase_left = 0;
-+        fprintf(stderr, "[survey] lonk: stalk mode %s\n", nostalk ? "off" : "back on");
++        lonk_say("[survey] lonk: stalk mode %s\n", nostalk ? "off" : "back on");
 +        pthread_mutex_unlock(&survey_lock);
 +        return 1;
 +    }
@@ -4869,7 +4960,7 @@ index c05d6c3..b469040 100644
 +        pthread_mutex_lock(&survey_lock);
 +        lonk_no_buddy = nobuddy;
 +        if (nobuddy && lonk_kind == LONK_BUDDY && lonk_brain) lonk_phase_left = 0;   /* and out of it now: he rolls again */
-+        fprintf(stderr, "[survey] lonk: buddy mode %s\n", nobuddy ? "off (whistle still calls him)" : "back on");
++        lonk_say("[survey] lonk: buddy mode %s\n", nobuddy ? "off (whistle still calls him)" : "back on");
 +        pthread_mutex_unlock(&survey_lock);
 +        return 1;
 +    }
@@ -4884,7 +4975,7 @@ index c05d6c3..b469040 100644
 +    }
 +    unsigned every;
 +    if ((used = 0, sscanf(line, "survey lonk bodylog %u %n", &every, &used)) == 1 && used && !line[used]) {
-+        body_every = every; fprintf(stderr, "[survey] lonk: body log %s%u\n", every ? "every frames: " : "off ", every); return 1;
++        body_every = every; lonk_say("[survey] lonk: body log %s%u\n", every ? "every frames: " : "off ", every); return 1;
 +    }
 +    if ((used = 0, sscanf(line, "survey lonk body %n", &used)) == 0 && used && !line[used]) {
 +        body_once = 4; return 1;   /* (4 frames on: what's drawn is known by then) */
@@ -4902,77 +4993,77 @@ index c05d6c3..b469040 100644
 +    char onoff[8];
 +    if ((used = 0, sscanf(line, "survey lonk feetstats %n", &used)) == 0 && used && !line[used]) { fs_print(); al_details(); return 1; }
 +    if ((used = 0, sscanf(line, "survey lonk footik %n", &used)) == 0 && used && !line[used]) {
-+        fprintf(stderr, "[survey] lonk: footik %s, lift L %+.3f R %+.3f drop %.3f, %u frames, %u matrices written (%u failed), %u legs too short\n",
++        lonk_say("[survey] lonk: footik %s, lift L %+.3f R %+.3f drop %.3f, %u frames, %u matrices written (%u failed), %u legs too short\n",
 +                foot_ik_off ? "off" : "on", fik_dy[0], fik_dy[1], fik_drop, fik_frames, fik_writes, fik_fails, fik_short); return 1; }
 +    if ((used = 0, sscanf(line, "survey lonk footik trace %n", &used)) == 0 && used && !line[used]) { fik_trace_n = 0; fik_ntrace_n = 0; return 1; }
-+    if ((used = 0, sscanf(line, "survey lonk shake on %n", &used)) == 0 && used && !line[used]) { shake_on = 1; shake_frames = 0; fprintf(stderr, "[survey] lonk: shake on\n"); return 1; }
-+    if ((used = 0, sscanf(line, "survey lonk shake off %n", &used)) == 0 && used && !line[used]) { shake_on = 0; fprintf(stderr, "[survey] lonk: shake off\n"); return 1; }
-+    { float g; if ((used = 0, sscanf(line, "survey lonk grade %f %n", &g, &used)) == 1 && used && !line[used]) { lonk_grade_force = g; fprintf(stderr, "[survey] lonk: grade forced to %.0f\n", g); return 1; } }
-+    if ((used = 0, sscanf(line, "survey lonk grade off %n", &used)) == 0 && used && !line[used]) { lonk_grade_force = NAN; fprintf(stderr, "[survey] lonk: grade from the ground (now %.1f)\n", lonk_grade); return 1; }
-+    if ((used = 0, sscanf(line, "survey lonk footik on %n", &used)) == 0 && used && !line[used]) { foot_ik_off = 0; fprintf(stderr, "[survey] lonk: footik on\n"); return 1; }
-+    if ((used = 0, sscanf(line, "survey lonk footik off %n", &used)) == 0 && used && !line[used]) { foot_ik_off = 1; fprintf(stderr, "[survey] lonk: footik off\n"); return 1; }
++    if ((used = 0, sscanf(line, "survey lonk shake on %n", &used)) == 0 && used && !line[used]) { shake_on = 1; shake_frames = 0; lonk_say("[survey] lonk: shake on\n"); return 1; }
++    if ((used = 0, sscanf(line, "survey lonk shake off %n", &used)) == 0 && used && !line[used]) { shake_on = 0; lonk_say("[survey] lonk: shake off\n"); return 1; }
++    { float g; if ((used = 0, sscanf(line, "survey lonk grade %f %n", &g, &used)) == 1 && used && !line[used]) { lonk_grade_force = g; lonk_say("[survey] lonk: grade forced to %.0f\n", g); return 1; } }
++    if ((used = 0, sscanf(line, "survey lonk grade off %n", &used)) == 0 && used && !line[used]) { lonk_grade_force = NAN; lonk_say("[survey] lonk: grade from the ground (now %.1f)\n", lonk_grade); return 1; }
++    if ((used = 0, sscanf(line, "survey lonk footik on %n", &used)) == 0 && used && !line[used]) { foot_ik_off = 0; lonk_say("[survey] lonk: footik on\n"); return 1; }
++    if ((used = 0, sscanf(line, "survey lonk footik off %n", &used)) == 0 && used && !line[used]) { foot_ik_off = 1; lonk_say("[survey] lonk: footik off\n"); return 1; }
 +    if ((used = 0, sscanf(line, "survey lonk feetstats reset %n", &used)) == 0 && used && !line[used]) {
 +        memset(fs_hist, 0, sizeof fs_hist); memset(fs_vert_sunk, 0, sizeof fs_vert_sunk); memset(fs_in_floor, 0, sizeof fs_in_floor); memset(fs_in_other, 0, sizeof fs_in_other); memset(al_in_part, 0, sizeof al_in_part); memset(al_slide_by, 0, sizeof al_slide_by);
-+        fprintf(stderr, "[survey] lonk: feetstats reset\n"); return 1;
++        lonk_say("[survey] lonk: feetstats reset\n"); return 1;
 +    }
 +    if ((used = 0, sscanf(line, "survey lonk alarms %7[a-z] %n", onoff, &used)) == 1 && used && !line[used] && (!strcmp(onoff, "on") || !strcmp(onoff, "off"))) {
-+        alarms_off = !strcmp(onoff, "off"); fprintf(stderr, "[survey] lonk: alarms %s\n", alarms_off ? "off" : "on"); return 1;
++        alarms_off = !strcmp(onoff, "off"); lonk_say("[survey] lonk: alarms %s\n", alarms_off ? "off" : "on"); return 1;
 +    }
 +    if ((used = 0, sscanf(line, "survey lonk rec %7[a-z] %n", onoff, &used)) == 1 && used && !line[used] && (!strcmp(onoff, "on") || !strcmp(onoff, "off"))) {
-+        rec_off = !strcmp(onoff, "off"); fprintf(stderr, "[survey] lonk: recorder %s\n", rec_off ? "off" : "on"); return 1;
++        rec_off = !strcmp(onoff, "off"); lonk_say("[survey] lonk: recorder %s\n", rec_off ? "off" : "on"); return 1;
 +    }
 +    float tc[2];
 +    if ((used = 0, sscanf(line, "survey lonk testclimb %f %f %n", &tc[0], &tc[1], &used)) == 2 && used && !line[used]) {
 +        climb_test_up = tc[0]; climb_test_side = tc[1];
 +        if (!lonk_climb_test || !lonk_climb) lonk_climb_test = 1;   /* (on a wall already: it just moves him there) */
-+        fprintf(stderr, "[survey] lonk: test climb to %.1f m up, %.1f m sideways\n", tc[0], tc[1]);
++        lonk_say("[survey] lonk: test climb to %.1f m up, %.1f m sideways\n", tc[0], tc[1]);
 +        return 1;
 +    }
 +    if ((used = 0, sscanf(line, "survey lonk testclimb off %n", &used)) == 0 && used && !line[used]) {
-+        lonk_climb_test = 0; fprintf(stderr, "[survey] lonk: test climb off\n"); return 1;
++        lonk_climb_test = 0; lonk_say("[survey] lonk: test climb off\n"); return 1;
 +    }
 +    if ((used = 0, sscanf(line, "survey lonk testjump %n", &used)) == 0 && used && !line[used]) {
-+        lonk_fake_climbjump = 30; climb_test_up += 4; fprintf(stderr, "[survey] lonk: test climb jump\n"); return 1;   /* (and the test's height with it) */
++        lonk_fake_climbjump = 30; climb_test_up += 4; lonk_say("[survey] lonk: test climb jump\n"); return 1;   /* (and the test's height with it) */
 +    }
 +    if ((used = 0, sscanf(line, "survey lonk climbupright %n", &used)) == 0 && used && !line[used]) {
 +        lonk_climb_upright = !lonk_climb_upright;
-+        fprintf(stderr, "[survey] lonk: climbs with %s hips\n", lonk_climb_upright ? "the standing" : "his climb's own");
++        lonk_say("[survey] lonk: climbs with %s hips\n", lonk_climb_upright ? "the standing" : "his climb's own");
 +        return 1;
 +    }
 +    if ((used = 0, sscanf(line, "survey lonk climbflip %n", &used)) == 0 && used && !line[used]) {
 +        lonk_climb_flip = !lonk_climb_flip;
-+        fprintf(stderr, "[survey] lonk: climbing left and right %s\n", lonk_climb_flip ? "swapped" : "as they were");
++        lonk_say("[survey] lonk: climbing left and right %s\n", lonk_climb_flip ? "swapped" : "as they were");
 +        return 1;
 +    }
 +    float cg;
 +    if ((used = 0, sscanf(line, "survey lonk climbgap %f %n", &cg, &used)) == 1 && used && !line[used] && cg >= 0.2f && cg <= 1.5f) {
 +        lonk_climb_gap = cg;
-+        fprintf(stderr, "[survey] lonk: climbs %.2f m off the wall\n", lonk_climb_gap);
++        lonk_say("[survey] lonk: climbs %.2f m off the wall\n", lonk_climb_gap);
 +        return 1;
 +    }
 +    unsigned delay;
 +    if ((used = 0, sscanf(line, "survey lonk swimdelay %u %n", &delay, &used)) == 1 && used && !line[used] && delay < 10) {
 +        lonk_swim_delay = delay;
-+        fprintf(stderr, "[survey] lonk: swim height switches %u frames after the clip\n", delay);
++        lonk_say("[survey] lonk: swim height switches %u frames after the clip\n", delay);
 +        return 1;
 +    }
 +    float sw[4];
 +    if ((used = 0, sscanf(line, "survey lonk swim %f %f %f %f %n", &sw[0], &sw[1], &sw[2], &sw[3], &used)) == 4 && used && !line[used] &&
 +        fabsf(sw[0]) < 3 && fabsf(sw[1]) < 3 && fabsf(sw[2]) <= 60 && sw[3] >= 0 && sw[3] < 1) {
 +        lonk_swim_lift = sw[0]; lonk_tread_lift = sw[1]; lonk_swim_pitch = sw[2]; lonk_swim_push = sw[3];
-+        fprintf(stderr, "[survey] lonk: swims %.2f m up, treads %.2f m up, %.0f degrees head up, push %.2f\n", sw[0], sw[1], sw[2], sw[3]);
++        lonk_say("[survey] lonk: swims %.2f m up, treads %.2f m up, %.0f degrees head up, push %.2f\n", sw[0], sw[1], sw[2], sw[3]);
 +        return 1;
 +    }
 +    if ((used = 0, sscanf(line, "survey lonk recopy %n", &used)) == 0 && used && !line[used]) {
 +        lonk_recopy = 1;
-+        fprintf(stderr, "[survey] lonk: re-copying your weapons at the next check\n");
++        lonk_say("[survey] lonk: re-copying your weapons at the next check\n");
 +        return 1;
 +    }
 +    int twin = (used = 0, sscanf(line, "survey lonk twin %n", &used)) == 0 && used && !line[used];
 +    if (!kind && (twin || ((used = 0, sscanf(line, "survey lonk naked %n", &used)) == 0 && used && !line[used]))) {
 +        pthread_mutex_lock(&survey_lock);
 +        lonk_twin = twin; lonk_outfit = 0; dress_slot = -1; dress_left = 1;
-+        fprintf(stderr, "[survey] lonk: %s\n", twin ? "twins! he dresses like you" : "back in his underwear");
++        lonk_say("[survey] lonk: %s\n", twin ? "twins! he dresses like you" : "back in his underwear");
 +        atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release); pthread_mutex_unlock(&survey_lock);
 +        return 1;
 +    }
@@ -5021,7 +5112,7 @@ index c05d6c3..b469040 100644
 +    float bob[2];
 +    if (!kind && (used = 0, sscanf(line, "survey lonk bob %f %f %n", &bob[0], &bob[1], &used)) == 2 && used && !line[used] && isfinite(bob[0]) && isfinite(bob[1])) {
 +        lonk_bob[0] = fminf(fmaxf(bob[0], 0), 0.3f); lonk_bob[1] = bob[1] - floorf(bob[1]);
-+        fprintf(stderr, "[survey] lonk: his run bounces %.3f m, lowest at loop %.2f (and halfway round)\n", lonk_bob[0], lonk_bob[1]);
++        lonk_say("[survey] lonk: his run bounces %.3f m, lowest at loop %.2f (and halfway round)\n", lonk_bob[0], lonk_bob[1]);
 +        return 1;
 +    }
 +    if (!kind && (used = 0, sscanf(line, "survey lonk sheathe %n", &used)) == 0 && used && !line[used]) {
@@ -5030,7 +5121,7 @@ index c05d6c3..b469040 100644
 +    }
 +    if (!kind && (used = 0, sscanf(line, "survey lonk trace %n", &used)) == 0 && used && !line[used]) {
 +        lonk_trace = !lonk_trace;
-+        fprintf(stderr, "[survey] lonk: trace %s\n", lonk_trace ? "on" : "off");
++        lonk_say("[survey] lonk: trace %s\n", lonk_trace ? "on" : "off");
 +        return 1;
 +    }
 +    /* "survey lonk start [mood]": with a mood he spawns already in it, brain off (no split second of random brain first) */
@@ -5057,13 +5148,13 @@ index c05d6c3..b469040 100644
 +            atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
 +        }
 +        pthread_mutex_unlock(&survey_lock);
-+        fprintf(stderr, "[survey] lonk: %s%s\n", busy ? "start rejected (busy or survey off)" : there ? "already here, now: " : "starting: body + ",
++        lonk_say("[survey] lonk: %s%s\n", busy ? "start rejected (busy or survey off)" : there ? "already here, now: " : "starting: body + ",
 +                busy ? "" : start_mood == LONK_KINDS ? "brain" : lonk_names[start_mood]);
 +        return 1;
 +    }
 +    if (!kind && (used = 0, sscanf(line, "survey lonk stop %n", &used)) == 0 && used && !line[used]) {
 +        pthread_mutex_lock(&survey_lock); stalk_left = 0; lonk_brain = 0; pthread_mutex_unlock(&survey_lock);
-+        fprintf(stderr, "[survey] lonk: stopped\n");
++        lonk_say("[survey] lonk: stopped\n");
 +        return 1;
 +    }
 +    if (!kind && (used = 0, sscanf(line, "survey lonk %15s %u %n", word, &frames, &used)) == 2 && used && !line[used]) {
@@ -5075,7 +5166,7 @@ index c05d6c3..b469040 100644
 +        lonk_brain = which == LONK_KINDS;
 +        if (lonk_brain) lonk_phase_left = 0; else lonk_enter(which, frames);
 +        lonk_home = lonk_brain ? -1 : which;
-+        fprintf(stderr, "[survey] lonk: %s for %u frames, %u body pieces, ground=%s\n", word, stalk_left, stalker_count, ground_names[ground_mode]);
++        lonk_say("[survey] lonk: %s for %u frames, %u body pieces, ground=%s\n", word, stalk_left, stalker_count, ground_names[ground_mode]);
 +        if (stalk_left) atomic_store_explicit(&runtime_survey_pending, 1, memory_order_release);
 +        pthread_mutex_unlock(&survey_lock);
 +        return 1;
@@ -5122,7 +5213,7 @@ index c05d6c3..b469040 100644
 +        spawn_body = strcmp(request.tag, "prop") != 0; spawn_request(request.tag, request.name, request.off, frame, actor); request.kind = 0;
 +    }
 +    if (stalker_count) PART(1, stalkers_check());
-+    if (stalk_left && actor) { PART(0, lonk_step(frame, actor)); if (!--stalk_left) fprintf(stderr, "[survey] lonk: done\n"); }
++    if (stalk_left && actor) { PART(0, lonk_step(frame, actor)); if (!--stalk_left) lonk_say("[survey] lonk: done\n"); }
 +    /* never gone for long: once the player stands somewhere real again (not the loading screen's origin), he respawns */
 +    if (lonk_respawn_left && actor && !spawn_left && !request.kind) {
 +        float pp[3];
@@ -5130,7 +5221,7 @@ index c05d6c3..b469040 100644
 +        if (!real) lonk_respawn_left = 120;
 +        else if (!--lonk_respawn_left) {
 +            float off[3] = {4, 0, 0};
-+            fprintf(stderr, "[survey] lonk: he's back\n");
++            lonk_say("[survey] lonk: he's back\n");
 +            spawn_body = 1; lonk_anchored = 0;
 +            spawn_request("lonk", "PouchPlayer", off, frame, actor);
 +        }
