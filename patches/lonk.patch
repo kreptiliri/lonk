@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..73b5566 100644
+index c05d6c3..b469040 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -311,7 +311,7 @@ index c05d6c3..73b5566 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,66 +505,4992 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,66 +505,4998 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -3998,6 +3998,12 @@ index c05d6c3..73b5566 100644
 +            vy = lonk_jump; feet += 0.06f; lonk_jump = 0; lonk_air = 1;
 +            int going = moved < 2 && lonk_speed > 0.8f;   /* standing, he jumps on the spot (one step at take-off flew him past you) */
 +            lonk_air_vel[0] = going ? mx / lonk_dt : 0; lonk_air_vel[1] = going ? mz / lonk_dt : 0;
++            /* on the go Link jumps higher (traced, yours: 0.64 m standing, 1.04 m running 5.6 m/s, 1.21 m sprinting 8 m/s,
++               same gravity): the take-off speed rises with his ground speed, 6.4 -> 8.2 -> 8.8 m/s */
++            if (!lonk_jump_aimed && vy == LONK_JUMP) {
++                float gv = hypotf(lonk_air_vel[0], lonk_air_vel[1]);
++                vy = gv < 5.6f ? LONK_JUMP + (8.16f - LONK_JUMP) * gv / 5.6f : fminf(8.16f + (8.8f - 8.16f) * (gv - 5.6f) / 2.4f, 8.8f);
++            }
 +            if (lonk_jump_aimed) {   /* up a ledge: straight over it, at a run */
 +                float jx = lonk_jump_to[0] - a[0], jz = lonk_jump_to[1] - a[2], jl = fmaxf(hypotf(jx, jz), 0.01f);
 +                lonk_air_vel[0] = jx / jl * LONK_RUN; lonk_air_vel[1] = jz / jl * LONK_RUN;

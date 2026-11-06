@@ -52,7 +52,7 @@ Runs on the [MacNativeGames](https://github.com/ly05010419/MacNativeGames) nativ
 
 And whatever the mood, he watches you:
 
-- you jump (or flip, or roll): he jumps a beat later
+- you jump (or flip, or roll): he jumps a beat later, as high as you: higher on the run, higher still sprinting
 - you get hit: he startles
 - you swing your sword at him: he walks off a couple of metres, turns round and gets back at you (drops something
   gross at your feet, sometimes a bomb barrel; has a snack; or makes a face or does a victory dance), then comes back
