@@ -108,7 +108,7 @@ final class Panel: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ note: Notification) {
-        // the flight recorder keeps the last 15 s of both Links; this writes them out for Claude to read (lonk_mark_*.txt)
+        // the flight recorder keeps the last 15 s of both Links; this writes them out to a file (lonk_mark_*.txt)
         let weird = button("that was weird") { send(["survey lonk mark (the panel's button)"]) }
         weird.controlSize = .regular
         weird.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
