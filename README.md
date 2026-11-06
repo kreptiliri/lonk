@@ -22,6 +22,7 @@ Runs on the [MacNativeGames](https://github.com/ly05010419/MacNativeGames) nativ
   sky islands, caves and bridges count), around walls, off ledges after you, and up onto them when you're up there.
 - **His feet stand on the ground** (new): his own foot IK. The game's needs physics his body doesn't have, so each frame
   the mod bends his knees in the bone matrices the game draws him with: his feet land on the slope instead of in it.
+  Uphill his walk and run blend into Link's own slope clips (longer, slower steps), as yours do.
 - **He sees.** A ring of rays tells him what's around him: enemies, you, things in the way. He also reads what you're
   doing from your own animation commands.
 - **He swims** (new): into the water after you, with Link's swim stroke at your height, treading water when you stop,
@@ -167,10 +168,10 @@ reload.
 - As your twin he holds a two-hander in one hand when he stands still (his tree has no two-handed idle; it looks tough, so
   it stays), and he doesn't copy a shield-only guard.
 - As your twin he's in his underwear for about half a second after he spawns, until his clothes are on.
-- His feet fit slopes now (his own foot IK: each frame his knees bend so his feet land on the slope, and he sinks a
-  little on steep ground so the downhill foot reaches). Up to 35 degrees they sit like yours; steeper, a toe can still
-  go up to about 17 cm into the ground (yours, 2). On ground steeper than about 50 degrees he just runs, where your Link
-  climbs or does its slow slope walk.
+- On slopes his feet sit like yours now (measured), but only uphill does he switch to the slope clips: downhill, and with
+  his weapons out, he keeps his flat walk and run. On ground steeper than about 50 degrees he still just runs, where your
+  Link climbs.
+- With the mod installed, the inventory Link's "holding items up" pose plays a walk instead.
 - With the mod installed, the inventory Link runs, sprints, celebrates, startles or eats in the pause menu when you hold
   a weapon.
 

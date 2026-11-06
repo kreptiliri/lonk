@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..fb08348 100644
+index c05d6c3..73b5566 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -311,7 +311,7 @@ index c05d6c3..fb08348 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,66 +505,4975 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,66 +505,4992 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -1048,11 +1048,8 @@ index c05d6c3..fb08348 100644
 +                if (!changed && run >= 0) { if (len < (int)sizeof line - 20) len += snprintf(line + len, sizeof line - len, " %d-%d", run, b - 1); run = -1; }
 +            }
 +            fprintf(stderr, "%s\n", line);
-         }
-     }
--    atomic_store_explicit(&runtime_survey_pending, request.kind || hold_left, memory_order_release);
--    pthread_mutex_unlock(&survey_lock);
--    in_tick = 0;
++        }
++    }
 +    uintptr_t (*get_model)(uintptr_t) = (uintptr_t (*)(uintptr_t))get_model_fn;
 +    uintptr_t who[2] = {player, 0};
 +    for (unsigned i = 0; i < stalker_count; i++) if (!strcmp(stalkers[i].name, "PouchPlayer")) who[1] = stalkers[i].actor;
@@ -1123,6 +1120,7 @@ index c05d6c3..fb08348 100644
 +   change is a rotation about a joint, so it's one matrix on the left of every bone below it (no bind pose needed).
 +   Done on both palette buffers of each drawn model, each from its own pose; a buffer we already did keeps our mark. */
 +static int foot_ik_off;   /* "survey lonk footik on|off" */
++static float lonk_grade, lonk_grade_force = NAN;   /* (the slope along the way he faces, degrees, uphill negative as Link's PerimeterGrade; "survey lonk grade <deg|off>" forces it) */
 +static float fik_drop;   /* (how far his whole body goes down on a slope, so the downhill foot reaches: the waist control Link has) */
 +static float fik_dy[2], fik_n[2][3] = {{0, 1, 0}, {0, 1, 0}};   /* (each leg, smoothed: how far up the ankle goes, the ground's normal) */
 +static unsigned fik_frames, fik_writes, fik_fails, fik_short;   /* (frames done, matrices written, failed, legs that couldn't reach) */
@@ -1262,6 +1260,16 @@ index c05d6c3..fb08348 100644
 +        float steep = sqrtf(gx * gx + gz * gz);
 +        if (steep > 1.2f) { gx *= 1.2f / steep; gz *= 1.2f / steep; }   /* (50 degrees at most) */
 +        have = 1;
++    }
++    {   /* (the grade for his walk and run's slope clips: the mod blends them in from 15 degrees) */
++        float rot[9], g = 0;
++        if (have && read_mem(him + ACTOR_ROT, rot, sizeof rot)) {
++            float l = hypotf(rot[2], rot[8]);
++            if (l > 0.1f) g = -atanf((gx * rot[2] + gz * rot[8]) / l) * 57.2958f;
++        }
++        lonk_grade += (g - lonk_grade) * 0.15f;
++        if (lonk_grade > 45) lonk_grade = 45;
++        if (lonk_grade < -45) lonk_grade = -45;
 +    }
 +    if (have) {
 +        for (int k = 0; k < 5; k++) {
@@ -1993,6 +2001,10 @@ index c05d6c3..fb08348 100644
 +            was_fresh = fresh_clip;
 +        }
 +        was_loop = loop;
++        if (!loop && (on == GAIT_WALK || on == GAIT_RUN)) {   /* (walking or running: the slope, for the mod's blend into Link's up and down 45-degree clips) */
++            struct { const char *name; uint64_t zero; } t_key = {"Temperature", 0};
++            ((void (*)(uintptr_t, const void *, float))set_float)(bb, &t_key, isfinite(lonk_grade_force) ? lonk_grade_force : lonk_grade);
++        }
 +        ((void (*)(uintptr_t, const void *, const char *))set_string)(bb, &k_key, lonk_arm_kind);
 +        if (gait != lonk_gait && !waiting) fprintf(stderr, "[survey] gait: %s\n", gait_names[gait]);
 +        /* the rate Link's own tree plays them at (its frame controllers: walk 0.9, run 1.5, sprint 1.75), scaled by how fast he goes
@@ -2009,7 +2021,7 @@ index c05d6c3..fb08348 100644
 +        lonk_body = body; lonk_body_emote = emote_cmd;
 +    }
 +    if (!waiting) lonk_gait = gait;
- }
++}
 +/* Place PouchPlayer with the game's own set-transform, as the menu does: 0x2ba758(actor, &arg, 0); arg = position, row-major
 +   rotation, scale, 8 zero bytes at +0x40, flags 7 at +0x48. Facing the player, where it already stands. */
 +static void pouch_place(uintptr_t player) {
@@ -2136,9 +2148,12 @@ index c05d6c3..fb08348 100644
 +            uintptr_t (*get_model)(uintptr_t) = (uintptr_t (*)(uintptr_t))game_fn(0xba8854, w_model, 5);
 +            uintptr_t world_model = get_model ? get_model(player) : 0;
 +            dress_show(eu, world_model ? read_ptr(world_model + 0x60) : 0, false);
-+        }
-+    }
-+}
+         }
+     }
+-    atomic_store_explicit(&runtime_survey_pending, request.kind || hold_left, memory_order_release);
+-    pthread_mutex_unlock(&survey_lock);
+-    in_tick = 0;
+ }
 +/* Every frame once he's dressed: the game keeps putting his pieces back in the menu's scene (that's the flashing, then no legs), so they
 +   go back to the world scene each frame. Logs how often that was needed every 10 s. */
 +static unsigned fuse_show(uintptr_t eu, uintptr_t world, bool quiet);
@@ -4886,6 +4901,8 @@ index c05d6c3..fb08348 100644
 +    if ((used = 0, sscanf(line, "survey lonk footik trace %n", &used)) == 0 && used && !line[used]) { fik_trace_n = 0; fik_ntrace_n = 0; return 1; }
 +    if ((used = 0, sscanf(line, "survey lonk shake on %n", &used)) == 0 && used && !line[used]) { shake_on = 1; shake_frames = 0; fprintf(stderr, "[survey] lonk: shake on\n"); return 1; }
 +    if ((used = 0, sscanf(line, "survey lonk shake off %n", &used)) == 0 && used && !line[used]) { shake_on = 0; fprintf(stderr, "[survey] lonk: shake off\n"); return 1; }
++    { float g; if ((used = 0, sscanf(line, "survey lonk grade %f %n", &g, &used)) == 1 && used && !line[used]) { lonk_grade_force = g; fprintf(stderr, "[survey] lonk: grade forced to %.0f\n", g); return 1; } }
++    if ((used = 0, sscanf(line, "survey lonk grade off %n", &used)) == 0 && used && !line[used]) { lonk_grade_force = NAN; fprintf(stderr, "[survey] lonk: grade from the ground (now %.1f)\n", lonk_grade); return 1; }
 +    if ((used = 0, sscanf(line, "survey lonk footik on %n", &used)) == 0 && used && !line[used]) { foot_ik_off = 0; fprintf(stderr, "[survey] lonk: footik on\n"); return 1; }
 +    if ((used = 0, sscanf(line, "survey lonk footik off %n", &used)) == 0 && used && !line[used]) { foot_ik_off = 1; fprintf(stderr, "[survey] lonk: footik off\n"); return 1; }
 +    if ((used = 0, sscanf(line, "survey lonk feetstats reset %n", &used)) == 0 && used && !line[used]) {

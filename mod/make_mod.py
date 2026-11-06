@@ -98,6 +98,9 @@ RIGHT_STILL = 221
 # The patch climbs on the root's way round its blender (WeaponFire on), through a free blender of the menu's, with the
 # ArmR bone group turned into Root alone (its one other user, the right arm of the menu's hot and cold idle, loses it)
 CLIMB_STILL, CLIMB_GROUP = 225, 'ArmR'
+# (blender: (his unarmed bool selector, its two leaves for up and down, the flat clip, uphill, downhill); see main)
+SLOPES = {170: (223, (171, 173), 'Nml_Move_Walk', 'Nml_Move_Walk_Slope_U45', None),
+          174: (226, (175, 177), 'Nml_Move_Run', 'Nml_Move_Run_Slope_U45', None)}
 
 
 def reached(doc):
@@ -318,6 +321,36 @@ def main():
     next(c for c in doc['Commands'] if c['Name'] == 'PauseMenuWait')['Node Index'] = water['Node Index']
     if (taken & {n['Node Index'] for n in (guard, shield, shield2, fire, fire2, fire3, water)} | ({CLIMB_PICK, RIGHT_STILL, CLIMB_STILL} & taken)) or ROOT in reached({'Nodes': doc['Nodes'], 'Commands': [{'Node Index': guard['Node Index']}]}):
         sys.exit('the loops would loop back into his tree')
+    # Slopes: Link's walk and run blend into their up and down 45-degree versions (longer, slower steps uphill) by the
+    # slope's grade, in a one-dimensional blender: uphill -45..-15, flat -45..45, downhill 15..45 (as Link's own, which
+    # reads PerimeterGrade: negative is uphill). His tree's four such blenders are the menu's "Lift" poses (holding an
+    # item up), a command he never gets; two of them take his walk and run (unarmed), on Temperature, which the patch
+    # writes as the grade while he walks or runs (it writes the climbs' values on it while he climbs).
+    nodes = {n['Node Index']: n for n in doc['Nodes']}
+    for blender, (sel, leaves, flat, up, down) in SLOPES.items():
+        b, s_ = nodes[blender], nodes[sel]
+        false = next(c for c in s_['Body']['Child Nodes'] if 'Condition False' in c)
+        if (b['Node Type'] != 'OneDimensionalBlender' or len(b['Body']['Child Nodes']) != 2 or
+                nodes[false['Condition False']]['Body'].get('Animation') != flat or
+                any(nodes[l]['Node Type'] != 'SkeletalAnimation' or not nodes[l]['Body'].get('Animation', '').startswith('Lift_') for l in leaves)):
+            sys.exit('no free blender for the slope clips: not the 1.4.3 ASB?')
+        # (both of the blender's own leaves: a blender's clips carry Sync Controls, his walk's leaf has none, and with it
+        # under the blender the game crashed as he spawned; a third child crashed it too: it keeps the two it had. So:
+        # uphill, and the flat clip again, with the flat leaf's events (his steps) and frame controls)
+        flat_body = nodes[false['Condition False']]['Body']
+        for leaf, clip in zip(leaves, (up, flat)):
+            body = nodes[leaf]['Body']
+            body['Animation'] = clip
+            body.pop('Frame Controls', None)
+            body.pop('Events', None)   # (the lift's own sounds: not his)
+            nodes[leaf].pop('Sync Controls', None)   # (the Lift command's sync: under his walk command it crashed him at spawn)
+            if clip == flat:
+                for key in ('Frame Controls', 'Events'):
+                    if flat_body.get(key): body[key] = list(flat_body[key])
+        b['Body']['Parameter'] = {'Blackboard Index': 0, 'Type': 'float', 'Select Flag': 'SelectOnUpdate'}
+        b['Body']['Child Nodes'] = [{'Condition Min': -45.0, 'Condition Max': -15.0, 'Node Index': leaves[0]},
+                                    {'Condition Min': -45.0, 'Condition Max': 45.0, 'Node Index': leaves[1]}]
+        false['Condition False'] = blender
     AsbFile.from_dict(doc).to_binary(str(work) + '/')
     edited = (work / 'PouchPlayer.root.asb').read_bytes()
 
