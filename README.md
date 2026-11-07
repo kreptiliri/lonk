@@ -34,6 +34,12 @@ Runs on the [MacNativeGames](https://github.com/ly05010419/MacNativeGames) nativ
 - **A recorder for bug hunting** (new): the last 15 s of both Links, every frame, written to a file by
   `survey lonk mark` or the panel's "that was weird" button; glitch alarms log parts inside walls, snaps, spins and
   frozen clips as they happen. `survey lonk shake on` measures flicker: how hard each part of both Links jerks, every frame.
+- **A whole-session recorder** (new, off unless you start the game with `TOTK_LONK_OBS=1`, or `survey lonk obs on`):
+  every frame of both Links (all 127 bones), your keys, mouse and camera, what you both hold, the rock around you
+  (scanned in 3D) and what's nearby, into one file per game run. `tools/observatory/lens.py` reads it back: `odd`
+  lists what was most unlike your Link at a moment, `find in rock` finds where he was inside rock, `compare
+  feet|turns|bounce|jumps` measures him against you over a whole session, `slice`/`top` draw the rock round him.
+  `live.py` writes a short running log while you play. ~120 MB an hour at 30 fps.
 - **He doesn't stay gone.** You die, he's back a couple of seconds after you are.
 - **He has a (small) brain.** Every few seconds he decides what to do, and what you're doing changes his dice: on the
   move he sticks with you, standing around he plays.
@@ -87,6 +93,7 @@ data. You need your own legally dumped copy of the game, like the port itself do
 - `mod/make_mod.py`: builds his animation mod from your own game files (nothing from the game is in this repo).
 - `tools/plugin.sh`: builds his code as a hot-reload plugin (see below).
 - `tools/lonk_panel.swift`: a floating control panel (see below).
+- `tools/observatory/`: the readers for the whole-session recordings (`lens.py`, python 3, nothing to install).
 - `docs/how-it-works.md`: the reverse-engineering notes. How I found the spawn function in 1.4.3, how he gets dressed,
   how an inventory Link learned to run, how he finds the ground and sees enemies.
 
@@ -122,6 +129,7 @@ from his first frame.
 | `survey lonk hit [gift\|eat\|silly]` | as if you'd swung at him (any reaction, or that one) |
 | `survey lonk emote <name>` | `look`, `lookup`, `eat`, `meal` (the same as `eat` now), `yuck`, `jump`, `sulk`, `surprise` |
 | `survey lonk mark [note]` | write the last 15 s of both Links to `~/Library/Logs/MacNativeGames/lonk_mark_<time>.txt` (also the panel's "that was weird"); `survey lonk alarms on\|off`, `survey lonk rec on\|off` |
+| `survey lonk obs [on\|off]` | the whole-session recorder: status, or turn it on/off (`~/Library/Logs/MacNativeGames/lonk_session_<time>.obs`, read with `tools/observatory/lens.py`) |
 | `survey lonk testclimb <up m> <sideways m>` / `off` | put him on the nearest wall near you and hold him there (a test); `survey lonk testjump` makes him climb-jump |
 | `survey lonk pose <swim\|tread\|climb\|cling\|glide\|swing\|off>` | play one of the new loops where he stands for 5 s, to look at it (needs the mod rebuilt) |
 | `survey lonk swim <lift> <tread lift> <tilt> <push>` | tune his swimming: how much higher he swims (1.5 m) and treads water (0) than his feet 1.4 m under the surface, degrees head up (0), how much his speed surges with each stroke (0.35) |

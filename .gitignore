@@ -7,3 +7,4 @@ romfs/
 exefs/
 *.elf
 *.log
+__pycache__/

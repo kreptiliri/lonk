@@ -26,7 +26,7 @@ index 9179e3c..95d94aa 100644
  #endif
  #ifndef GAME_NAME
 diff --git a/games/totk/runtime/world_survey.c b/games/totk/runtime/world_survey.c
-index c05d6c3..6275b0e 100644
+index c05d6c3..4b38eea 100644
 --- a/games/totk/runtime/world_survey.c
 +++ b/games/totk/runtime/world_survey.c
 @@ -5,7 +5,10 @@
@@ -40,17 +40,24 @@ index c05d6c3..6275b0e 100644
  #include <limits.h>
  #include <mach/mach.h>
  #include "mach_vm_compat.h"
-@@ -13,7 +16,9 @@
+@@ -13,7 +16,16 @@
  #include <stdio.h>
  #include <stdlib.h>
  #include <string.h>
 +#include <time.h>
  #include <unistd.h>
 +#include <stdarg.h>
++#include <pthread.h>
++#include <fcntl.h>
++#include <dlfcn.h>
++#include <sys/mman.h>
++#include <mach-o/dyld.h>
++#include <mach-o/loader.h>
++#include <mach-o/nlist.h>
  
  #ifdef GAME_BOTW
  /* Breath of the Wild 1.6.0: no frame-end hook (the survey sync object is never found, see runtime_survey_sync), so
-@@ -181,24 +186,203 @@ void runtime_survey_init(Module *m) {
+@@ -181,24 +193,203 @@ void runtime_survey_init(Module *m) {
  int runtime_survey_command(const char *line) { (void)line; return 0; }
  #endif
  #else
@@ -259,7 +266,7 @@ index c05d6c3..6275b0e 100644
  
  static int read_mem(uintptr_t address, void *out, size_t size) {
      if (!address || address > UINTPTR_MAX - size) return 0;
-@@ -254,6 +438,45 @@ static uintptr_t player_actor(void) {
+@@ -254,6 +445,45 @@ static uintptr_t player_actor(void) {
      }
      return 0;
  }
@@ -305,7 +312,7 @@ index c05d6c3..6275b0e 100644
  void runtime_survey_init(Module *m) {
      const char *enabled = getenv("TOTK_SURVEY");
      if (!enabled || strcmp(enabled, "1")) return;
-@@ -272,6 +495,21 @@ void runtime_survey_init(Module *m) {
+@@ -272,6 +502,21 @@ void runtime_survey_init(Module *m) {
          runtime_fail("survey requires verified game-version forceSetMatrix entry");
      survey_main = (uintptr_t)m->base;
      survey_force = (void (*)(void *, const float *, uint32_t))(m->base + FORCE_MATRIX);
@@ -327,7 +334,7 @@ index c05d6c3..6275b0e 100644
      survey_enabled = 1;
      fprintf(stderr, "[survey] enabled: test profile, game frame-end commands, original forceSetMatrix\n");
  }
-@@ -282,66 +520,5073 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
+@@ -282,66 +527,6123 @@ static void report(const char *tag, const char *status, uint64_t frame, uintptr_
                  tag, status, (unsigned long long)frame, (unsigned long long)actor, xyz[0], xyz[1], xyz[2]);
      else fprintf(stderr, "[survey] tag=%s status=%s frame=%llu actor=0\n", tag, status, (unsigned long long)frame);
  }
@@ -1506,6 +1513,489 @@ index c05d6c3..6275b0e 100644
 +        body_line(1, "him", him, lonk_climb ? in : NULL, hface, doing, frame);
 +    }
 +}
++/* ===== OBSERVATORY (a recording and analysis tool: capture only, nothing here changes what he does) =====
++   Phase 0 probes. "survey peek ray <you|him> sx sy sz ex ey ez": one physics ray between two points given relative to
++   that Link's feet, with what the query leaves behind (hit, normal, fraction, layer, body). "survey peek column <you|him>
++   dx dz top bottom": every surface along a vertical line, down from top and up from bottom (each cast starts just past
++   the last hit), to learn what a ray does from inside rock and whether it sees back faces. */
++/* The observatory's own copy of ray_cast (his code's casts and its ray_last stay untouched): same query, its own buffer,
++   and the two words the cliff-check node sets to 1 (+0x90, +0x114) can be set for tests ("survey peek rayflags a b") */
++static _Alignas(16) uint8_t obs_q[0x200];
++static uint32_t obs_q90 = 1, obs_q114 = 1, obs_poke_off, obs_poke_val, obs_faces;   /* (obs_faces: +0x84, 1 = only faces turned toward the ray, 2 = only faces turned away, 0 both: the cast ORs it into Havok's ray flags) */
++static int obs_ray(const float s[3], const float e[3], float hit[3], float n[3], float *frac, uint32_t *layer) {
++    static int checked;
++    if (!checked) { float h0[3]; ray_cast(s, s, h0, NULL); checked = 1 + (ray_last != NULL); }   /* (once: ray_cast checks the code and tables) */
++    if (checked != 2) return 0;
++    static const uint32_t w_cast[] = {0x39446008, 0x37184b08, 0xa9ba7bfd, 0xa9016ffc, 0x910003fd, 0xa90267fa};
++    bool (*cast)(void *, int) = (bool (*)(void *, int))game_fn(0x1952a4, w_cast, 6);
++    if (!cast) return 0;
++    uint8_t *q = obs_q;
++    memset(q, 0, sizeof obs_q);
++    uintptr_t vt = survey_main + 0x361da10 + 0x10, filter = (uintptr_t)(q + 0x128), filter_vt = survey_main + 0x3929490 + 0x10;
++    float fraction = -1;
++    uint64_t layers = ray_layers, low = 0xffffffffull, all = ~0ull, one64 = 1;
++    memcpy(q, &vt, 8); memcpy(q + 0x08, s, 12); memcpy(q + 0x14, e, 12); memcpy(q + 0x3c, &fraction, 4);
++    memcpy(q + 0x60, &filter, 8); memcpy(q + 0x90, &obs_q90, 4); memcpy(q + 0x114, &obs_q114, 4);
++    memcpy(q + 0x128, &filter_vt, 8); memcpy(q + 0x130, &layers, 8); memcpy(q + 0x138, &low, 8); memcpy(q + 0x140, &all, 8);
++    memcpy(q + 0x150, &one64, 8);
++    memcpy(q + 0x84, &obs_faces, 4);
++    if (obs_poke_off) memcpy(q + obs_poke_off, &obs_poke_val, 4);
++    int got = cast(q, 0);
++    if (got) { memcpy(hit, q + 0x24, 12); for (int k = 0; k < 3; k++) if (!isfinite(hit[k])) got = 0; }
++    if (got && n) memcpy(n, q + 0x30, 12);
++    if (frac) memcpy(frac, q + 0x3c, 4);
++    if (layer) { *layer = 0; if (got) memcpy(layer, q + 0x48, 4); }
++    return got;
++}
++static uintptr_t obs_hit_actor(void) {   /* (the actor whose body the last obs_ray hit, as ray_hit_actor reads it) */
++    uintptr_t body = 0; memcpy(&body, obs_q + 0x170, 8);
++    uintptr_t holder = body ? read_ptr(body + 0x110) : 0;
++    if (!holder) return 0;
++    uintptr_t link = holder + 0x18, object = read_ptr(link + 8);
++    uint32_t id = 0, now = 0;
++    if (!object || !read_mem(link + 0x10, &id, 4) || id == 0xffffffffu || !read_mem(object + 0x48, &now, 4) || now != id) return 0;
++    return read_ptr(object + 0x40);
++}
++/* Only the world's own geometry for the rock tests: a hit on an actor's body (gear, his fused rocks, an enemy, a thing
++   you carry) is passed through and the cast goes on (static rock and ground have no actor). obs_skipped counts them,
++   obs_skipped_name keeps the last one's name. */
++static unsigned obs_skipped; static char obs_skipped_name[48];
++static int obs_ray_static(const float s0[3], const float e[3], float hit[3], float n[3]) {
++    float a[3] = {s0[0], s0[1], s0[2]}, d[3] = {e[0] - s0[0], e[1] - s0[1], e[2] - s0[2]};
++    float len = sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
++    if (len <= 0) return 0;
++    for (int k = 0; k < 6; k++) {
++        if (!obs_ray(a, e, hit, n, NULL, NULL)) return 0;
++        uintptr_t act = obs_hit_actor();
++        if (!act) return 1;
++        obs_skipped++;
++        if (!actor_name_at(act, obs_skipped_name)) snprintf(obs_skipped_name, sizeof obs_skipped_name, "%#llx", (unsigned long long)act);
++        for (int q = 0; q < 3; q++) a[q] = hit[q] + d[q] / len * 0.002f;
++    }
++    return 0;
++}
++/* "survey peek hunt <cam|pad|reread>": a whole-memory search on its own thread (never the game's: deep walks there froze
++   the game twice), over resident read-write pages only, writing candidates to obs_hunt.txt (reread: the same addresses
++   again -> obs_hunt2.txt) for the tools to compare. cam: {position, look-at, up} (9 floats: |up| = 1, position within
++   40 m of you, look-at 0.3-40 m from it; sead's LookAtCamera keeps them so). pad: a 40-byte NpadState as input.c hands it
++   to the game {int64 sampling, u64 buttons, int32 lx ly rx ry, u32 attributes = 1, 0}. */
++static _Atomic int obs_hunt_busy;
++static int obs_hunt_mode; static float obs_hunt_at[3];
++static void obs_hunt_line(FILE *f, int mode, uintptr_t a, const uint8_t *p) {
++    if (mode == 1) { const float *v = (const float *)p; fprintf(f, "%llx %.3f %.3f %.3f %.3f %.3f %.3f %.4f %.4f %.4f %.4f %.4f %.4f\n", (unsigned long long)a, v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8], v[9], v[10], v[11]); }
++    else { int64_t smp; uint64_t b; int32_t ax[4]; uint32_t at[2]; memcpy(&smp, p, 8); memcpy(&b, p + 8, 8); memcpy(ax, p + 16, 16); memcpy(at, p + 32, 8);
++           fprintf(f, "%llx %lld %llx %d %d %d %d %u %u\n", (unsigned long long)a, (long long)smp, (unsigned long long)b, ax[0], ax[1], ax[2], ax[3], at[0], at[1]); }
++}
++static void *obs_hunt_main(void *unused) {
++    (void)unused;
++    const char *home = getenv("HOME"); char path[PATH_MAX], path2[PATH_MAX];
++    snprintf(path, sizeof path, "%s/Library/Logs/MacNativeGames/obs_hunt.txt", home ? home : "/tmp");
++    snprintf(path2, sizeof path2, "%s/Library/Logs/MacNativeGames/obs_hunt2.txt", home ? home : "/tmp");
++    uint64_t t0 = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
++    unsigned found = 0; unsigned long long scanned = 0;
++    if (obs_hunt_mode == 3) {   /* reread: mode word on the first line */
++        FILE *in = fopen(path, "r"), *out = fopen(path2, "w");
++        char line[400]; int mode = 1;
++        if (in && out && fgets(line, sizeof line, in)) { sscanf(line, "# mode %d", &mode); fputs(line, out); }
++        while (in && out && fgets(line, sizeof line, in)) {
++            unsigned long long a = strtoull(line, NULL, 16); uint8_t p[48];
++            if (a && read_mem((uintptr_t)a, p, sizeof p)) { obs_hunt_line(out, mode, (uintptr_t)a, p); found++; }
++        }
++        if (in) fclose(in);
++        if (out) fclose(out);
++        fprintf(stderr, "[obs] hunt reread: %u -> %s\n", found, path2);
++        atomic_store(&obs_hunt_busy, 0); return NULL;
++    }
++    FILE *f = fopen(path, "w");
++    if (!f) { atomic_store(&obs_hunt_busy, 0); return NULL; }
++    fprintf(f, "# mode %d at %.3f %.3f %.3f\n", obs_hunt_mode == 4 ? 2 : obs_hunt_mode, obs_hunt_at[0], obs_hunt_at[1], obs_hunt_at[2]);
++    static uint8_t buf[1 << 20];
++    int disp[(1 << 20) / 4096];
++    mach_vm_address_t addr = 0;
++    natural_t depth = 0;
++    const vm_size_t page = vm_page_size;
++    while (found < 20000) {
++        mach_vm_size_t size = 0; vm_region_submap_info_data_64_t info; mach_msg_type_number_t count = VM_REGION_SUBMAP_INFO_COUNT_64;
++        if (mach_vm_region_recurse(mach_task_self(), &addr, &size, &depth, (vm_region_recurse_info_t)&info, &count) != KERN_SUCCESS) break;
++        if (info.is_submap) { depth++; continue; }
++        if ((info.protection & (VM_PROT_READ | VM_PROT_WRITE)) == (VM_PROT_READ | VM_PROT_WRITE) && info.pages_resident > 0 &&
++            !(addr <= (uintptr_t)buf && (uintptr_t)buf < addr + size)) {
++            for (mach_vm_address_t w = addr; w < addr + size && found < 20000; w += sizeof buf) {
++                mach_vm_size_t len = addr + size - w; if (len > sizeof buf) len = sizeof buf;
++                mach_vm_size_t pages = len / page, dn = pages;
++                if (mach_vm_page_range_query(mach_task_self(), w, len, (mach_vm_address_t)disp, &dn) != KERN_SUCCESS) continue;
++                for (mach_vm_size_t pg = 0; pg < dn && pg < pages; pg++) {
++                    if (!(disp[pg] & VM_PAGE_QUERY_PAGE_PRESENT)) continue;
++                    mach_vm_size_t got = 0;
++                    if (mach_vm_read_overwrite(mach_task_self(), w + pg * page, page, (mach_vm_address_t)buf, &got) != KERN_SUCCESS || got != page) continue;
++                    scanned += page;
++                    if (obs_hunt_mode == 1) {
++                        for (size_t i = 0; i + 48 <= page; i += 4) {
++                            const float *v = (const float *)(buf + i);
++                            if (!(v[7] > 0.3f && v[7] < 1.0001f)) continue;
++                            float u2 = v[6] * v[6] + v[7] * v[7] + v[8] * v[8];
++                            if (!(u2 > 0.98f && u2 < 1.02f)) continue;
++                            float d0 = v[0] - obs_hunt_at[0], d1 = v[1] - obs_hunt_at[1], d2 = v[2] - obs_hunt_at[2];
++                            if (!(d0 * d0 + d1 * d1 + d2 * d2 < 1600)) continue;
++                            float e0 = v[3] - v[0], e1 = v[4] - v[1], e2 = v[5] - v[2], l2 = e0 * e0 + e1 * e1 + e2 * e2;
++                            if (!(l2 > 0.09f && l2 < 1600)) continue;
++                            obs_hunt_line(f, 1, (uintptr_t)(w + pg * page + i), buf + i); if (++found >= 20000) break;
++                        }
++                    } else {
++                        for (size_t i = 0; i + 48 <= page; i += 8) {
++                            uint32_t at[2]; memcpy(at, buf + i + 32, 8);
++                            if (at[0] != 1 || at[1] != 0) continue;
++                            int64_t smp; uint64_t b; int32_t ax[4]; memcpy(&smp, buf + i, 8); memcpy(&b, buf + i + 8, 8); memcpy(ax, buf + i + 16, 16);
++                            if (smp < 100 || smp > 10000000000ll || b >= (1ull << 32)) continue;
++                            int okax = 1, full = 0; for (int k = 0; k < 4; k++) { if (ax[k] < -32768 || ax[k] > 32767) okax = 0; if (ax[k] == 32767 || ax[k] == -32767) full = 1; }
++                            if (!okax || (obs_hunt_mode == 4 && !full)) continue;
++                            obs_hunt_line(f, 2, (uintptr_t)(w + pg * page + i), buf + i); if (++found >= 20000) break;
++                        }
++                    }
++                }
++            }
++        }
++        addr += size;
++    }
++    fclose(f);
++    fprintf(stderr, "[obs] hunt %s: %u found in %.0f MB, %.1f s -> %s\n", obs_hunt_mode == 1 ? "cam" : obs_hunt_mode == 4 ? "padheld" : "pad", found, scanned / 1048576.0,
++            (clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - t0) / 1e9, path);
++    atomic_store(&obs_hunt_busy, 0);
++    return NULL;
++}
++/* "survey peek hunt find <hex u32>" (every 4-aligned word with that value, resident read-write memory, up to 4M),
++   "hunt keep <hex>" / "hunt drop <hex>" (keep the candidates now equal / not equal to it), "hunt list" (up to 64 with the
++   words around them -> obs_hunt.txt): narrowing on its own thread, to find fields that follow a key held or let go. */
++static uintptr_t *obs_cand; static unsigned obs_cand_n; static uint32_t obs_find_val; static int obs_find_op;
++static void *obs_find_main(void *unused) {
++    (void)unused;
++    uint64_t t0 = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
++    const unsigned cap = 4u << 20;
++    if (!obs_cand) obs_cand = malloc(cap * sizeof *obs_cand);
++    if (!obs_cand) { atomic_store(&obs_hunt_busy, 0); return NULL; }
++    if (obs_find_op == 0) {
++        static uint8_t buf[1 << 20]; int disp[(1 << 20) / 4096]; const vm_size_t page = vm_page_size;
++        mach_vm_address_t addr = 0; natural_t depth = 0; obs_cand_n = 0;
++        while (obs_cand_n < cap) {
++            mach_vm_size_t size = 0; vm_region_submap_info_data_64_t info; mach_msg_type_number_t count = VM_REGION_SUBMAP_INFO_COUNT_64;
++            if (mach_vm_region_recurse(mach_task_self(), &addr, &size, &depth, (vm_region_recurse_info_t)&info, &count) != KERN_SUCCESS) break;
++            if (info.is_submap) { depth++; continue; }
++            if ((info.protection & (VM_PROT_READ | VM_PROT_WRITE)) == (VM_PROT_READ | VM_PROT_WRITE) && info.pages_resident > 0 &&
++                !(addr <= (uintptr_t)buf && (uintptr_t)buf < addr + size) && !(addr <= (uintptr_t)obs_cand && (uintptr_t)obs_cand < addr + size)) {
++                for (mach_vm_address_t w = addr; w < addr + size && obs_cand_n < cap; w += sizeof buf) {
++                    mach_vm_size_t len = addr + size - w; if (len > sizeof buf) len = sizeof buf;
++                    mach_vm_size_t pages = len / page, dn = pages;
++                    if (mach_vm_page_range_query(mach_task_self(), w, len, (mach_vm_address_t)disp, &dn) != KERN_SUCCESS) continue;
++                    for (mach_vm_size_t pg = 0; pg < dn && pg < pages && obs_cand_n < cap; pg++) {
++                        mach_vm_size_t got = 0;
++                        if (!(disp[pg] & VM_PAGE_QUERY_PAGE_PRESENT) || mach_vm_read_overwrite(mach_task_self(), w + pg * page, page, (mach_vm_address_t)buf, &got) != KERN_SUCCESS || got != page) continue;
++                        const uint32_t *v = (const uint32_t *)buf;
++                        for (size_t i = 0; i < page / 4 && obs_cand_n < cap; i++) if (v[i] == obs_find_val) obs_cand[obs_cand_n++] = (uintptr_t)(w + pg * page + i * 4);
++                    }
++                }
++            }
++            addr += size;
++        }
++    } else if (obs_find_op == 1 || obs_find_op == 2) {
++        unsigned k = 0;
++        for (unsigned i = 0; i < obs_cand_n; i++) { uint32_t v; if (read_mem(obs_cand[i], &v, 4) && ((v == obs_find_val) == (obs_find_op == 1))) obs_cand[k++] = obs_cand[i]; }
++        obs_cand_n = k;
++    } else {
++        const char *home = getenv("HOME"); char path[PATH_MAX];
++        snprintf(path, sizeof path, "%s/Library/Logs/MacNativeGames/obs_hunt.txt", home ? home : "/tmp");
++        FILE *f = fopen(path, "w");
++        for (unsigned i = 0; f && i < obs_cand_n && i < 64; i++) {
++            uint32_t v[16] = {0}; read_mem(obs_cand[i] - 16, v, sizeof v);
++            fprintf(f, "%llx", (unsigned long long)obs_cand[i]);
++            for (int k = 0; k < 16; k++) fprintf(f, " %08x", v[k]);
++            fprintf(f, "\n");
++        }
++        if (f) fclose(f);
++    }
++    fprintf(stderr, "[obs] hunt %s %x: %u candidates, %.1f s\n", (const char *[]){"find", "keep", "drop", "list"}[obs_find_op], obs_find_val, obs_cand_n,
++            (clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - t0) / 1e9);
++    atomic_store(&obs_hunt_busy, 0);
++    return NULL;
++}
++/* The user's input, read-only, from the host's own statics (input.c, gamepad.m) found by name in the main executable's
++   symbol table (static symbols are kept: nothing is stripped). Never calls anything there (runtime_gamepad_read clears
++   the pressed edges: calling it would eat the user's presses). A build without one of them just has no such channel. */
++struct obs_in_syms { const uint8_t *keys, *user_keys, *mouse_down, *key_axis; const uint64_t *key_button, *mouse_button, *pending; const float *mouse_rx, *mouse_ry;
++                     const uint8_t *mouse_axis; const struct { uint64_t buttons; int32_t lx, ly, rx, ry; int connected; } *pad; int looked; };
++static struct obs_in_syms obs_in;
++static const void *obs_host_sym(const char *want) {
++    const struct mach_header_64 *mh = (const struct mach_header_64 *)_dyld_get_image_header(0);
++    intptr_t slide = _dyld_get_image_vmaddr_slide(0);
++    const struct load_command *lc = (const void *)(mh + 1);
++    const struct symtab_command *st = NULL; const struct segment_command_64 *linkedit = NULL;
++    for (uint32_t i = 0; i < mh->ncmds; i++, lc = (const void *)((const uint8_t *)lc + lc->cmdsize)) {
++        if (lc->cmd == LC_SYMTAB) st = (const void *)lc;
++        if (lc->cmd == LC_SEGMENT_64 && !strcmp(((const struct segment_command_64 *)lc)->segname, "__LINKEDIT")) linkedit = (const void *)lc;
++    }
++    if (!st || !linkedit) return NULL;
++    const uint8_t *base = (const uint8_t *)(linkedit->vmaddr + slide - linkedit->fileoff);
++    const struct nlist_64 *sym = (const void *)(base + st->symoff);
++    const char *names = (const char *)(base + st->stroff);
++    for (uint32_t i = 0; i < st->nsyms; i++)
++        if ((sym[i].n_type & N_TYPE) == N_SECT && !(sym[i].n_type & N_STAB) && !strcmp(names + sym[i].n_un.n_strx, want)) return (const void *)(sym[i].n_value + slide);
++    return NULL;
++}
++static void obs_in_look(void) {
++    if (obs_in.looked) return;
++    obs_in.looked = 1;
++    obs_in.keys = obs_host_sym("_keys"); obs_in.user_keys = obs_host_sym("_userKeys"); obs_in.mouse_down = obs_host_sym("_mouseDown");
++    obs_in.key_axis = obs_host_sym("_keyAxis"); obs_in.key_button = obs_host_sym("_keyButton"); obs_in.mouse_button = obs_host_sym("_mouseButton");
++    obs_in.pending = obs_host_sym("_pending"); obs_in.mouse_rx = obs_host_sym("_mouseRx"); obs_in.mouse_ry = obs_host_sym("_mouseRy");
++    obs_in.mouse_axis = obs_host_sym("_mouseAxis"); obs_in.pad = obs_host_sym("_gamepadState");
++    fprintf(stderr, "[obs] input: keys %s userKeys %s mouse %s map %s pad %s\n", obs_in.keys ? "ok" : "-", obs_in.user_keys ? "ok" : "-", obs_in.mouse_down ? "ok" : "-",
++            obs_in.key_button && obs_in.key_axis ? "ok" : "-", obs_in.pad ? "ok" : "-");
++}
++static void obs_rock_point(const float b[3], int *in, float *deep, int *count) {
++    /* every surface above (to 8 m) and the two nearest below, each: gap, top or underside, |n_y| */
++    struct { float g, ny; int under; } up[24], dn[8]; int nu = 0, nd = 0, tops = 0, unders = 0, hi_under = 0; float hi = -INFINITY, top = b[1] + 8;
++    for (int dir = 0; dir < 2; dir++) {
++        float y = dir ? b[1] : top;
++        obs_faces = 1;
++        for (int k = 0; k < 10 && nu < 24; k++) {
++            float s0[3] = {b[0], y, b[2]}, e0[3] = {b[0], dir ? top : b[1], b[2]}, hit[3], nn[3];
++            if ((dir ? y >= top : y <= b[1]) || !obs_ray_static(s0, e0, hit, nn)) break;
++            if (dir) unders++; else tops++;
++            if (hit[1] > hi) { hi = hit[1]; hi_under = dir; }
++            float nl = sqrtf(nn[0] * nn[0] + nn[1] * nn[1] + nn[2] * nn[2]), ny = nl > 0 ? fabsf(nn[1]) / nl : 1;
++            up[nu].g = hit[1] - b[1]; up[nu].under = dir; up[nu].ny = ny; nu++;
++            y = hit[1] + (dir ? 0.002f : -0.002f);
++        }
++    }
++    for (int kind = 1; kind <= 2; kind++) {
++        float s0[3] = {b[0], b[1], b[2]}, e0[3] = {b[0], b[1] - 8, b[2]}, hit[3], nn[3];
++        obs_faces = (uint32_t)kind;
++        for (int k = 0; k < 3 && nd < 8; k++) {   /* (the nearest few of this kind) */
++            if (!obs_ray_static(s0, e0, hit, nn)) break;
++            float nl = sqrtf(nn[0] * nn[0] + nn[1] * nn[1] + nn[2] * nn[2]), ny = nl > 0 ? fabsf(nn[1]) / nl : 1;
++            dn[nd].g = b[1] - hit[1]; dn[nd].under = kind == 2; dn[nd].ny = ny; nd++;
++            if (ny >= 0.25f) break;
++            s0[1] = hit[1] - 0.002f;
++        }
++    }
++    obs_faces = 0;
++    *count = tops - unders + hi_under;
++    /* nearest above, nearest below. An edge (a top and an underside within 3 cm: the line runs along where a rock's top
++       meets its side; which is "nearer" flips with a millimetre) is skipped whole, near-wall faces included in finding
++       it; then near-wall faces (|n_y| < 0.25: a vertical line only grazes them; the sideways rays judge walls) are passed */
++    for (int i = 1; i < nu; i++) for (int j = i; j > 0 && up[j].g < up[j - 1].g; j--) { __typeof__(up[0]) t = up[j]; up[j] = up[j - 1]; up[j - 1] = t; }
++    for (int i = 1; i < nd; i++) for (int j = i; j > 0 && dn[j].g < dn[j - 1].g; j--) { __typeof__(dn[0]) t = dn[j]; dn[j] = dn[j - 1]; dn[j - 1] = t; }
++    int ia = 0, ib = 0;
++    for (;;) {
++        if (ia + 1 < nu && up[ia].under != up[ia + 1].under && up[ia + 1].g - up[ia].g < 0.03f) { ia += 2; continue; }
++        if (ia < nu && up[ia].ny < 0.25f) { ia++; continue; }
++        break;
++    }
++    for (;;) {
++        if (ib + 1 < nd && dn[ib].under != dn[ib + 1].under && dn[ib + 1].g - dn[ib].g < 0.03f) { ib += 2; continue; }
++        if (ib < nd && dn[ib].ny < 0.25f) { ib++; continue; }
++        break;
++    }
++    int above_top = ia < nu && !up[ia].under, below_under = ib < nd && dn[ib].under;
++    *in = above_top || below_under;
++    if (!*in) { *deep = 0; return; }
++    float d = INFINITY;
++    if (ia < nu) d = up[ia].g * up[ia].ny;
++    if (ib < nd && dn[ib].g * dn[ib].ny < d) d = dn[ib].g * dn[ib].ny;
++    /* and sideways: inside, the way out through a steep face is across, not up or down: 8 rays out 1.5 m, faces turned
++       away from the ray (the rock's outside, seen from within) */
++    obs_faces = 2;
++    for (int k = 0; k < 8; k++) {
++        float ang = k * 0.785398f, e0[3] = {b[0] + sinf(ang) * 1.5f, b[1], b[2] + cosf(ang) * 1.5f}, hit[3], nn[3];
++        if (obs_ray_static(b, e0, hit, nn)) { float h = hypotf(hit[0] - b[0], hit[2] - b[2]); if (h < d) d = h; }
++    }
++    obs_faces = 0;
++    *deep = isfinite(d) ? d : 0;
++}
++static int obs_peek(int n, char **tok, uintptr_t player, uintptr_t pouch) {
++    if (n == 3 && !strcmp(tok[0], "rayflags")) {   /* "rayflags <offset> <u32>": written into the query before each cast (offset 0 = none) */
++        obs_poke_off = (uint32_t)strtoul(tok[1], NULL, 0); obs_poke_val = (uint32_t)strtoul(tok[2], NULL, 0);
++        if (obs_poke_off > 0x1fc) obs_poke_off = 0;
++        fprintf(stderr, "[obs] rayflags +%#x = %#x\n", obs_poke_off, obs_poke_val); return 1;
++    }
++    if (n >= 2 && !strcmp(tok[0], "hunt") && (!strcmp(tok[1], "find") || !strcmp(tok[1], "keep") || !strcmp(tok[1], "drop") || !strcmp(tok[1], "list"))) {
++        int op = !strcmp(tok[1], "find") ? 0 : !strcmp(tok[1], "keep") ? 1 : !strcmp(tok[1], "drop") ? 2 : 3;
++        if (op < 3 && n != 3) { fprintf(stderr, "[obs] hunt find|keep|drop <hex u32>, hunt list\n"); return 1; }
++        int idle = 0;
++        if (!atomic_compare_exchange_strong(&obs_hunt_busy, &idle, 1)) { fprintf(stderr, "[obs] hunt: busy\n"); return 1; }
++        obs_find_op = op; obs_find_val = op < 3 ? (uint32_t)strtoul(tok[2], NULL, 16) : 0;
++        pthread_t t;
++        if (pthread_create(&t, NULL, obs_find_main, NULL)) { atomic_store(&obs_hunt_busy, 0); return 1; }
++        pthread_detach(t);
++        return 1;
++    }
++    if (n == 2 && !strcmp(tok[0], "hunt")) {
++        int mode = !strcmp(tok[1], "cam") ? 1 : !strcmp(tok[1], "pad") ? 2 : !strcmp(tok[1], "reread") ? 3 : !strcmp(tok[1], "padheld") ? 4 : 0;   /* (padheld: a stick held all the way) */
++        if (!mode) { fprintf(stderr, "[obs] hunt cam|pad|reread\n"); return 1; }
++        int idle = 0;
++        if (!atomic_compare_exchange_strong(&obs_hunt_busy, &idle, 1)) { fprintf(stderr, "[obs] hunt: busy\n"); return 1; }
++        obs_hunt_mode = mode;
++        if (!read_mem(player + ACTOR_POS, obs_hunt_at, sizeof obs_hunt_at)) obs_hunt_at[0] = obs_hunt_at[1] = obs_hunt_at[2] = 0;
++        pthread_t t;
++        if (pthread_create(&t, NULL, obs_hunt_main, NULL)) { atomic_store(&obs_hunt_busy, 0); return 1; }
++        pthread_detach(t);
++        fprintf(stderr, "[obs] hunt %s started\n", tok[1]);
++        return 1;
++    }
++    if (n == 1 && !strcmp(tok[0], "input")) {   /* what's held right now */
++        obs_in_look();
++        char line[600]; int len = snprintf(line, sizeof line, "[obs] input now: user keys");
++        for (int k = 0; k < 128; k++) if (obs_in.user_keys && obs_in.user_keys[k]) len += snprintf(line + len, sizeof line - len, " %d(btn %llx ax %d)", k,
++                                                   obs_in.key_button ? (unsigned long long)obs_in.key_button[k] : 0ull, obs_in.key_axis ? obs_in.key_axis[k] : -1);
++        len += snprintf(line + len, sizeof line - len, " | synthetic");
++        for (int k = 0; k < 128; k++) if (obs_in.keys && obs_in.keys[k]) len += snprintf(line + len, sizeof line - len, " %d", k);
++        len += snprintf(line + len, sizeof line - len, " | mouse");
++        for (int k = 0; k < 5; k++) if (obs_in.mouse_down && obs_in.mouse_down[k]) len += snprintf(line + len, sizeof line - len, " b%d", k);
++        if (obs_in.mouse_rx) len += snprintf(line + len, sizeof line - len, " look %.2f %.2f", *obs_in.mouse_rx, *obs_in.mouse_ry);
++        if (obs_in.pad) snprintf(line + len, sizeof line - len, " | pad %llx %d %d %d %d", (unsigned long long)obs_in.pad->buttons, obs_in.pad->lx, obs_in.pad->ly, obs_in.pad->rx, obs_in.pad->ry);
++        fprintf(stderr, "%s\n", line);
++        return 1;
++    }
++    if (n == 3 && !strcmp(tok[0], "chain")) {   /* "chain <from hex> <to hex>": pointers from <from> (0x2000 bytes) and one step deeper (0x800) landing up to 0x800 before <to> */
++        uintptr_t from = (uintptr_t)strtoull(tok[1], NULL, 16), to = (uintptr_t)strtoull(tok[2], NULL, 16);
++        static uintptr_t blk[0x400]; unsigned hits = 0;
++        if (!read_mem(from, blk, 0x2000)) { fprintf(stderr, "[obs] chain: can't read\n"); return 1; }
++        static uintptr_t one[0x2000 / 8]; memcpy(one, blk, 0x2000);
++        for (unsigned i = 0; i < 0x400 && hits < 20; i++) {
++            uintptr_t q = one[i];
++            if (q <= to && to - q < 0x800) { fprintf(stderr, "[obs] chain: [%#llx+%#x] + %#llx\n", (unsigned long long)from, i * 8, (unsigned long long)(to - q)); hits++; }
++            if (q < 0x100000000ull || q > 0x7fffffffffffull || (q & 7)) continue;
++            uintptr_t two[0x100];
++            if (!read_mem(q, two, sizeof two)) continue;
++            for (unsigned k = 0; k < 0x100 && hits < 20; k++) if (two[k] <= to && to - two[k] < 0x800) {
++                fprintf(stderr, "[obs] chain: [[%#llx+%#x]+%#x] + %#llx\n", (unsigned long long)from, i * 8, k * 8, (unsigned long long)(to - two[k])); hits++; }
++        }
++        fprintf(stderr, "[obs] chain: %u\n", hits);
++        return 1;
++    }
++    if (n == 4 && !strcmp(tok[0], "rock")) {   /* "rock x y z" (world): the recorder's in-rock rule at that point */
++        float pt[3] = {strtof(tok[1], NULL), strtof(tok[2], NULL), strtof(tok[3], NULL)}, deep; int in, count;
++        obs_rock_point(pt, &in, &deep, &count);
++        fprintf(stderr, "[obs] rock %.3f %.3f %.3f: %s, %.2f m deep (count %d)\n", pt[0], pt[1], pt[2], in ? "INSIDE" : "air", deep, count);
++        return 1;
++    }
++    if (n == 1 && !strcmp(tok[0], "skel")) {   /* both Links' skeletons, every model: index, name, parent, skinned slot, rigid slot -> obs_skel.txt */
++        char path[PATH_MAX]; const char *home = getenv("HOME");
++        snprintf(path, sizeof path, "%s/Library/Logs/MacNativeGames/obs_skel.txt", home ? home : "/tmp");
++        FILE *f = fopen(path, "w"); if (!f) return 1;
++        unsigned total = 0;
++        for (int w = 0; w < 2; w++) for (int m = 0; m < 5; m++) {
++            const struct body_model *bm = &body_models[w][m];
++            fprintf(f, "# %s model %d %#llx bones %u palette %#llx\n", w ? "him" : "you", m, (unsigned long long)bm->model, bm->count, (unsigned long long)bm->palette);
++            for (unsigned b = 0; bm->model && b < bm->count && b < 300; b++) {
++                uintptr_t e = bm->bones + b * 0x58, np = read_ptr(e);
++                int16_t ix[4] = {0}; uint16_t len = 0; char name[64] = "?";
++                read_mem(e + 0x20, ix, sizeof ix);
++                if (np && read_mem(np, &len, 2) && len > 0 && len < 63 && read_mem(np + 2, name, len)) name[len] = 0;
++                fprintf(f, "%d %d %u %s %d %d %d %d\n", w, m, b, name, ix[0], ix[1], ix[2], ix[3]);
++                total++;
++            }
++        }
++        fclose(f);
++        fprintf(stderr, "[obs] skel: %u bones -> %s\n", total, path);
++        return 1;
++    }
++    if (n < 2 || (strcmp(tok[0], "ray") && strcmp(tok[0], "column") && strcmp(tok[0], "scan") && strcmp(tok[0], "near"))) return 0;
++    uintptr_t who = !strcmp(tok[1], "him") ? pouch : player;
++    float at[3] = {0, 0, 0};   /* ("abs": world coordinates) */
++    if (strcmp(tok[1], "abs") && (!who || !read_mem(who + ACTOR_POS, at, sizeof at) || !valid_xyz(at))) { fprintf(stderr, "[obs] no %s\n", tok[1]); return 1; }
++    if (!strcmp(tok[0], "near") && (n == 2 || n == 3)) {   /* "near <you|him> [r]": every actor in the game's actor tree (all actors, by creation number, node at actor+0x390) within r m */
++        float r = n == 3 ? strtof(tok[2], NULL) : 20;
++        uint64_t t0 = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
++        uintptr_t root = fuse_root(who + 0x390), stack[256]; unsigned sp = 0, seen = 0, shown = 0, named = 0;
++        if (root) stack[sp++] = root;
++        char line[1600]; int len = snprintf(line, sizeof line, "[obs] near:");
++        FILE *nf = NULL;   /* (all of them -> obs_near.txt: the log line gets cut) */
++        while (sp && seen < 30000) {
++            uintptr_t nd = stack[--sp]; seen++;
++            uintptr_t c0 = fuse_node_ok(read_ptr(nd)), c1 = fuse_node_ok(read_ptr(nd + 8));
++            if (c0 && sp < 255) stack[sp++] = c0;
++            if (c1 && sp < 255) stack[sp++] = c1;
++            uintptr_t a = nd - 0x390; float q[3]; char nm[64];
++            if (!read_mem(a + ACTOR_POS, q, sizeof q) || !valid_xyz(q) || !actor_name_at(a, nm)) continue;
++            named++;
++            float d = sqrtf((q[0] - at[0]) * (q[0] - at[0]) + (q[1] - at[1]) * (q[1] - at[1]) + (q[2] - at[2]) * (q[2] - at[2]));
++            if (d <= r) {
++                if (!nf) { char path[PATH_MAX]; const char *home = getenv("HOME"); snprintf(path, sizeof path, "%s/Library/Logs/MacNativeGames/obs_near.txt", home ? home : "/tmp"); nf = fopen(path, "w"); }
++                if (nf) fprintf(nf, "%.1f %s %.2f %.2f %.2f\n", d, nm, q[0], q[1], q[2]);
++                if (len < (int)sizeof line - 80) len += snprintf(line + len, sizeof line - len, " %s %.1f", nm, d);
++                shown++;
++            }
++            if (n == 3 && !strncmp(nm, "Camera", 6 * 0) && strstr(nm, "Camera")) fprintf(stderr, "[obs] near: %s at %#llx\n", nm, (unsigned long long)a);
++        }
++        if (nf) fclose(nf);
++        fprintf(stderr, "%s\n[obs] near: %u nodes, %u named actors, %u within %.0f m, %.2f ms\n", line, seen, named, shown, r, (clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - t0) / 1e6);
++        return 1;
++    }
++    if (!strcmp(tok[0], "ray") && n == 8) {
++        float s[3], e[3], hit[3] = {0}, nn[3] = {0}, frac; uint32_t layer;
++        for (int k = 0; k < 3; k++) { s[k] = at[k] + strtof(tok[2 + k], NULL); e[k] = at[k] + strtof(tok[5 + k], NULL); }
++        int got = obs_ray(s, e, hit, nn, &frac, &layer);
++        uintptr_t body = 0; memcpy(&body, obs_q + 0x170, 8);
++        fprintf(stderr, "[obs] ray %s (%.2f %.2f %.2f)->(%.2f %.2f %.2f): %s hit %+.3f %+.3f %+.3f n %.2f %.2f %.2f frac %.4f layer %#x body %#llx\n", tok[1],
++                s[0] - at[0], s[1] - at[1], s[2] - at[2], e[0] - at[0], e[1] - at[1], e[2] - at[2], got ? "HIT" : "miss",
++                hit[0] - at[0], hit[1] - at[1], hit[2] - at[2], nn[0], nn[1], nn[2], frac, layer, (unsigned long long)body);
++        if (got) {   /* the query's words after the cast, to find which say what was hit */
++            char line[1400]; int len = snprintf(line, sizeof line, "[obs] raw:");
++            for (int o = 0x18; o < 0x1a0; o += 4) { uint32_t w; memcpy(&w, obs_q + o, 4); if (w) len += snprintf(line + len, sizeof line - len, " %x:%x", o, w); if ((size_t)len > sizeof line - 24) break; }
++            fprintf(stderr, "%s\n", line);
++        }
++        return 1;
++    }
++    if (!strcmp(tok[0], "column") && n == 6) {
++        float x = at[0] + strtof(tok[2], NULL), z = at[2] + strtof(tok[3], NULL), top = at[1] + strtof(tok[4], NULL), bottom = at[1] + strtof(tok[5], NULL);
++        for (int dir = 0; dir < 2; dir++) {   /* 0 down from the top, 1 up from the bottom */
++            char line[1000]; int len = snprintf(line, sizeof line, "[obs] column %s %+.2f %+.2f %s:", tok[1], x - at[0], z - at[2], dir ? "up" : "down");
++            float y = dir ? bottom : top;
++            obs_faces = 1;   /* (down: tops only; up: undersides only) */
++            for (int k = 0; k < 12; k++) {
++                float s[3] = {x, y, z}, e[3] = {x, dir ? top : bottom, z}, hit[3], nn[3], frac; uint32_t layer;
++                if ((dir ? y >= top : y <= bottom) || !obs_ray(s, e, hit, nn, &frac, &layer)) break;
++                float nl = sqrtf(nn[0] * nn[0] + nn[1] * nn[1] + nn[2] * nn[2]);
++                uint32_t key = 0; memcpy(&key, obs_q + 0x58, 4);
++                char an[64] = "-"; uintptr_t ha = obs_hit_actor(); if (ha && !actor_name_at(ha, an)) snprintf(an, sizeof an, "%#llx", (unsigned long long)ha);
++                len += snprintf(line + len, sizeof line - len, " %+.3f(%+.2f L%x %04x %s)", hit[1] - at[1], nl > 0 ? nn[1] / nl : 0, layer, key >> 16, an);
++                if ((size_t)len >= sizeof line - 40) break;
++                y = hit[1] + (dir ? 0.002f : -0.002f);
++            }
++            obs_faces = 0;
++            fprintf(stderr, "%s\n", line);
++        }
++        return 1;
++    }
++    if (!strcmp(tok[0], "scan") && n == 6) {   /* "scan <you|him> <radius> <step> <top> <bottom>": every surface of a grid of columns -> obs_scan.txt */
++        float r = strtof(tok[2], NULL), st = strtof(tok[3], NULL), top = at[1] + strtof(tok[4], NULL), bottom = at[1] + strtof(tok[5], NULL);
++        if (!(r > 0 && r <= 12 && st >= 0.1f && st <= 2)) { fprintf(stderr, "[obs] scan: radius 0..12, step 0.1..2\n"); return 1; }
++        char path[PATH_MAX]; const char *home = getenv("HOME");
++        snprintf(path, sizeof path, "%s/Library/Logs/MacNativeGames/obs_scan.txt", home ? home : "/tmp");
++        FILE *f = fopen(path, "w"); if (!f) return 1;
++        fprintf(f, "# at %.3f %.3f %.3f r %.2f step %.2f top %.2f bottom %.2f\n", at[0], at[1], at[2], r, st, top - at[1], bottom - at[1]);
++        uint64_t t0 = clock_gettime_nsec_np(CLOCK_UPTIME_RAW); unsigned casts = 0, hits = 0;
++        for (float dx = -r; dx <= r + 1e-3f; dx += st) for (float dz = -r; dz <= r + 1e-3f; dz += st) for (int dir = 0; dir < 2; dir++) {
++            /* tops: down from the top, faces turned up (toward the ray); undersides: up from the bottom, faces turned down */
++            float x = at[0] + dx, z = at[2] + dz, y = dir ? bottom : top;
++            obs_faces = 1;
++            for (int k = 0; k < 40 && (dir ? y < top : y > bottom); k++) {
++                float s0[3] = {x, y, z}, e0[3] = {x, dir ? top : bottom, z}, hit[3], nn[3]; uint32_t layer, key = 0;
++                casts++;
++                if (!obs_ray(s0, e0, hit, nn, NULL, &layer)) break;
++                memcpy(&key, obs_q + 0x58, 4); hits++;
++                fprintf(f, "%.2f %.2f %.3f %.3f %.3f %.3f %x %08x %c\n", dx, dz, hit[1] - at[1], nn[0], nn[1], nn[2], layer, key, dir ? 'B' : 'T');
++                y = hit[1] + (dir ? 0.002f : -0.002f);
++            }
++            obs_faces = 0;
++        }
++        fclose(f);
++        fprintf(stderr, "[obs] scan: %u casts, %u hits, %.1f ms -> %s\n", casts, hits, (clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - t0) / 1e6, path);
++        return 1;
++    }
++    fprintf(stderr, "[obs] peek: ray <you|him> sx sy sz ex ey ez | column <you|him> dx dz top bottom | scan <you|him> r step top bottom\n");
++    return 1;
+ }
 +static void peek_run(uintptr_t player) {
 +    static const uint32_t w_model[] = {0xf9411408, 0xb4000168, 0xf9400500, 0xb4000100, 0xf9400008};
 +    uintptr_t (*get_model)(uintptr_t) = (uintptr_t (*)(uintptr_t))game_fn(0xba8854, w_model, 5);
@@ -1528,6 +2018,7 @@ index c05d6c3..6275b0e 100644
 +    }
 +    uintptr_t pouch = 0, addr = 0;
 +    for (unsigned i = 0; i < stalker_count; i++) if (!strcmp(stalkers[i].name, "PouchPlayer")) pouch = stalkers[i].actor;
++    if (obs_peek(n, tok, player, pouch)) return;
 +    if (n == 1 && !strcmp(tok[0], "euscan")) { eu_scan(pouch ? pouch_eu(pouch) : 0); return; }
 +    if (n == 2 && !strcmp(tok[0], "aread")) {   /* read-only: what one actor points at (and one pointer deeper) */
 +        uintptr_t a = (uintptr_t)strtoull(tok[1], NULL, 16);
@@ -2136,7 +2627,7 @@ index c05d6c3..6275b0e 100644
 +    }
 +    if (!dropped) fprintf(stderr, "[survey] drop: nothing named %s*\n", drop_request);
 +    if (!stalker_count) lonk_anchored = 0;
- }
++}
 +/* Dressing PouchPlayer the way the pause menu's OneShotChangeEquipmentForPouch does: eu = 0xcbffa0(actor) (its EquipmentUser,
 +   [[actor+0x228]+0x230]), then equip 0x1b6cd78(eu, slot, &name, dye -1, 0, 0) per slot. An empty name dresses like the player
 +   (or hair + default clothes when the player wears none). The real Player gets its Zonai arm the same way: slot 19 (Extra),
@@ -4268,8 +4759,8 @@ index c05d6c3..6275b0e 100644
 +   (below), 3 s after it goes off so what came after is in it too (one a minute at most, 12 a session). It goes next to
 +   the log, lonk_mark_<date>_<time>.txt: a line a frame (him: mood, gait, climb, clip clock, speeds, his gear; you: your
 +   animation commands; both: where, facing) and every 2nd frame each one's body, the body log's parts with their wall,
-+   floor and water, worked out as it's written, 2 ms of a frame at a time so the game doesn't hitch. night_tools/mark.py
-+   reads them. */
++   floor and water, worked out as it's written, 2 ms of a frame at a time so the game doesn't hitch (plain text:
++   readable as it is). */
 +#define REC_FRAMES 1024   /* (15 s at 60 a second) */
 +#define REC_KEEP_S 15
 +struct rec_frame {
@@ -4293,6 +4784,34 @@ index c05d6c3..6275b0e 100644
 +    uint8_t has_scene;
 +    float scene[3][16], over[2], under[2], under_deg[2];
 +    char src[12];
++    /* (the observatory: every bone of both, by the skeleton's names (obs_skel_names), in mm from that Link's actor
++       position, INT16_MIN none; and where each came from: model 0-4 (+8: drawn this very frame), 0xff none) */
++    int16_t skel[2][128][3];
++    uint8_t skel_from[2][128];
++    /* (the observatory, your side: keys you hold (a bit per Mac key code), keys the input file holds, mouse buttons
++       (bits), the mouse look (input.c's smoothed mouse speed before its clamp: about 1 = full stick), the controller buttons and sticks all that makes for the game (as
++       input.c builds them, sticks -32767..32767, mouse look not in), a game controller's own; the camera (position,
++       look-at, up); from the camera to each head: how far to the first thing hit (NAN nothing), and how far the head
++       is; your weapon, bow and shield: where, drawn) */
++    uint8_t in_user[16], in_synth[16], in_mouse, in_pad_on;
++    float in_look[2];
++    uint64_t in_buttons, in_pad_buttons;
++    int16_t in_stick[4], in_pad[4];
++    float cam[9], cam_hit[2], cam_head[2];
++    float ygear[3][3];
++    int8_t ygear_out[3];
++    /* (a check on what's "drawn": per Link and model, frames since body_track saw its palette change (its test: the first
++       two matrices) and frames since ANY matrix of either buffer changed; 254 = longer, 255 = no such model) */
++    uint8_t mdl_age[2][5], mdl_full[2][5];
++    /* (in rock, exactly: for each of the 15 parts, one column straight through it (tops down, undersides up, from 8 m
++       over it): how many rocks it is inside (0 air; 0xff not looked at this frame: him on even frames, you on odd), and
++       how far under the nearest surface above it, cm) */
++    uint8_t rock_in[2][BODY_PARTS];
++    int16_t rock_top[2][BODY_PARTS];
++    uint8_t rock_count[2][BODY_PARTS];
++    uint16_t rock_skip;   /* (actor hits the rock tests passed through this frame: gear, his fused rocks...) */
++    float gear_rot[2][3][9];   /* (each one's weapon, bow, shield: the actor's rotation, 3x3 as the game keeps it at ACTOR_ROT; NAN none) */   /* (rock_in is the rule below: 1 inside, 0 air, 0xff not looked; rock_top = how deep, cm, across
++                                            the nearest face (the gap to it x its steepness); rock_count the old count, tops - undersides above) */
 +};
 +#define SCENE_R 3.0f
 +static struct rec_frame rec_ring[REC_FRAMES];
@@ -4377,7 +4896,9 @@ index c05d6c3..6275b0e 100644
 +    fprintf(stderr, "%s\n", line);
 +}
 +static const char *const gear_names[3] = {"weapon", "bow", "shield"};
++static void obs_mark(const char *why, const char *note);
 +static void mark_start(const char *why, const char *note) {
++    obs_mark(why, note);
 +    if (mark_file) { fprintf(stderr, "[mark] still writing %s: this is in it\n", mark_path); return; }
 +    if (!rec_count) { fprintf(stderr, "[mark] nothing recorded (is he here? \"survey lonk rec on\")\n"); return; }
 +    if (!mark_buf) mark_buf = malloc(sizeof rec_ring);
@@ -4721,6 +5242,527 @@ index c05d6c3..6275b0e 100644
 +        if (++gear_run[k] == 5) { snprintf(what, sizeof what, "his %s is %.2f m from his hand but put away", gear_names[k], d); alarm_fire(r, 1, AL_GEAR, what); }
 +    }
 +}
++/* ===== OBSERVATORY: every bone =====
++   The 127 bones of Link's body skeleton (the names as the body model has them: both Links have the same), each from the
++   first of the five models (body, head, upper, lower armor, Zonai arm) that was drawn lately and has it skinned (joint =
++   palette matrix x rest place) or rigid (palette translation), like body_bone does for the 15 parts. Per model a name ->
++   slot map with the rest places, made again only when the model or its palette changes; each frame one read of each
++   drawn model's palette. */
++#define OBS_BONES 128
++static char obs_skel_names[OBS_BONES][32];
++static unsigned obs_skel_n, obs_skel_seq;   /* (how many names; bumped when the list is made) */
++struct obs_skel_map { uintptr_t model, palette; int16_t sk[OBS_BONES], rg[OBS_BONES]; float rest[OBS_BONES][3]; int top; };
++static struct obs_skel_map obs_maps[2][5];
++static int obs_bone_name(const struct body_model *m, unsigned b, char out[32], int16_t ix[4]) {
++    uintptr_t e = m->bones + b * 0x58, np = read_ptr(e);
++    uint16_t len = 0;
++    out[0] = 0;
++    if (!np || !read_mem(np, &len, 2) || !len || len > 31 || !read_mem(np + 2, out, len) || !read_mem(e + 0x20, ix, 4 * sizeof *ix)) return 0;
++    out[len] = 0;
++    return 1;
++}
++static void obs_palette_ages(struct rec_frame *r, uint64_t frame) {
++    static uintptr_t seen[2][5]; static uint64_t hash[2][5][2], changed[2][5];
++    static float buf[512 * 12];
++    for (int w = 0; w < 2; w++) for (int k = 0; k < 5; k++) {
++        const struct body_model *m = &body_models[w][k];
++        r->mdl_age[w][k] = r->mdl_full[w][k] = 0xff;
++        if (!m->model) { seen[w][k] = 0; continue; }
++        r->mdl_age[w][k] = (uint8_t)(frame - m->changed > 254 ? 254 : frame - m->changed);
++        int top = obs_maps[w][k].model == m->model && obs_maps[w][k].top >= 0 ? obs_maps[w][k].top : 96;
++        int any = 0;
++        for (int c = 0; c < 2; c++) {
++            if (c && !m->copy) continue;
++            uint64_t h = 1469598103934665603ull;
++            if (!read_mem(m->palette + (c ? m->copy : 0), buf, (size_t)(top + 1) * 0x30)) continue;
++            const uint32_t *u = (const uint32_t *)buf;
++            for (int q = 0; q < (top + 1) * 12; q++) h = (h ^ u[q]) * 1099511628211ull;
++            if (h != hash[w][k][c]) any = 1;
++            hash[w][k][c] = h;
++        }
++        if (seen[w][k] != m->model) { seen[w][k] = m->model; changed[w][k] = frame; }
++        if (any) changed[w][k] = frame;
++        r->mdl_full[w][k] = (uint8_t)(frame - changed[w][k] > 254 ? 254 : frame - changed[w][k]);
++    }
++}
++static void obs_skel_take(struct rec_frame *r, uint64_t frame) {
++    obs_palette_ages(r, frame);
++    for (int w = 0; w < 2; w++) for (int b = 0; b < OBS_BONES; b++) { r->skel[w][b][0] = r->skel[w][b][1] = r->skel[w][b][2] = INT16_MIN; r->skel_from[w][b] = 0xff; }
++    if (!obs_skel_n) {   /* the names: the body skeleton of whichever Link has one */
++        const struct body_model *m = body_models[0][0].model ? &body_models[0][0] : &body_models[1][0];
++        if (!m->model || m->count < 2) return;
++        unsigned n = 0;
++        for (unsigned b = 0; b < m->count && n < OBS_BONES; b++) { int16_t ix[4]; if (obs_bone_name(m, b, obs_skel_names[n], ix)) n++; }
++        obs_skel_n = n; obs_skel_seq++;
++    }
++    for (int w = 0; w < 2; w++) {
++        const float *pos = w ? r->him : r->you;
++        if (!isfinite(pos[0])) continue;
++        float cell[3];
++        for (int c = 0; c < 3; c++) cell[c] = 10 * floorf(pos[c] / 10);
++        for (int k = 0; k < 5; k++) {
++            const struct body_model *m = &body_models[w][k];
++            struct obs_skel_map *mp = &obs_maps[w][k];
++            if (!m->model || frame - m->changed > 6) continue;
++            if (mp->model != m->model || mp->palette != m->palette) {   /* (a new model: its bones by name) */
++                mp->model = m->model; mp->palette = m->palette; mp->top = -1;
++                for (int b = 0; b < OBS_BONES; b++) mp->sk[b] = mp->rg[b] = -1;
++                for (unsigned b = 0; b < m->count && b < 400; b++) {
++                    char name[32]; int16_t ix[4];
++                    if (!obs_bone_name(m, b, name, ix)) continue;
++                    for (unsigned c = 0; c < obs_skel_n; c++) if (!strcmp(name, obs_skel_names[c])) {
++                        if (ix[2] >= 0 && ix[2] < 512) {
++                            float ib[12];
++                            if (!read_mem(m->inv_bind + (uintptr_t)ix[2] * 0x30, ib, sizeof ib)) break;
++                            for (int q = 0; q < 3; q++) mp->rest[c][q] = -(ib[q] * ib[3] + ib[4 + q] * ib[7] + ib[8 + q] * ib[11]);
++                            mp->sk[c] = ix[2]; if (ix[2] > mp->top) mp->top = ix[2];
++                        } else if (ix[3] >= 0 && ix[3] < 512) { mp->rg[c] = ix[3]; if (ix[3] > mp->top) mp->top = ix[3]; }
++                        break;
++                    }
++                }
++            }
++            if (mp->top < 0) continue;
++            static float pal[512 * 12];
++            uintptr_t at = m->palette + (m->cur ? m->copy : 0);
++            if (!read_mem(at, pal, (size_t)(mp->top + 1) * 0x30)) continue;
++            uint8_t from = (uint8_t)(k | (m->changed == frame ? 8 : 0));
++            for (unsigned c = 0; c < obs_skel_n; c++) {
++                if (r->skel_from[w][c] != 0xff || (mp->sk[c] < 0 && mp->rg[c] < 0)) continue;
++                const float *pm = pal + (mp->sk[c] >= 0 ? mp->sk[c] : mp->rg[c]) * 12;
++                float o[3];
++                for (int q = 0; q < 3; q++)
++                    o[q] = (mp->sk[c] >= 0 ? pm[q * 4] * mp->rest[c][0] + pm[q * 4 + 1] * mp->rest[c][1] + pm[q * 4 + 2] * mp->rest[c][2] : 0) + pm[q * 4 + 3] + cell[q] - pos[q];
++                if (!(fabsf(o[0]) < 32 && fabsf(o[1]) < 32 && fabsf(o[2]) < 32)) continue;
++                for (int q = 0; q < 3; q++) r->skel[w][c][q] = (int16_t)lrintf(o[q] * 1000);
++                r->skel_from[w][c] = from;
++            }
++        }
++    }
++}
++/* ===== OBSERVATORY: your side (input, camera, gear) =====
++   Input: the host's own statics read in place (obs_in, by symbol name; never a call into input.c or gamepad.m).
++   Camera: sead's LookAtCamera at [[PlayerCamera actor + 0x578] + 0x200] (+0x38 position, +0x44 look-at, +0x50 up),
++   the actor found by name in the actor tree once (21 ms) and checked by name each second. */
++static uint64_t obs_synth_button(unsigned code) {   /* (the input file's keys, as input.c's default table maps them) */
++    switch (code) { case 38: return 1; case 40: case 49: return 2; case 34: return 4; case 32: return 8; case 6: return 16; case 8: return 32;
++                    case 12: return 64; case 14: return 128; case 58: return 256; case 56: return 512; case 36: return 1024; case 48: case 53: return 2048;
++                    case 3: return 4096; case 17: return 8192; case 4: return 16384; case 5: return 32768; default: return 0; }
++}
++static uintptr_t obs_cam_actor, obs_cam_vt;
++static uint64_t obs_cam_checked_ns, obs_cam_looked_ns;
++static void obs_cam_find(uintptr_t player) {
++    uintptr_t root = fuse_root(player + 0x390), stack[256]; unsigned sp = 0, seen = 0;
++    if (root) stack[sp++] = root;
++    while (sp && seen < 30000) {
++        uintptr_t nd = stack[--sp]; seen++;
++        uintptr_t c0 = fuse_node_ok(read_ptr(nd)), c1 = fuse_node_ok(read_ptr(nd + 8));
++        if (c0 && sp < 255) stack[sp++] = c0;
++        if (c1 && sp < 255) stack[sp++] = c1;
++        char nm[64];
++        if (actor_name_at(nd - 0x390, nm) && !strcmp(nm, "PlayerCamera")) { obs_cam_actor = nd - 0x390; obs_cam_vt = 0; fprintf(stderr, "[obs] camera: PlayerCamera %#llx\n", (unsigned long long)obs_cam_actor); return; }
++    }
++}
++static void obs_side_take(struct rec_frame *r, uintptr_t player, uintptr_t him) {
++    obs_in_look();
++    if (obs_in.user_keys) for (int k = 0; k < 128; k++) if (obs_in.user_keys[k]) {
++        r->in_user[k >> 3] |= (uint8_t)(1 << (k & 7));
++        if (obs_in.key_button) r->in_buttons |= obs_in.key_button[k];
++    }
++    if (obs_in.keys) for (int k = 0; k < 128; k++) if (obs_in.keys[k]) { r->in_synth[k >> 3] |= (uint8_t)(1 << (k & 7)); r->in_buttons |= obs_synth_button((unsigned)k); }
++    if (obs_in.mouse_down) for (int k = 0; k < 5; k++) if (obs_in.mouse_down[k]) { r->in_mouse |= (uint8_t)(1 << k); if (obs_in.mouse_button) r->in_buttons |= obs_in.mouse_button[k]; }
++    if (obs_in.pending) r->in_buttons |= *obs_in.pending;
++    if (obs_in.mouse_rx && obs_in.mouse_ry) { r->in_look[0] = *obs_in.mouse_rx; r->in_look[1] = *obs_in.mouse_ry; }
++    {   /* sticks from keys: input.c's synthetic keys 0/2/13/1 (left stick) 123/124/125/126 (right), and the user's keys by keyAxis */
++        int ax[9] = {0};
++        if (obs_in.user_keys && obs_in.key_axis) for (int k = 0; k < 128; k++) if (obs_in.user_keys[k] && obs_in.key_axis[k] < 9) ax[obs_in.key_axis[k]] = 1;
++        if (obs_in.mouse_down && obs_in.mouse_axis) for (int k = 0; k < 5; k++) if (obs_in.mouse_down[k] && obs_in.mouse_axis[k] < 9) ax[obs_in.mouse_axis[k]] = 1;
++        const uint8_t *K = obs_in.keys; static const uint8_t zero[128]; if (!K) K = zero;
++        r->in_stick[0] = (int16_t)(32767 * ((K[2] | ax[2]) - (K[0] | ax[1]))); r->in_stick[1] = (int16_t)(32767 * ((K[13] | ax[3]) - (K[1] | ax[4])));
++        r->in_stick[2] = (int16_t)(32767 * ((K[124] | ax[6]) - (K[123] | ax[5]))); r->in_stick[3] = (int16_t)(32767 * ((K[126] | ax[7]) - (K[125] | ax[8])));
++    }
++    if (obs_in.pad) { r->in_pad_buttons = obs_in.pad->buttons; r->in_pad[0] = (int16_t)obs_in.pad->lx; r->in_pad[1] = (int16_t)obs_in.pad->ly; r->in_pad[2] = (int16_t)obs_in.pad->rx; r->in_pad[3] = (int16_t)obs_in.pad->ry; r->in_pad_on = (uint8_t)(obs_in.pad->connected != 0); }
++    /* the camera */
++    for (int k = 0; k < 9; k++) r->cam[k] = NAN;
++    r->cam_hit[0] = r->cam_hit[1] = r->cam_head[0] = r->cam_head[1] = NAN;
++    uint64_t now = r->ns;
++    if (obs_cam_actor && now - obs_cam_checked_ns > 1000000000ull) {
++        char nm[64]; obs_cam_checked_ns = now;
++        if (!actor_name_at(obs_cam_actor, nm) || strcmp(nm, "PlayerCamera")) obs_cam_actor = 0;
++    }
++    if (!obs_cam_actor && now - obs_cam_looked_ns > 5000000000ull) { obs_cam_looked_ns = now; obs_cam_find(player); }
++    uintptr_t cam = obs_cam_actor ? read_ptr(read_ptr(obs_cam_actor + 0x578) + 0x200) : 0, vt = cam ? read_ptr(cam) : 0;
++    float c[9];
++    if (cam && vt && (!obs_cam_vt || vt == obs_cam_vt) && read_mem(cam + 0x38, c, sizeof c) && valid_xyz(c) && valid_xyz(c + 3)) {
++        obs_cam_vt = vt;
++        memcpy(r->cam, c, sizeof c);
++        for (int w = 0; w < 2; w++) {   /* camera -> head */
++            int hi = -1; for (unsigned b = 0; b < obs_skel_n; b++) if (!strcmp(obs_skel_names[b], "Head")) hi = (int)b;
++            const float *pos = w ? r->him : r->you;
++            if (hi < 0 || r->skel_from[w][hi] == 0xff || !isfinite(pos[0])) continue;
++            float head[3], hit[3], nn[3];
++            for (int q = 0; q < 3; q++) head[q] = pos[q] + r->skel[w][hi][q] / 1000.0f;
++            r->cam_head[w] = sqrtf((head[0] - c[0]) * (head[0] - c[0]) + (head[1] - c[1]) * (head[1] - c[1]) + (head[2] - c[2]) * (head[2] - c[2]));
++            if (obs_ray(c, head, hit, nn, NULL, NULL)) r->cam_hit[w] = sqrtf((hit[0] - c[0]) * (hit[0] - c[0]) + (hit[1] - c[1]) * (hit[1] - c[1]) + (hit[2] - c[2]) * (hit[2] - c[2]));
++        }
++    }
++    /* your gear (his is in gear[] / gear_out[] already) */
++    static const uint32_t w_drawn[] = {0xd101c3ff, 0xa9017bfd, 0xf90013fb, 0xa90367fa, 0xa9045ff8, 0xa90557f6};
++    bool (*drawn)(uintptr_t, uint32_t) = (bool (*)(uintptr_t, uint32_t))game_fn(0x3e322c, w_drawn, 6);
++    uintptr_t eu = player ? pouch_eu(player) : 0;
++    for (int k = 0; k < 3; k++) {
++        static const unsigned links[3] = {0, 3, 4};
++        uintptr_t g = eu ? eu_link_actor(eu, links[k]) : 0;
++        r->ygear[k][0] = r->ygear[k][1] = r->ygear[k][2] = NAN;
++        if (g && (!read_mem(g + ACTOR_POS, r->ygear[k], sizeof r->ygear[k]) || !valid_xyz(r->ygear[k]))) r->ygear[k][0] = r->ygear[k][1] = r->ygear[k][2] = NAN;
++        r->ygear_out[k] = (int8_t)(g && drawn ? drawn(eu, links[k]) : -1);
++    }
++    for (int w = 0; w < 2; w++) {   /* (gear rotations: the user saw his sword on his back at another angle than theirs, and nothing recorded it) */
++        uintptr_t e2 = (w ? him : player) ? pouch_eu(w ? him : player) : 0;
++        for (int k = 0; k < 3; k++) {
++            static const unsigned links[3] = {0, 3, 4};
++            uintptr_t g = e2 ? eu_link_actor(e2, links[k]) : 0;
++            for (int q = 0; q < 9; q++) r->gear_rot[w][k][q] = NAN;
++            if (g && !read_mem(g + ACTOR_ROT, r->gear_rot[w][k], sizeof r->gear_rot[w][k])) for (int q = 0; q < 9; q++) r->gear_rot[w][k][q] = NAN;
++        }
++    }
++}
++static void obs_event_push(uint16_t type, uint64_t frame, const char *text);
++static void obs_side_events(uintptr_t player, uintptr_t him, uint64_t frame) {   /* (names that change now and then: as events, not per frame) */
++    static char last_gear[300], last_cmds[400];
++    char cmds[400];
++    anim_cmds(player, cmds, sizeof cmds);
++    if (strcmp(cmds, last_cmds)) { snprintf(last_cmds, sizeof last_cmds, "%s", cmds); obs_event_push(7, frame, cmds); }
++    if (frame % 15) return;
++    char g[300]; int n = 0;
++    for (int w = 0; w < 2; w++) {
++        uintptr_t eu = (w ? him : player) ? pouch_eu(w ? him : player) : 0;
++        n += snprintf(g + n, sizeof g - n, "%s%s", w ? " | him" : "you", eu ? "" : " -");
++        static const unsigned links[6] = {0, 3, 4, 8, 9, 10};
++        static const char *const what[6] = {"w", "b", "s", "head", "upper", "lower"};
++        for (int k = 0; eu && k < 6; k++) { char nm[64]; eu_link_name(eu, links[k], nm); n += snprintf(g + n, sizeof g - n, " %s=%s", what[k], nm[0] ? nm : "-"); }
++    }
++    if (strcmp(g, last_gear)) { snprintf(last_gear, sizeof last_gear, "%s", g); obs_event_push(6, frame, g); }
++}
++/* (rule v3, 2026-11-07: + an edge (top and underside within 3 cm) is skipped, near-wall faces (|n_y| < 0.25) don't
++   count up/down, and the depth is the least of up/down and sideways (8 rays out, faces turned away = the way out)) */
++/* In rock, exactly, per part: the grid scan's 0.25 m columns miss steep faces (it said his chest was out when a column
++   straight through it said in: 2026-11-07), so each part gets its own column through it. Inside = the nearest surface
++   above it is a top (a face turned up), or the nearest below it is an underside: what counting tops minus undersides
++   got wrong where two rock pieces share a face (the 2 mm step past a hit skips the copy: the user's chest came out "in"
++   under the slab's overhang). How deep: the gap to that nearest face x |its normal's y| (~ straight across the face).
++   Casts: down from 8 m over it to it (tops), up from it (undersides), and down from it for the nearest below, both kinds. */
++static void obs_rock_parts(struct rec_frame *r) {
++    memset(r->rock_in, 0xff, sizeof r->rock_in); memset(r->rock_count, 0xff, sizeof r->rock_count);
++    for (int w = 0; w < 2; w++) for (int p = 0; p < BODY_PARTS; p++) r->rock_top[w][p] = INT16_MIN;
++    int w = (int)(r->frame & 1) ? 0 : 1;
++    unsigned skipped0 = obs_skipped;
++    for (int p = 0; p < BODY_PARTS; p++) {
++        if (!(r->has[w] >> p & 1)) continue;
++        int in, count; float deep;
++        obs_rock_point(r->bone[w][p], &in, &deep, &count);
++        r->rock_in[w][p] = (uint8_t)in;
++        r->rock_count[w][p] = (uint8_t)(count < 0 ? 0 : count > 200 ? 200 : count);
++        r->rock_top[w][p] = (int16_t)lrintf(fminf(deep, 300) * 100);
++    }
++    r->rock_skip = (uint16_t)(obs_skipped - skipped0 > 65535 ? 65535 : obs_skipped - skipped0);
++    static uint64_t said_ns;
++    if (r->rock_skip && r->ns - said_ns > 1000000000ull) { said_ns = r->ns; char t[96]; snprintf(t, sizeof t, "rock test passed through %s (%s's parts)", obs_skipped_name, w ? "his" : "your"); obs_event_push(4, r->frame, t); }
++}
++/* The 3D rock scanner: a grid of columns (OBS_SCAN_N a side, OBS_SCAN_STEP apart) round one of you, each cast down
++   seeing only faces turned up (tops) and up seeing only faces turned down (undersides), each again past every hit
++   (ray query +0x84 = 1: see obs_ray above). Going down a column, a top = into rock, an underside = out of it, so the
++   surfaces say where the solid is (an overhang, a slab leaning over him, him inside it). A few columns a frame (at most
++   ~0.6 ms), a whole scan in ~10 frames; round him and round you in turn every half second, round both at each
++   bookmark, "survey lonk scan" now. Record 8: {u64 frame, ns; f32 x y z (the centre), step, top, bottom (from y);
++   u16 n; u8 who, why} then per column (x outer, z inner, from -half to +half) u8 count + count x {i16 cm*2 + 1 if an
++   underside, u8 layer}, highest first. */
++#define OBS_SCAN_N 33
++#define OBS_SCAN_STEP 0.25f
++#define OBS_SCAN_MAX 12
++#define OBS_SCAN_BYTES (64 + OBS_SCAN_N * OBS_SCAN_N * (1 + 2 * OBS_SCAN_MAX * 3))
++struct obs_scan { uint64_t frame, ns; float c[3]; int who, why, next; size_t len; uint8_t data[OBS_SCAN_BYTES]; };
++static struct obs_scan obs_scan_now;   /* (the one being made) */
++static int obs_scan_busy;
++static struct obs_scan obs_scan_out[3];   /* (made, for the writer) */
++static _Atomic unsigned obs_scan_w, obs_scan_r;
++static int obs_scan_want[4][2], obs_scan_wants;   /* (asked for: who, why) */
++static unsigned obs_scans_done, obs_scans_lost;
++static uint64_t obs_scan_last_ns;
++static int obs_scan_turn;
++static void obs_scan_ask(int who, int why) { if (obs_scan_wants < 4) { obs_scan_want[obs_scan_wants][0] = who; obs_scan_want[obs_scan_wants][1] = why; obs_scan_wants++; } }
++static void obs_scan_step(const struct rec_frame *r) {
++    uint64_t t0 = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
++    struct obs_scan *sc = &obs_scan_now;
++    if (!obs_scan_busy) {
++        int who = -1, why = 0;
++        if (obs_scan_wants) { who = obs_scan_want[0][0]; why = obs_scan_want[0][1]; obs_scan_wants--; memmove(obs_scan_want[0], obs_scan_want[1], sizeof obs_scan_want[0] * (size_t)obs_scan_wants); }
++        else if (t0 - obs_scan_last_ns > 500000000ull) { who = obs_scan_turn ^= 1; why = 0; }
++        if (who < 0) return;
++        const float *pos = who ? r->him : r->you;
++        if (!isfinite(pos[0]) || r->paused) return;
++        obs_scan_last_ns = t0;
++        sc->frame = r->frame; sc->ns = t0; sc->who = who; sc->why = why; sc->next = 0;
++        for (int q = 0; q < 3; q++) sc->c[q] = pos[q];
++        sc->c[0] = roundf(pos[0] / OBS_SCAN_STEP) * OBS_SCAN_STEP; sc->c[2] = roundf(pos[2] / OBS_SCAN_STEP) * OBS_SCAN_STEP;   /* (every scan on one world grid: their columns line up) */
++        float head[6] = {sc->c[0], sc->c[1], sc->c[2], OBS_SCAN_STEP, 12.0f, -6.0f};
++        uint16_t n = OBS_SCAN_N; uint8_t wb[2] = {(uint8_t)who, (uint8_t)why};
++        memcpy(sc->data, &sc->frame, 8); memcpy(sc->data + 8, &sc->ns, 8); memcpy(sc->data + 16, head, sizeof head); memcpy(sc->data + 40, &n, 2); memcpy(sc->data + 42, wb, 2);
++        sc->len = 44;
++        obs_scan_busy = 1;
++    }
++    const float half = (OBS_SCAN_N - 1) / 2.0f * OBS_SCAN_STEP, top = sc->c[1] + 12.0f, bottom = sc->c[1] - 6.0f;
++    while (sc->next < OBS_SCAN_N * OBS_SCAN_N && clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - t0 < 600000) {
++        int ix = sc->next / OBS_SCAN_N, iz = sc->next % OBS_SCAN_N;
++        float x = sc->c[0] - half + ix * OBS_SCAN_STEP, z = sc->c[2] - half + iz * OBS_SCAN_STEP;
++        float hs[2 * OBS_SCAN_MAX]; uint8_t un[2 * OBS_SCAN_MAX], ly[2 * OBS_SCAN_MAX]; int cnt = 0;
++        for (int dir = 0; dir < 2; dir++) {
++            float y = dir ? bottom : top;
++            obs_faces = 1;
++            for (int k = 0; k < OBS_SCAN_MAX && (dir ? y < top : y > bottom); k++) {
++                float s0[3] = {x, y, z}, e0[3] = {x, dir ? top : bottom, z}, hit[3], nn[3]; uint32_t layer;
++                if (!obs_ray_static(s0, e0, hit, nn)) break;
++                memcpy(&layer, obs_q + 0x48, 4);
++                hs[cnt] = hit[1]; un[cnt] = (uint8_t)dir; ly[cnt] = (uint8_t)layer; cnt++;
++                y = hit[1] + (dir ? 0.002f : -0.002f);
++            }
++            obs_faces = 0;
++        }
++        for (int a = 1; a < cnt; a++) for (int b = a; b > 0 && hs[b] > hs[b - 1]; b--) {   /* (highest first) */
++            float th = hs[b]; hs[b] = hs[b - 1]; hs[b - 1] = th; uint8_t tu = un[b]; un[b] = un[b - 1]; un[b - 1] = tu; tu = ly[b]; ly[b] = ly[b - 1]; ly[b - 1] = tu;
++        }
++        sc->data[sc->len++] = (uint8_t)cnt;
++        for (int k = 0; k < cnt; k++) {
++            int16_t v = (int16_t)(lrintf(fmaxf(-16000, fminf(16000, (hs[k] - sc->c[1]) * 100))) * 2 + un[k]);
++            memcpy(sc->data + sc->len, &v, 2); sc->data[sc->len + 2] = ly[k]; sc->len += 3;
++        }
++        sc->next++;
++    }
++    if (sc->next < OBS_SCAN_N * OBS_SCAN_N) return;
++    obs_scan_busy = 0;
++    unsigned w = atomic_load(&obs_scan_w);
++    if (w - atomic_load(&obs_scan_r) >= 3) { obs_scans_lost++; return; }
++    struct obs_scan *o = &obs_scan_out[w % 3];
++    o->len = sc->len; memcpy(o->data, sc->data, sc->len);
++    atomic_store(&obs_scan_w, w + 1);
++    obs_scans_done++;
++}
++/* ===== OBSERVATORY: the session recording =====
++   Every recorded frame (the flight recorder's rec_frame, as it is) goes to one file for the whole game session,
++   ~/Library/Logs/MacNativeGames/lonk_session_<date>_<time>.obs, not just the last 15 s: marks, the panel's button and
++   alarms are bookmarks in it, and his decisions (lonk_say) are kept as text with their frame. The game thread only
++   copies a frame into a ring; a thread of ours packs 256 frames at a time (raw deflate, libcompression) and appends.
++   Records: {u32 'LOBS', u16 type, u16 layout, u32 bytes, u32 count} + bytes. Types: 1 layout (text: the frame's fields
++   by name, type, count, offset; and the name tables), 2 frames (deflated, count frames of the layout's size), 3 mark
++   (u64 frame, u64 ns, text "why\tnote"), 4 said (u64 frame, u64 ns, text). A new build of the plugin goes on in the
++   same file (the path is KEEP) with its own layout record; the old build's thread drains its ring and stops once its
++   build isn't the live one. tools/observatory/lens.py reads it. Off unless TOTK_LONK_OBS=1 (it costs ~1 ms a frame and
++   ~120-240 MB an hour); "survey lonk obs" = status, "survey lonk obs off|on". */
++enum { OBS_REC_LAYOUT = 1, OBS_REC_FRAMES = 2, OBS_REC_MARK = 3, OBS_REC_SAID = 4, OBS_REC_SKEL = 5, OBS_REC_GEAR = 6, OBS_REC_CMDS = 7, OBS_REC_SCAN = 8, OBS_REC_SCAN_Z = 9, OBS_REC_NEAR = 10 };   /* (9: a scan, raw deflate) */   /* (5: the bone names, "|"-separated, for skel[]; 6: both Links' gear names on a change; 7: your animation commands on a change) */
++#define OBS_RING 2048
++#define OBS_BLOCK 256
++static struct rec_frame *obs_ring;   /* (mapped on first use; an old build's writer unmaps it once it has stopped: old builds stay loaded) */
++static _Atomic unsigned obs_w, obs_r;
++struct obs_event { uint64_t frame, ns; uint16_t type; char text[238]; };
++#define OBS_EVENTS 512
++static struct obs_event obs_ev[OBS_EVENTS];
++static _Atomic unsigned obs_ev_w, obs_ev_r;
++static KEEP char obs_path[256];
++static KEEP unsigned obs_layout_seq;
++static KEEP int obs_off = -1;   /* (-1 = not decided yet: TOTK_LONK_OBS=1 turns it on) */
++static int obs_is_off(void) {
++    if (obs_off < 0) { const char *e = getenv("TOTK_LONK_OBS"); obs_off = !(e && !strcmp(e, "1")); }
++    return obs_off;
++}
++static unsigned obs_layout;   /* (this build's layout number) */
++static _Atomic int obs_thread_on;
++static _Atomic unsigned long long obs_bytes, obs_frames_out, obs_dropped;
++static uint64_t obs_frame_now;
++static void obs_event_push(uint16_t type, uint64_t frame, const char *text) {
++    unsigned w = atomic_load(&obs_ev_w);
++    if (w - atomic_load(&obs_ev_r) >= OBS_EVENTS) { atomic_fetch_add(&obs_dropped, 1); return; }
++    struct obs_event *e = &obs_ev[w % OBS_EVENTS];
++    e->frame = frame; e->ns = clock_gettime_nsec_np(CLOCK_UPTIME_RAW); e->type = type;
++    snprintf(e->text, sizeof e->text, "%s", text);
++    atomic_store(&obs_ev_w, w + 1);
++}
++static void obs_mark(const char *why, const char *note) {
++    if (obs_is_off() || !obs_path[0]) return;
++    char t[238]; snprintf(t, sizeof t, "%s\t%s", why ? why : "", note ? note : "");
++    obs_scan_ask(1, 1); obs_scan_ask(0, 1);
++    obs_event_push(OBS_REC_MARK, obs_frame_now, t);
++}
++static int obs_write_rec(int fd, uint16_t type, const void *data, uint32_t len, uint32_t count) {
++    static uint8_t out[16 + OBS_BLOCK * sizeof(struct rec_frame) + 4096 + OBS_SCAN_BYTES];
++    if (len > sizeof out - 16) return 0;
++    uint32_t head[4] = {0x53424f4c, (uint32_t)type | (uint32_t)obs_layout << 16, len, count};
++    memcpy(out, head, 16); memcpy(out + 16, data, len);
++    ssize_t put = write(fd, out, 16 + len);
++    if (put > 0) atomic_fetch_add(&obs_bytes, (unsigned long long)put);
++    return put == (ssize_t)(16 + len);
++}
++static int obs_layout_text(char *t, size_t size) {
++    struct timespec wall; clock_gettime(CLOCK_REALTIME, &wall);
++    int n = snprintf(t, size, "version 1\nframe_size %zu\nbody_parts %d\nclock %lld.%09ld %llu\n", sizeof(struct rec_frame), BODY_PARTS,
++                     (long long)wall.tv_sec, wall.tv_nsec, (unsigned long long)clock_gettime_nsec_np(CLOCK_UPTIME_RAW));
++#define OBS_F(name, ty, cnt) n += snprintf(t + n, size - n, "field %s %s %d %zu\n", #name, ty, (int)(cnt), offsetof(struct rec_frame, name));
++    OBS_F(frame, "Q", 1) OBS_F(ns, "Q", 1) OBS_F(you, "f", 3) OBS_F(him, "f", 3) OBS_F(yface, "f", 2) OBS_F(hface, "f", 2) OBS_F(anchor, "f", 3)
++    OBS_F(loop, "f", 1) OBS_F(clock, "f", 1) OBS_F(rate, "f", 1) OBS_F(v, "f", 1) OBS_F(climb_vy, "f", 1) OBS_F(side_v, "f", 1) OBS_F(gap, "f", 1)
++    OBS_F(tilt, "f", 1) OBS_F(wall_n, "f", 2) OBS_F(yaw, "f", 1) OBS_F(gear, "f", 9) OBS_F(bone, "f", 2 * BODY_PARTS * 3) OBS_F(has, "H", 2)
++    OBS_F(fresh, "H", 2) OBS_F(from, "B", 2 * BODY_PARTS) OBS_F(gait, "b", 1) OBS_F(kind, "b", 1) OBS_F(climb, "b", 1) OBS_F(clip, "b", 1)
++    OBS_F(you_climb, "b", 1) OBS_F(air, "b", 1) OBS_F(swim, "b", 1) OBS_F(paused, "b", 1) OBS_F(emote, "b", 1) OBS_F(armed, "b", 1)
++    OBS_F(gear_out, "b", 3) OBS_F(bodies, "b", 1) OBS_F(alarms, "I", 1) OBS_F(lost, "I", 1) OBS_F(teleports, "I", 1) OBS_F(him_actor, "Q", 1)
++    OBS_F(you_cmds, "s", 48) OBS_F(buried, "b", 1) OBS_F(has_scene, "B", 1) OBS_F(scene, "f", 48) OBS_F(over, "f", 2) OBS_F(under, "f", 2)
++    OBS_F(under_deg, "f", 2) OBS_F(src, "s", 12) OBS_F(skel, "h", 2 * 128 * 3) OBS_F(skel_from, "B", 2 * 128)
++    OBS_F(in_user, "B", 16) OBS_F(in_synth, "B", 16) OBS_F(in_mouse, "B", 1) OBS_F(in_pad_on, "B", 1) OBS_F(in_look, "f", 2) OBS_F(in_buttons, "Q", 1)
++    OBS_F(in_pad_buttons, "Q", 1) OBS_F(in_stick, "h", 4) OBS_F(in_pad, "h", 4) OBS_F(cam, "f", 9) OBS_F(cam_hit, "f", 2) OBS_F(cam_head, "f", 2)
++    OBS_F(ygear, "f", 9) OBS_F(ygear_out, "b", 3) OBS_F(mdl_age, "B", 10) OBS_F(mdl_full, "B", 10) OBS_F(rock_in, "B", 2 * BODY_PARTS) OBS_F(rock_top, "h", 2 * BODY_PARTS) OBS_F(rock_count, "B", 2 * BODY_PARTS) OBS_F(rock_skip, "H", 1) OBS_F(gear_rot, "f", 54)
++#undef OBS_F
++    n += snprintf(t + n, size - n, "names parts"); for (int k = 0; k < BODY_PARTS; k++) n += snprintf(t + n, size - n, "|%s", body_names[k]);
++    n += snprintf(t + n, size - n, "\nnames gaits"); for (int k = 0; k < GAITS; k++) n += snprintf(t + n, size - n, "|%s", gait_names[k]);
++    n += snprintf(t + n, size - n, "\nnames moods"); for (int k = 0; k < LONK_KINDS; k++) n += snprintf(t + n, size - n, "|%s", lonk_names[k]);
++    n += snprintf(t + n, size - n, "\nnames alarms"); for (int k = 0; k < AL_KINDS; k++) n += snprintf(t + n, size - n, "|%s", alarm_names[k]);
++    n += snprintf(t + n, size - n, "\nnames clips|still|up|down|left|right\n");
++    return n;
++}
++void runtime_survey_tick(uint64_t frame);   /* (this build's own tick: lonk_plugin_tick or survey_local_tick) */
++static int obs_live(void) {   /* is this build the one the game runs now? (the host's survey_live: {init, command, tick, cancel_user}) */
++    static const void *const *live; static int looked;
++    if (!looked) { looked = 1; live = obs_host_sym("_survey_live"); }
++    if (!live) return 1;
++    const uintptr_t *impl = (const uintptr_t *)atomic_load((const void *_Atomic *)live);
++    return !impl || impl[2] == (uintptr_t)&runtime_survey_tick;
++}
++/* Nearby actors, once a second, by the writer thread (a walk of the whole actor tree is ~21 ms: not the game thread's):
++   read only, from the actor the game thread last saw as you (obs_near_player), every actor within 25 m of you or him.
++   Record 10 (raw deflate): {u64 frame, ns} then lines "name x y z". */
++static _Atomic uintptr_t obs_near_player;
++static float obs_near_at[2][3];
++static _Atomic unsigned long long obs_near_frame;
++static size_t obs_near_take(uint8_t *out, size_t size) {
++    uintptr_t player = atomic_load(&obs_near_player);
++    if (!player) return 0;
++    float at[2][3]; memcpy(at, obs_near_at, sizeof at);
++    uint64_t frame = atomic_load(&obs_near_frame), ns = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
++    memcpy(out, &frame, 8); memcpy(out + 8, &ns, 8);
++    size_t len = 16;
++    uintptr_t root = fuse_root(player + 0x390), stack[256]; unsigned sp = 0, seen = 0;
++    if (root) stack[sp++] = root;
++    while (sp && seen < 30000) {
++        uintptr_t nd = stack[--sp]; seen++;
++        uintptr_t c0 = fuse_node_ok(read_ptr(nd)), c1 = fuse_node_ok(read_ptr(nd + 8));
++        if (c0 && sp < 255) stack[sp++] = c0;
++        if (c1 && sp < 255) stack[sp++] = c1;
++        uintptr_t a = nd - 0x390; float q[3]; char nm[64];
++        if (!read_mem(a + ACTOR_POS, q, sizeof q) || !valid_xyz(q)) continue;
++        int near = 0;
++        for (int w = 0; w < 2; w++) if (isfinite(at[w][0]) && fabsf(q[0] - at[w][0]) < 25 && fabsf(q[2] - at[w][2]) < 25 && fabsf(q[1] - at[w][1]) < 25) near = 1;
++        if (!near || !actor_name_at(a, nm)) continue;
++        int n = snprintf((char *)out + len, size - len, "%s %.2f %.2f %.2f\n", nm, q[0], q[1], q[2]);
++        if (n <= 0 || len + (size_t)n >= size) break;
++        len += (size_t)n;
++    }
++    return len;
++}
++static void *obs_writer(void *unused) {
++    (void)unused;
++    static size_t (*encode)(uint8_t *, size_t, const uint8_t *, size_t, void *, int);
++    if (!encode) { void *h = dlopen("/usr/lib/libcompression.dylib", RTLD_NOW); encode = h ? (size_t (*)(uint8_t *, size_t, const uint8_t *, size_t, void *, int))dlsym(h, "compression_encode_buffer") : NULL; }
++    int fd = open(obs_path, O_WRONLY | O_CREAT | O_APPEND, 0644);
++    if (fd < 0 || !encode) { fprintf(stderr, "[obs] session: can't write %s%s\n", obs_path, encode ? "" : " (no libcompression)"); if (fd >= 0) close(fd); atomic_store(&obs_thread_on, 0); return NULL; }
++    static char lt[8192];
++    int ln = obs_layout_text(lt, sizeof lt);
++    obs_write_rec(fd, OBS_REC_LAYOUT, lt, (uint32_t)ln, 0);
++    static struct rec_frame block[OBS_BLOCK];
++    static uint8_t packed[OBS_BLOCK * sizeof(struct rec_frame) + 4096];
++    unsigned skel_sent = 0;
++    for (;;) {
++        int live = obs_live();
++        if (obs_skel_seq != skel_sent && obs_skel_n) {
++            static char names[OBS_BONES * 33]; int nl = 0;
++            for (unsigned c = 0; c < obs_skel_n; c++) nl += snprintf(names + nl, sizeof names - nl, "%s%s", c ? "|" : "", obs_skel_names[c]);
++            obs_write_rec(fd, OBS_REC_SKEL, names, (uint32_t)nl, obs_skel_n);
++            skel_sent = obs_skel_seq;
++        }
++        unsigned ev_r = atomic_load(&obs_ev_r), ev_w = atomic_load(&obs_ev_w);
++        for (; ev_r != ev_w; ev_r++) {
++            const struct obs_event *e = &obs_ev[ev_r % OBS_EVENTS];
++            uint8_t buf[256]; size_t tl = strnlen(e->text, sizeof e->text);
++            memcpy(buf, &e->frame, 8); memcpy(buf + 8, &e->ns, 8); memcpy(buf + 16, e->text, tl);
++            obs_write_rec(fd, e->type, buf, (uint32_t)(16 + tl), 1);
++        }
++        atomic_store(&obs_ev_r, ev_r);
++        for (unsigned sr = atomic_load(&obs_scan_r), sw = atomic_load(&obs_scan_w); sr != sw; sr++) {
++            const struct obs_scan *o = &obs_scan_out[sr % 3];
++            static uint8_t zs[OBS_SCAN_BYTES + 1024];
++            size_t zl = encode(zs, sizeof zs, o->data, o->len, NULL, 0x205);
++            if (zl) obs_write_rec(fd, OBS_REC_SCAN_Z, zs, (uint32_t)zl, (uint32_t)o->len);   /* (count = the unpacked size) */
++            else obs_write_rec(fd, OBS_REC_SCAN, o->data, (uint32_t)o->len, 1);
++            atomic_store(&obs_scan_r, sr + 1);
++        }
++        static uint64_t near_ns;
++        if (live && clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - near_ns > 1000000000ull) {
++            near_ns = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
++            static uint8_t nb[32768], nz[32768 + 1024];
++            size_t nl = obs_near_take(nb, sizeof nb);
++            size_t zl = nl > 16 ? encode(nz, sizeof nz, nb, nl, NULL, 0x205) : 0;
++            if (zl) obs_write_rec(fd, OBS_REC_NEAR, nz, (uint32_t)zl, (uint32_t)nl);
++        }
++        unsigned r = atomic_load(&obs_r), w = atomic_load(&obs_w);
++        /* (a full block, or what's there every ~2 s, or all of it when stopping) */
++        static uint64_t last_flush; uint64_t now = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
++        while (w - r >= OBS_BLOCK || (w != r && (now - last_flush > 2000000000ull || !live))) {
++            unsigned cnt = w - r < OBS_BLOCK ? w - r : OBS_BLOCK;
++            for (unsigned k = 0; k < cnt; k++) block[k] = obs_ring[(r + k) % OBS_RING];
++            size_t got = encode(packed, sizeof packed, (const uint8_t *)block, cnt * sizeof(struct rec_frame), NULL, 0x205 /* COMPRESSION_ZLIB: raw deflate */);
++            if (got) { obs_write_rec(fd, OBS_REC_FRAMES, packed, (uint32_t)got, cnt); atomic_fetch_add(&obs_frames_out, cnt); }
++            r += cnt; atomic_store(&obs_r, r); last_flush = now;
++        }
++        if (!live && atomic_load(&obs_w) == r && atomic_load(&obs_ev_w) == ev_r) {
++            static int grace;   /* (a second more: a frame pushed while the switch happened still gets written) */
++            if (++grace > 5) break;
++        }
++        usleep(200000);
++    }
++    close(fd);
++    if (!obs_live()) { struct rec_frame *ring = obs_ring; obs_ring = NULL; if (ring) munmap(ring, OBS_RING * sizeof *ring); fprintf(stderr, "[obs] session: an old build's writer stopped\n"); return NULL; }
++    atomic_store(&obs_thread_on, 0);
++    return NULL;
++}
++static void obs_push(const struct rec_frame *r) {   /* (the game thread: one frame into the ring) */
++    obs_frame_now = r->frame;
++    memcpy(obs_near_at[0], r->you, sizeof r->you); memcpy(obs_near_at[1], r->him, sizeof r->him); atomic_store(&obs_near_frame, r->frame);
++    if (obs_is_off()) return;
++    if (!obs_path[0]) {
++        time_t now = time(NULL); struct tm tm; localtime_r(&now, &tm);
++        const char *home = getenv("HOME");
++        char stamp[32]; strftime(stamp, sizeof stamp, "%Y%m%d_%H%M%S", &tm);
++        snprintf(obs_path, sizeof obs_path, "%s/Library/Logs/MacNativeGames/lonk_session_%s.obs", home ? home : "/tmp", stamp);
++        fprintf(stderr, "[obs] session: %s\n", obs_path);
++    }
++    if (!atomic_load(&obs_thread_on)) {
++        static int tries;
++        if (tries > 3) return;
++        tries++;
++        if (!obs_layout) obs_layout = ++obs_layout_seq;
++        if (!obs_ring) {
++            void *m = mmap(NULL, OBS_RING * sizeof *obs_ring, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
++            if (m == MAP_FAILED) return;
++            obs_ring = m;
++        }
++        atomic_store(&obs_thread_on, 1);
++        pthread_t t;
++        if (pthread_create(&t, NULL, obs_writer, NULL)) { atomic_store(&obs_thread_on, 0); return; }
++        pthread_detach(t);
++    }
++    if (!obs_ring) return;
++    unsigned w = atomic_load(&obs_w);
++    if (w - atomic_load(&obs_r) >= OBS_RING) { atomic_fetch_add(&obs_dropped, 1); return; }
++    struct rec_frame *d = &obs_ring[w % OBS_RING];
++    *d = *r;
++    if (r->said[0]) obs_event_push(OBS_REC_SAID, r->frame, r->said);
++    memset(d->said, 0, sizeof d->said);
++    atomic_store(&obs_w, w + 1);
++}
 +static void rec_take(uintptr_t player, uint64_t frame) {
 +    uint64_t t0 = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
 +    uintptr_t him = 0;
@@ -4744,6 +5786,8 @@ index c05d6c3..6275b0e 100644
 +            if (body_models[w][from].changed == frame) r->fresh[w] |= (uint16_t)(1u << p);
 +        }
 +    }
++    atomic_store(&obs_near_player, player);
++    if (!obs_is_off()) { obs_skel_take(r, frame); obs_side_take(r, player, him); obs_side_events(player, him, frame); obs_rock_parts(r); obs_scan_step(r); }
 +    anim_cmds(player, r->you_cmds, sizeof r->you_cmds);
 +    memcpy(r->said, lonk_said, sizeof r->said); lonk_said[0] = 0;
 +    r->you_climb = (int8_t)lonk_you_climb;
@@ -4801,6 +5845,7 @@ index c05d6c3..6275b0e 100644
 +    rec_head = (rec_head + 1) % REC_FRAMES;
 +    if (rec_count < REC_FRAMES) rec_count++;
 +    if (!alarms_off) alarm_check(r, q);
++    obs_push(r);
 +    rec_spent_ns += clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - t0; rec_spent_n++;
 +    if (!alarm_stats_ns) alarm_stats_ns = t0;
 +    if (t0 - alarm_stats_ns >= 60000000000ull) {   /* a line a minute: how often each test went off, on him and on you */
@@ -5008,6 +6053,18 @@ index c05d6c3..6275b0e 100644
 +    }
 +    if ((used = 0, sscanf(line, "survey lonk alarms %7[a-z] %n", onoff, &used)) == 1 && used && !line[used] && (!strcmp(onoff, "on") || !strcmp(onoff, "off"))) {
 +        alarms_off = !strcmp(onoff, "off"); lonk_say("[survey] lonk: alarms %s\n", alarms_off ? "off" : "on"); return 1;
++    }
++    if ((used = 0, sscanf(line, "survey lonk obs %n", &used)) == 0 && used && !line[used]) {   /* the session recording's status */
++        fprintf(stderr, "[obs] session %s: %s, %llu frames written, %.1f MB, %llu dropped, ring %u, %u scans (%u lost), writer %s\n", obs_is_off() ? "OFF" : "on", obs_path[0] ? obs_path : "(not yet)",
++                (unsigned long long)atomic_load(&obs_frames_out), atomic_load(&obs_bytes) / 1048576.0, (unsigned long long)atomic_load(&obs_dropped),
++                atomic_load(&obs_w) - atomic_load(&obs_r), obs_scans_done, obs_scans_lost, atomic_load(&obs_thread_on) ? "running" : "stopped");
++        return 1;
++    }
++    if ((used = 0, sscanf(line, "survey lonk scan %7[a-z] %n", onoff, &used)) == 1 && used && !line[used] && (!strcmp(onoff, "you") || !strcmp(onoff, "him"))) {
++        obs_scan_ask(!strcmp(onoff, "him"), 2); fprintf(stderr, "[obs] scan round %s asked\n", onoff); return 1;
++    }
++    if ((used = 0, sscanf(line, "survey lonk obs %7[a-z] %n", onoff, &used)) == 1 && used && !line[used] && (!strcmp(onoff, "on") || !strcmp(onoff, "off"))) {
++        obs_off = !strcmp(onoff, "off"); fprintf(stderr, "[obs] session recording %s\n", obs_off ? "off" : "on"); return 1;
 +    }
 +    if ((used = 0, sscanf(line, "survey lonk rec %7[a-z] %n", onoff, &used)) == 1 && used && !line[used] && (!strcmp(onoff, "on") || !strcmp(onoff, "off"))) {
 +        rec_off = !strcmp(onoff, "off"); lonk_say("[survey] lonk: recorder %s\n", rec_off ? "off" : "on"); return 1;
